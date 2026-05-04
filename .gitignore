@@ -1,0 +1,30 @@
+# --- Python and Flask Specific ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+instance/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Environment Secrets ---
+.env
+.flaskenv
+
+# --- Frontend (JS/CSS) ---
+# Only include these if you use npm/yarn for frontend packages
+node_modules/
+dist/
+build/
+.eslintcache
+
+# --- OS and IDE Specific ---
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.log
