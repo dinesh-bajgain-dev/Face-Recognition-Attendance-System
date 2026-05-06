@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>FRS · Attendance System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="static/css/style.css" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' rx='7' fill='%23e8e8ec'/%3E%3Crect x='7' y='7' width='18' height='18' rx='4' fill='none' stroke='%230d0d0f' stroke-width='2.5'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <!-- ── Login overlay ──────────────────────────────────────────────────── -->
+    <div class="login-overlay" id="loginOverlay">
+      <div class="login-card">
+        <div class="login-logo">
+          <svg
+            class="logo-svg"
+            width="28"
+            height="28"
+            viewBox="0 0 28 28"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect width="28" height="28" rx="6" fill="#e8e8ec" />
+            <rect
+              x="6"
+              y="6"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill="none"
+              stroke="#0d0d0f"
+              stroke-width="2.2"
+            /></svg
+          ><span>FRS</span>
+        </div>
+        <h2>Sign in</h2>
+        <div class="form-group">
+          <label>Username</label
+          ><input type="text" id="loginUser" placeholder="admin" />
+        </div>
+        <div class="form-group">
+          <label>Password</label
+          ><input type="password" id="loginPass" placeholder="••••••" />
+        </div>
+        <button class="btn-primary full" onclick="doLogin()">Sign in</button>
+        <p class="login-hint">Default: admin / admin123</p>
+        <div id="loginErr" class="msg err" style="margin-top: 0.5rem"></div>
+      </div>
+    </div>
+
+    <!-- ── Sidebar ────────────────────────────────────────────────────────── -->
+    <nav class="sidebar" id="sidebar">
+      <div class="sidebar-logo">
+        <svg
+          class="logo-svg"
+          width="28"
+          height="28"
+          viewBox="0 0 28 28"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <rect width="28" height="28" rx="6" fill="#e8e8ec" />
+          <rect
+            x="6"
+            y="6"
+            width="16"
+            height="16"
+            rx="3.5"
+            fill="none"
+            stroke="#0d0d0f"
+            stroke-width="2.2"
+          />
+        </svg>
+        <span class="logo-text">FRS</span>
+      </div>
+      <div class="sidebar-nav">
+        <a
+          class="nav-item active"
+          data-page="dashboard"
+          onclick="navigate('dashboard')"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          Dashboard
+        </a>
+        <a class="nav-item" data-page="students" onclick="navigate('students')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+            <circle cx="9" cy="7" r="4" />
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+          </svg>
+          Students
+        </a>
+        <a class="nav-item" data-page="enroll" onclick="navigate('enroll')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <circle cx="12" cy="8" r="4" />
+            <path d="M20 21a8 8 0 1 0-16 0" />
+            <line x1="12" y1="13" x2="12" y2="21" />
+            <line x1="8" y1="17" x2="16" y2="17" />
+          </svg>
+          Enroll
+        </a>
+        <a
+          class="nav-item"
+          data-page="recognize"
+          onclick="navigate('recognize')"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M9 9a3 3 0 1 1 6 0 3 3 0 0 1-6 0" />
+            <path d="M3 9V6a3 3 0 0 1 3-3h3" />
+            <path d="M21 9V6a3 3 0 0 1-3-3h-3" />
+            <path d="M3 15v3a3 3 0 0 0 3 3h3" />
+            <path d="M21 15v3a3 3 0 0 0-3 3h-3" />
+          </svg>
+          Recognize
+        </a>
+        <a
+          class="nav-item"
+          data-page="attendance"
+          onclick="navigate('attendance')"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
+          Attendance
+        </a>
+        <a class="nav-item" data-page="reports" onclick="navigate('reports')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <line x1="18" y1="20" x2="18" y2="10" />
+            <line x1="12" y1="20" x2="12" y2="4" />
+            <line x1="6" y1="20" x2="6" y2="14" />
+          </svg>
+          Reports
+        </a>
+        <a class="nav-item" data-page="settings" onclick="navigate('settings')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+            />
+          </svg>
+          Settings
+        </a>
+      </div>
+      <div class="sidebar-footer">
+        <div class="status-dot" id="apiDot"></div>
+        <span id="apiStatus" class="status-label">Connecting…</span>
+        <button class="logout-btn" onclick="logout()" title="Sign out">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16,17 21,12 16,7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ── Main ───────────────────────────────────────────────────────────── -->
+    <main class="main">
+      <!-- DASHBOARD -->
+      <section class="page active" id="page-dashboard">
+        <header class="page-header">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="subtitle" id="dashDate"></p>
+          </div>
+          <div class="header-time" id="clockDisplay"></div>
+        </header>
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Registered</div>
+            <div class="stat-value" id="statRegistered">—</div>
+          </div>
+          <div class="stat-card accent-green">
+            <div class="stat-label">Present Today</div>
+            <div class="stat-value" id="statPresent">—</div>
+          </div>
+          <div class="stat-card accent-red">
+            <div class="stat-label">Absent Today</div>
+            <div class="stat-value" id="statAbsent">—</div>
+          </div>
+          <div class="stat-card accent-amber">
+            <div class="stat-label">Attendance Rate</div>
+            <div class="stat-value" id="statRate">—</div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="card card-chart">
+            <div class="section-title">30-Day Overview</div>
+            <div class="chart-wrap">
+              <canvas id="attendanceChart"></canvas>
+            </div>
+          </div>
+          <div class="card">
+            <div class="section-title">Recent Recognition Events</div>
+            <div id="recentLogs" class="log-list"></div>
+          </div>
+        </div>
+        <div class="section-title" style="margin-top: 1.5rem">
+          Today's Attendance
+        </div>
+        <div class="search-row">
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Search name…"
+            oninput="filterDashTable(this.value)"
+          />
+        </div>
+        <table class="data-table" id="dashTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Department</th>
+              <th>Time</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="dashTableBody"></tbody>
+        </table>
+      </section>
+
+      <!-- STUDENTS -->
+      <section class="page" id="page-students">
+        <header class="page-header">
+          <h1>Students</h1>
+          <button class="btn-secondary" onclick="navigate('enroll')">
+            + Enroll New
+          </button>
+        </header>
+        <div class="search-row">
+          <input
+            type="text"
+            class="search-input"
+            id="studentSearch"
+            placeholder="Search name or ID…"
+            oninput="searchStudents()"
+          />
+          <select
+            class="select-input"
+            id="deptFilter"
+            onchange="searchStudents()"
+          >
+            <option value="">All departments</option>
+          </select>
+        </div>
+        <div class="persons-grid" id="personsGrid"></div>
+      </section>
+
+      <!-- STUDENT PROFILE (sub-page) -->
+      <section class="page" id="page-profile">
+        <header class="page-header">
+          <button class="btn-secondary" onclick="navigate('students')">
+            ← Back
+          </button>
+          <div class="header-actions" id="profileActions"></div>
+        </header>
+        <div id="profileContent"></div>
+      </section>
+
+      <!-- ENROLL -->
+      <section class="page" id="page-enroll">
+        <header class="page-header"><h1>Enroll Student</h1></header>
+        <div class="enroll-layout">
+          <div class="card">
+            <div class="section-title">Student Information</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Student ID *</label
+                ><input type="text" id="eId" placeholder="e.g. 2024001" />
+              </div>
+              <div class="form-group">
+                <label>Full Name *</label
+                ><input
+                  type="text"
+                  id="eName"
+                  placeholder="e.g. Dinesh Sharma"
+                />
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Department</label
+                ><input
+                  type="text"
+                  id="eDept"
+                  placeholder="e.g. Computer Science"
+                />
+              </div>
+              <div class="form-group">
+                <label>Email</label
+                ><input
+                  type="email"
+                  id="eEmail"
+                  placeholder="student@college.edu"
+                />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Phone</label
+              ><input type="text" id="ePhone" placeholder="+977-98XXXXXXXX" />
+            </div>
+
+            <div class="section-title" style="margin-top: 1.25rem">
+              Face Images
+            </div>
+            <div class="upload-zone" id="uploadZone">
+              <svg
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                opacity="0.35"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17,8 12,3 7,8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <p>
+                Drop photos or
+                <span
+                  class="link"
+                  onclick="document.getElementById('fileInput').click()"
+                  >browse</span
+                >
+              </p>
+              <p class="muted">30–150 images recommended · JPG, PNG</p>
+              <input
+                type="file"
+                id="fileInput"
+                multiple
+                accept="image/*"
+                style="display: none"
+                onchange="handleFiles(this.files)"
+              />
+            </div>
+            <div id="filePreview" class="file-preview"></div>
+            <!-- Webcam capture option -->
+            <div
+              class="webcam-section"
+              id="webcamSection"
+              style="display: none"
+            >
+              <video
+                id="enrollCam"
+                autoplay
+                muted
+                playsinline
+                style="width: 100%; border-radius: 8px"
+              ></video>
+              <div class="action-row" style="margin-top: 0.75rem">
+                <button class="btn-secondary" onclick="captureWebcamFrame()">
+                  📸 Capture Frame
+                </button>
+                <span class="muted" id="webcamCount">0 frames captured</span>
+                <button class="btn-secondary" onclick="stopWebcam()">
+                  Stop
+                </button>
+              </div>
+            </div>
+            <div class="action-row" style="margin-top: 1rem">
+              <button class="btn-primary" onclick="enrollStudent()">
+                Enroll &amp; Generate Embeddings
+              </button>
+              <button class="btn-secondary" onclick="startWebcam()">
+                Use Webcam
+              </button>
+            </div>
+            <div
+              class="progress-wrap"
+              id="enrollProgress"
+              style="display: none"
+            >
+              <div class="progress-bar" id="enrollBar"></div>
+            </div>
+            <div id="enrollMsg" class="msg"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RECOGNIZE -->
+      <section class="page" id="page-recognize">
+        <header class="page-header">
+          <h1>Live Recognition</h1>
+          <div class="header-actions">
+            <button
+              class="btn-secondary"
+              id="camToggle"
+              onclick="toggleCamera()"
+            >
+              ▶ Start Camera
+            </button>
+            <button
+              class="btn-secondary"
+              onclick="document.getElementById('uploadRecog').click()"
+            >
+              Upload Image
+              <input
+                type="file"
+                id="uploadRecog"
+                accept="image/*"
+                style="display: none"
+                onchange="recognizeImage(this)"
+              />
+            </button>
+          </div>
+        </header>
+        <div class="recognize-layout">
+          <div class="camera-wrap" id="cameraWrap">
+            <img
+              id="liveStream"
+              class="live-stream"
+              style="display: none"
+              src=""
+              alt="live"
+            />
+            <canvas
+              id="recognizeCanvas"
+              style="display: none; max-width: 100%; border-radius: 8px"
+            ></canvas>
+            <div class="camera-placeholder" id="cameraPlaceholder">
+              <svg
+                width="52"
+                height="52"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1"
+                opacity="0.15"
+              >
+                <path d="M23 7 16 12 23 17z" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+              <p class="muted">Start camera or upload an image</p>
+            </div>
+          </div>
+          <div class="recog-sidebar">
+            <div class="recog-result" id="recogResult">
+              <div class="recog-icon" id="recogIcon">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.2"
+                >
+                  <path d="M9 9a3 3 0 1 1 6 0 3 3 0 0 1-6 0" />
+                  <path d="M3 9V6a3 3 0 0 1 3-3h3" />
+                  <path d="M21 9V6a3 3 0 0 1-3-3h-3" />
+                  <path d="M3 15v3a3 3 0 0 0 3 3h3" />
+                  <path d="M21 15v3a3 3 0 0 0-3 3h-3" />
+                </svg>
+              </div>
+              <div class="recog-name" id="recogName">Awaiting…</div>
+              <div class="recog-confidence" id="recogConf"></div>
+              <div class="recog-badge" id="recogBadge"></div>
+            </div>
+            <div class="section-title" style="margin-top: 1.5rem">
+              Live Event Log
+            </div>
+            <div id="liveLog" class="live-log"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ATTENDANCE -->
+      <section class="page" id="page-attendance">
+        <header class="page-header">
+          <h1>Attendance</h1>
+          <div class="header-actions">
+            <input type="date" id="attDate" onchange="loadAttendancePage()" />
+            <button class="btn-secondary" onclick="exportFacultyCSV()">
+              Export CSV
+            </button>
+          </div>
+        </header>
+
+        <!-- Faculty tab bar -->
+        <div class="faculty-tabs" id="facultyTabs">
+          <!-- Populated by JS: "All" tab + one tab per faculty -->
+        </div>
+
+        <!-- Overall summary row (shown only on "All" tab) -->
+        <div class="faculty-summary-row" id="facultySummaryRow"></div>
+
+        <!-- Active faculty header card -->
+        <div
+          class="faculty-header-card"
+          id="facultyHeaderCard"
+          style="display: none"
+        >
+          <div class="fhc-info">
+            <div class="fhc-name" id="fhcName"></div>
+            <div class="fhc-date" id="fhcDate"></div>
+          </div>
+          <div class="fhc-stats">
+            <div class="fhc-stat">
+              <div class="fhc-val green" id="fhcPresent">—</div>
+              <div class="fhc-lbl">Present</div>
+            </div>
+            <div class="fhc-stat">
+              <div class="fhc-val red" id="fhcAbsent">—</div>
+              <div class="fhc-lbl">Absent</div>
+            </div>
+            <div class="fhc-stat">
+              <div class="fhc-val amber" id="fhcTotal">—</div>
+              <div class="fhc-lbl">Total</div>
+            </div>
+            <div class="fhc-stat">
+              <div class="fhc-val" id="fhcRate">—</div>
+              <div class="fhc-lbl">Rate</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Search row -->
+        <div class="search-row" style="margin-top: 1rem">
+          <input
+            type="text"
+            class="search-input"
+            id="attSearch"
+            placeholder="Search student name or ID…"
+            oninput="filterActiveTable(this.value)"
+          />
+        </div>
+
+        <!-- Table container — re-rendered whenever faculty tab changes -->
+        <div id="attTableContainer"></div>
+      </section>
+
+      <!-- REPORTS -->
+      <section class="page" id="page-reports">
+        <header class="page-header">
+          <h1>Reports &amp; Analytics</h1>
+          <div class="header-actions">
+            <input type="date" id="repFrom" />
+            <span style="color: var(--text3)">to</span>
+            <input type="date" id="repTo" />
+            <button class="btn-secondary" onclick="loadReports()">
+              Generate
+            </button>
+            <button class="btn-secondary" onclick="exportRange()">
+              Export CSV
+            </button>
+          </div>
+        </header>
+        <div class="stats-row">
+          <div class="stat-card">
+            <div class="stat-label">Avg. Attendance</div>
+            <div class="stat-value" id="repAvg">—</div>
+          </div>
+          <div class="stat-card accent-green">
+            <div class="stat-label">Highest</div>
+            <div class="stat-value" id="repHigh">—</div>
+          </div>
+          <div class="stat-card accent-red">
+            <div class="stat-label">Below 75%</div>
+            <div class="stat-value" id="repLow">—</div>
+          </div>
+          <div class="stat-card accent-amber">
+            <div class="stat-label">Total Recognitions</div>
+            <div class="stat-value" id="repTotal">—</div>
+          </div>
+        </div>
+        <div class="two-col">
+          <div class="card">
+            <div class="section-title">Monthly Attendance Trend</div>
+            <canvas id="monthlyChart" height="200"></canvas>
+          </div>
+          <div class="card">
+            <div class="section-title">Attendance by Department</div>
+            <canvas id="deptChart" height="200"></canvas>
+          </div>
+        </div>
+        <div class="section-title" style="margin-top: 1.5rem">
+          Per-Student Summary
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Name</th>
+              <th>Department</th>
+              <th>Present Days</th>
+              <th>Percentage</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="repTableBody"></tbody>
+        </table>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="page" id="page-settings">
+        <header class="page-header"><h1>Settings</h1></header>
+        <div class="settings-layout">
+          <div class="card">
+            <div class="section-title">Recognition</div>
+            <div class="form-group">
+              <label>Confidence Threshold (%)</label>
+              <input
+                type="number"
+                id="setThreshold"
+                min="50"
+                max="99"
+                step="1"
+              />
+              <p class="muted" style="margin-top: 0.3rem">
+                Higher = fewer false positives. Recommended: 80
+              </p>
+            </div>
+            <div class="form-group">
+              <label>Frame Skip</label>
+              <input
+                type="number"
+                id="setFrameSkip"
+                min="1"
+                max="10"
+                step="1"
+              />
+              <p class="muted" style="margin-top: 0.3rem">
+                Process every Nth frame (higher = faster stream, lower accuracy)
+              </p>
+            </div>
+            <button
+              class="btn-primary"
+              onclick="saveSettings()"
+              style="margin-top: 1rem"
+            >
+              Save Settings
+            </button>
+            <div id="settingsMsg" class="msg"></div>
+          </div>
+          <div class="card">
+            <div class="section-title">System Info</div>
+            <div class="info-row">
+              <span>Database</span><span class="mono">PostgreSQL</span>
+            </div>
+            <div class="info-row">
+              <span>Embedding Model</span
+              ><span class="mono">ArcFace (buffalo_l)</span>
+            </div>
+            <div class="info-row">
+              <span>Backend</span><span class="mono">Flask 3 · Python</span>
+            </div>
+            <div class="info-row">
+              <span>Data directory</span
+              ><span class="mono" id="setDataDir">—</span>
+            </div>
+            <div class="section-title" style="margin-top: 1.5rem">
+              Change Password
+            </div>
+            <div class="form-group">
+              <label>New Password</label
+              ><input type="password" id="newPw" placeholder="min 6 chars" />
+            </div>
+            <button
+              class="btn-secondary"
+              onclick="changePw()"
+              style="margin-top: 0.5rem"
+            >
+              Update Password
+            </button>
+            <div id="pwMsg" class="msg"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="static/js/app.js"></script>
+  </body>
+</html>
