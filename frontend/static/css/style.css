@@ -45,7 +45,7 @@ body {
   overflow: hidden;
 }
 
-/* ──────────── Login ───────────────── */
+/* ───────── Login ───────── */
 .login-overlay {
   position: fixed;
   inset: 0;
