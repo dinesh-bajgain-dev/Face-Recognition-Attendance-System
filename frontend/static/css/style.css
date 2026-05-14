@@ -95,7 +95,7 @@ body {
   justify-content: center;
 }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
+/* ───────── Sidebar ───────── */
 .sidebar {
   width: var(--sidebar-w);
   min-width: var(--sidebar-w);
