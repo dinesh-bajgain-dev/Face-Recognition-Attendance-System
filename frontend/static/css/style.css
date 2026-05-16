@@ -255,7 +255,7 @@ body {
   flex-wrap: wrap;
 }
 
-/* ── Stats ──────────────────────────────────────────────────────────────── */
+/* ───────── Stats ───────── */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
