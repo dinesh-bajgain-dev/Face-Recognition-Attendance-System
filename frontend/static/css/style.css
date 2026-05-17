@@ -305,7 +305,7 @@ body {
   color: var(--amber);
 }
 
-/* ── Layouts ────────────────────────────────────────────────────────────── */
+/* ───────── Layouts ───────── */
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
