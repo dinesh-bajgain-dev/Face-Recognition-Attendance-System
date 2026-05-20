@@ -383,7 +383,7 @@ body {
   text-decoration: underline;
 }
 
-/* ── Buttons ────────────────────────────────────────────────────────────── */
+/* ───────── Buttons ───────── */
 .btn-primary,
 .btn-secondary {
   display: inline-flex;
@@ -427,7 +427,7 @@ body {
   background: rgba(239, 68, 68, 0.2);
 }
 
-/* ── Forms ──────────────────────────────────────────────────────────────── */
+/* ───────── Forms ───────── */
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -514,7 +514,7 @@ input[type="date"] {
   color-scheme: dark;
 }
 
-/* ── Upload zone ────────────────────────────────────────────────────────── */
+/* ───────── Upload zone ───────── */
 .upload-zone {
   border: 1px dashed var(--border-hi);
   border-radius: var(--r-lg);
@@ -608,7 +608,7 @@ input[type="date"] {
   color: var(--red);
 }
 
-/* ── Persons grid ───────────────────────────────────────────────────────── */
+/* ───────── Persons grid ───────── */
 .persons-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -681,7 +681,7 @@ input[type="date"] {
   color: var(--red);
 }
 
-/* ── Profile ────────────────────────────────────────────────────────────── */
+/* ───────── Profile ───────── */
 .profile-header {
   display: flex;
   align-items: flex-start;
@@ -767,7 +767,7 @@ input[type="date"] {
   transition: width 0.6s;
 }
 
-/* ── Recognize ──────────────────────────────────────────────────────────── */
+/* ───────── Recognize ───────── */
 .recognize-layout {
   display: grid;
   grid-template-columns: 1fr 260px;
@@ -895,7 +895,7 @@ input[type="date"] {
   font-family: var(--mono);
 }
 
-/* ── Dashboard log list ─────────────────────────────────────────────────── */
+/* ───────── Dashboard log list ───────── */
 .log-list {
   display: flex;
   flex-direction: column;
@@ -903,7 +903,7 @@ input[type="date"] {
   overflow-y: auto;
 }
 
-/* ── Attendance ─────────────────────────────────────────────────────────── */
+/* ───────── Attendance ───────── */
 .att-summary {
   display: flex;
   gap: 10px;
