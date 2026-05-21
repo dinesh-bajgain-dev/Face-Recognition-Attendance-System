@@ -207,35 +207,43 @@ async function loadDashboard() {
 
 function renderHistoryChart(history) {
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const dashSeries = buildDashHistorySeries(sorted, 29);
   const ctx = document.getElementById("attendanceChart").getContext("2d");
   if (charts.dash) charts.dash.destroy();
+  const dashChartOpts = chartOpts({
+    stacked: true,
+    maintainAspectRatio: false,
+  });
+  dashChartOpts.layout = { padding: { left: 10, right: 0, top: 0, bottom: 0 } };
+  dashChartOpts.onResize = (chart) => syncDashBarSizing(chart);
+  dashChartOpts.scales.x.offset = true;
+  dashChartOpts.scales.x.grid.offset = true;
+  dashChartOpts.scales.x.ticks.align = "center";
+  dashChartOpts.scales.x.ticks.autoSkip = false;
   charts.dash = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: sorted.map((h) => h.date.slice(5)),
+      labels: dashSeries.labels,
       datasets: [
         {
           label: "Present",
-          data: sorted.map((h) => h.present),
+          data: dashSeries.present,
           backgroundColor: "rgba(34,197,94,0.65)",
           borderRadius: 3,
           borderSkipped: false,
-          barThickness: 40,
-          maxBarThickness: 40,
         },
         {
           label: "Absent",
-          data: sorted.map((h) => h.absent),
+          data: dashSeries.absent,
           backgroundColor: "rgba(239,68,68,0.3)",
           borderRadius: 3,
           borderSkipped: false,
-          barThickness: 40,
-          maxBarThickness: 40,
         },
       ],
     },
-    options: chartOpts({ stacked: true, maintainAspectRatio: false }),
+    options: dashChartOpts,
   });
+  syncDashBarSizing(charts.dash);
 }
 
 function renderDashTable(records) {
@@ -1247,6 +1255,43 @@ function chartOpts({ stacked = false, maintainAspectRatio = true } = {}) {
       },
     },
   };
+}
+
+function syncDashBarSizing(chart) {
+  if (!chart || !chart.chartArea) return;
+
+  const barCount = chart.data.labels?.length || 0;
+  if (!barCount) return;
+
+  const targetBarWidth = 50;
+  const targetGap = 10;
+  const availableWidth = chart.chartArea.width;
+  if (!availableWidth) return;
+
+  const slotWidth = availableWidth / barCount;
+  const barWidth = Math.min(targetBarWidth, Math.max(1, slotWidth - targetGap));
+
+  chart.data.datasets.forEach((dataset) => {
+    dataset.barThickness = barWidth;
+    dataset.maxBarThickness = barWidth;
+  });
+  chart.update("none");
+}
+
+function buildDashHistorySeries(history, slotCount) {
+  const labels = Array.from({ length: slotCount }, (_, index) =>
+    history[index]?.date ? history[index].date.slice(5) : "",
+  );
+  const present = Array.from(
+    { length: slotCount },
+    (_, index) => history[index]?.present ?? 0,
+  );
+  const absent = Array.from(
+    { length: slotCount },
+    (_, index) => history[index]?.absent ?? 0,
+  );
+
+  return { labels, present, absent };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
