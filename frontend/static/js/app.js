@@ -183,11 +183,10 @@ function navigate(page) {
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadDashboard() {
   try {
-    const [att, hist, persons, logs] = await Promise.all([
+    const [att, hist, persons] = await Promise.all([
       api(`/attendance?date=${todayStr()}`).then((r) => r.json()),
       api(`/attendance/history`).then((r) => r.json()),
       api(`/students`).then((r) => r.json()),
-      api(`/logs?limit=30`).then((r) => r.json()),
     ]);
     document.getElementById("statRegistered").textContent = persons.count;
     document.getElementById("statPresent").textContent = att.present;
@@ -199,7 +198,6 @@ async function loadDashboard() {
     document.getElementById("statRate").textContent = rate;
 
     renderHistoryChart(hist.history);
-    renderRecentLogs(logs.logs);
     dashRecords = att.records;
     renderDashTable(dashRecords);
   } catch (e) {
@@ -222,6 +220,8 @@ function renderHistoryChart(history) {
           backgroundColor: "rgba(34,197,94,0.65)",
           borderRadius: 3,
           borderSkipped: false,
+          barThickness: 40,
+          maxBarThickness: 40,
         },
         {
           label: "Absent",
@@ -229,26 +229,13 @@ function renderHistoryChart(history) {
           backgroundColor: "rgba(239,68,68,0.3)",
           borderRadius: 3,
           borderSkipped: false,
+          barThickness: 40,
+          maxBarThickness: 40,
         },
       ],
     },
     options: chartOpts({ stacked: true, maintainAspectRatio: false }),
   });
-}
-
-function renderRecentLogs(logs) {
-  const el = document.getElementById("recentLogs");
-  el.innerHTML =
-    logs
-      .slice(0, 15)
-      .map(
-        (l) => `
-    <div class="log-item ${l.recognized ? "ok" : "fail"}">
-      <span class="log-name">${l.full_name || "Unknown"}</span>
-      <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
-    </div>`,
-      )
-      .join("") || `<p class="muted">No events yet</p>`;
 }
 
 function renderDashTable(records) {
