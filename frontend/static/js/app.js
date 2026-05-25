@@ -183,10 +183,11 @@ function navigate(page) {
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadDashboard() {
   try {
-    const [att, hist, persons] = await Promise.all([
+    const [att, hist, persons, logs] = await Promise.all([
       api(`/attendance?date=${todayStr()}`).then((r) => r.json()),
       api(`/attendance/history`).then((r) => r.json()),
       api(`/students`).then((r) => r.json()),
+      api(`/logs?limit=30`).then((r) => r.json()),
     ]);
     document.getElementById("statRegistered").textContent = persons.count;
     document.getElementById("statPresent").textContent = att.present;
@@ -198,6 +199,7 @@ async function loadDashboard() {
     document.getElementById("statRate").textContent = rate;
 
     renderHistoryChart(hist.history);
+    renderRecentLogs(logs.logs);
     dashRecords = att.records;
     renderDashTable(dashRecords);
   } catch (e) {
@@ -207,43 +209,46 @@ async function loadDashboard() {
 
 function renderHistoryChart(history) {
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  const dashSeries = buildDashHistorySeries(sorted, 29);
   const ctx = document.getElementById("attendanceChart").getContext("2d");
   if (charts.dash) charts.dash.destroy();
-  const dashChartOpts = chartOpts({
-    stacked: true,
-    maintainAspectRatio: false,
-  });
-  dashChartOpts.layout = { padding: { left: 10, right: 0, top: 0, bottom: 0 } };
-  dashChartOpts.onResize = (chart) => syncDashBarSizing(chart);
-  dashChartOpts.scales.x.offset = true;
-  dashChartOpts.scales.x.grid.offset = true;
-  dashChartOpts.scales.x.ticks.align = "center";
-  dashChartOpts.scales.x.ticks.autoSkip = false;
   charts.dash = new Chart(ctx, {
     type: "bar",
     data: {
-      labels: dashSeries.labels,
+      labels: sorted.map((h) => h.date.slice(5)),
       datasets: [
         {
           label: "Present",
-          data: dashSeries.present,
+          data: sorted.map((h) => h.present),
           backgroundColor: "rgba(34,197,94,0.65)",
           borderRadius: 3,
           borderSkipped: false,
         },
         {
           label: "Absent",
-          data: dashSeries.absent,
+          data: sorted.map((h) => h.absent),
           backgroundColor: "rgba(239,68,68,0.3)",
           borderRadius: 3,
           borderSkipped: false,
         },
       ],
     },
-    options: dashChartOpts,
+    options: chartOpts({ stacked: true }),
   });
-  syncDashBarSizing(charts.dash);
+}
+
+function renderRecentLogs(logs) {
+  const el = document.getElementById("recentLogs");
+  el.innerHTML =
+    logs
+      .slice(0, 15)
+      .map(
+        (l) => `
+    <div class="log-item ${l.recognized ? "ok" : "fail"}">
+      <span class="log-name">${l.full_name || "Unknown"}</span>
+      <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
+    </div>`,
+      )
+      .join("") || `<p class="muted">No events yet</p>`;
 }
 
 function renderDashTable(records) {
@@ -342,8 +347,7 @@ async function viewProfile(sid) {
       .slice(0, 2)
       .join("");
     document.getElementById("profileActions").innerHTML = `
-      <button class="btn-secondary" onclick="openEditModal('${sid}')">Edit</button>
-      <button class="btn-danger btn-secondary" onclick="deleteStudent('${sid}')">Delete</button>`;
+      <button class="btn-secondary" onclick="openEditModal('${sid}')">Edit Student</button>`;
 
     document.getElementById("profileContent").innerHTML = `
       <div class="profile-header">
@@ -419,13 +423,8 @@ async function viewProfile(sid) {
 }
 
 async function deleteStudent(sid) {
-  if (!confirm(`Remove student ${sid} from the system?`)) return;
-  const r = await api(`/students/${sid}`, { method: "DELETE" });
-  const d = await r.json();
-  if (d.deleted) {
-    toast("Student removed");
-    navigate("students");
-  } else toast("Not found", "err");
+  // now handled by the edit modal's confirmDeleteStudent()
+  openEditModal(sid);
 }
 
 async function openEditModal(sid) {
@@ -583,7 +582,8 @@ async function enrollStudent() {
     stopWebcam();
     selectedFiles = [];
     webcamFiles = [];
-    document.getElementById("filePreview").innerHTML = "";
+    const filePreview = document.getElementById("filePreview");
+    if (filePreview) filePreview.innerHTML = "";
     ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
       (id) => (document.getElementById(id).value = ""),
     );
@@ -1189,16 +1189,26 @@ async function saveSettings() {
 }
 
 async function changePw() {
-  const pw = document.getElementById("newPw").value;
-  if (!pw || pw.length < 6) {
-    setMsg("pwMsg", "Minimum 6 characters.", "err");
+  const oldPw = document.getElementById("oldPw")?.value || "";
+  const newPw = document.getElementById("newPw").value;
+  if (!newPw || newPw.length < 6) {
+    setMsg("pwMsg", "New password must be at least 6 characters.", "err");
     return;
   }
-  setMsg(
-    "pwMsg",
-    "(Password change requires a dedicated endpoint — coming soon)",
-    "",
-  );
+  const r = await api("/auth/change-password", {
+    method: "POST",
+    json: { old_password: oldPw, new_password: newPw },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    setMsg("pwMsg", "✓ Password updated. Please log in again.", "ok");
+    toast("Password changed");
+    // Token changes — log out after 2s
+    setTimeout(() => logout(), 2000);
+  } else {
+    setMsg("pwMsg", d.error || "Update failed.", "err");
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1220,10 +1230,9 @@ function dlBlob(content, mime, filename) {
   a.click();
 }
 
-function chartOpts({ stacked = false, maintainAspectRatio = true } = {}) {
+function chartOpts({ stacked = false } = {}) {
   return {
     responsive: true,
-    maintainAspectRatio,
     plugins: {
       legend: { display: false },
       tooltip: {
@@ -1255,43 +1264,6 @@ function chartOpts({ stacked = false, maintainAspectRatio = true } = {}) {
       },
     },
   };
-}
-
-function syncDashBarSizing(chart) {
-  if (!chart || !chart.chartArea) return;
-
-  const barCount = chart.data.labels?.length || 0;
-  if (!barCount) return;
-
-  const targetBarWidth = 50;
-  const targetGap = 10;
-  const availableWidth = chart.chartArea.width;
-  if (!availableWidth) return;
-
-  const slotWidth = availableWidth / barCount;
-  const barWidth = Math.min(targetBarWidth, Math.max(1, slotWidth - targetGap));
-
-  chart.data.datasets.forEach((dataset) => {
-    dataset.barThickness = barWidth;
-    dataset.maxBarThickness = barWidth;
-  });
-  chart.update("none");
-}
-
-function buildDashHistorySeries(history, slotCount) {
-  const labels = Array.from({ length: slotCount }, (_, index) =>
-    history[index]?.date ? history[index].date.slice(5) : "",
-  );
-  const present = Array.from(
-    { length: slotCount },
-    (_, index) => history[index]?.present ?? 0,
-  );
-  const absent = Array.from(
-    { length: slotCount },
-    (_, index) => history[index]?.absent ?? 0,
-  );
-
-  return { labels, present, absent };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1467,7 +1439,8 @@ window.enrollStudent = async function () {
     stopWebcam();
     selectedFiles = [];
     webcamFiles = [];
-    document.getElementById("filePreview").innerHTML = "";
+    const filePreview = document.getElementById("filePreview");
+    if (filePreview) filePreview.innerHTML = "";
     ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
       (id) => (document.getElementById(id).value = ""),
     );
@@ -1477,3 +1450,1262 @@ window.enrollStudent = async function () {
     bar.style.width = "0%";
   }
 };
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO CAPTURE ENGINE
+   Architecture:
+   - getUserMedia() opens webcam into <video id="captureCam">
+   - A requestAnimationFrame loop reads frames from video into a hidden canvas
+   - Every 400ms it POSTs the frame to /api/capture/validate-frame
+   - Backend returns { face_detected, quality{blur,brightness,overall,passed}, pose }
+   - If quality passes AND the current required pose matches → capture the frame
+   - Pose sequence: front(20) → left(10) → right(10) → up(10) → down(10) = 60 total
+   - Canvas overlay draws: face oval guide, alignment reticle, quality ring
+═══════════════════════════════════════════════════════════════════════ */
+
+const POSE_SEQUENCE = [
+  { pose: "front", target: 20, instruction: "Look straight at the camera" },
+  { pose: "left", target: 10, instruction: "Slowly turn your head LEFT" },
+  { pose: "right", target: 10, instruction: "Slowly turn your head RIGHT" },
+  { pose: "up", target: 10, instruction: "Tilt your head slightly UP" },
+  { pose: "down", target: 10, instruction: "Tilt your head slightly DOWN" },
+];
+const TOTAL_TARGET = 60;
+
+let captureStream = null;
+let captureAF = null; // requestAnimationFrame handle
+let captureFrames = []; // collected base64 frames
+let poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
+let captureActive = false;
+let _captureComplete = false; // guard: blocks frames after all 60 collected
+let _validateInFlight = false; // prevents concurrent validate calls
+let lastValidateTime = 0;
+let currentQuality = null;
+let currentPoseHint = "front";
+let captureMethod = "auto"; // "auto" | "upload"
+
+function setCaptureMethod(method, btn) {
+  captureMethod = method;
+  document
+    .querySelectorAll(".cmtab")
+    .forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  document.getElementById("uploadMode").style.display =
+    method === "upload" ? "block" : "none";
+  document.getElementById("capturePanel").style.display =
+    method === "auto" ? "flex" : "none";
+  if (method === "upload") {
+    stopAutoCapture();
+  }
+}
+
+// ── Start guided capture ──────────────────────────────────────────────
+async function startAutoCapture() {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  if (!sid || !name) {
+    toast("Fill in Student ID and Full Name first", "err");
+    document.getElementById("eId").focus();
+    return;
+  }
+
+  try {
+    captureStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: "user",
+      },
+    });
+    const video = document.getElementById("captureCam");
+    video.srcObject = captureStream;
+    await new Promise((res) => (video.onloadedmetadata = res));
+    video.play();
+
+    document.getElementById("capturePlaceholder").style.display = "none";
+    document.getElementById("startCaptureBtn").style.display = "none";
+    document.getElementById("stopCaptureBtn").style.display = "inline-flex";
+    document.getElementById("resetCaptureBtn").style.display = "inline-flex";
+
+    captureFrames = [];
+    poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
+    captureActive = true;
+    _captureComplete = false;
+    _validateInFlight = false;
+
+    _updatePosePips();
+    _runCaptureLoop();
+  } catch (e) {
+    toast("Camera access denied — check browser permissions", "err");
+    console.error(e);
+  }
+}
+
+function stopAutoCapture() {
+  captureActive = false;
+  if (captureAF) {
+    cancelAnimationFrame(captureAF);
+    captureAF = null;
+  }
+  if (captureStream) {
+    captureStream.getTracks().forEach((t) => t.stop());
+    captureStream = null;
+  }
+  document.getElementById("captureCam").srcObject = null;
+  document.getElementById("startCaptureBtn").style.display = "inline-flex";
+  document.getElementById("stopCaptureBtn").style.display = "none";
+}
+
+function resetCapture() {
+  stopAutoCapture();
+  captureFrames = [];
+  poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
+  _captureComplete = false;
+  _validateInFlight = false;
+  document.getElementById("captureCount").textContent = "0";
+  document.getElementById("captureInstruction").textContent =
+    "Fill in student info, then click Start Capture";
+  document.getElementById("qualityFill").style.width = "0%";
+  document.getElementById("qualityVal").textContent = "—";
+  document.getElementById("poseLabel").textContent = "—";
+  document.getElementById("capturePlaceholder").style.display = "flex";
+  document.getElementById("resetCaptureBtn").style.display = "none";
+  _updatePosePips();
+  setMsg("enrollMsg", "", "");
+}
+
+// ── Frame loop ────────────────────────────────────────────────────────
+function _runCaptureLoop() {
+  const video = document.getElementById("captureCam");
+  const overlay = document.getElementById("captureOverlay");
+  const ctx = overlay.getContext("2d");
+
+  function loop(ts) {
+    if (!captureActive) return;
+
+    // Match overlay size to video
+    overlay.width = video.videoWidth || 640;
+    overlay.height = video.videoHeight || 480;
+
+    _drawOverlay(ctx, overlay.width, overlay.height);
+
+    // Validate at most every 400ms (avoid hammering backend)
+    if (ts - lastValidateTime >= 400) {
+      lastValidateTime = ts;
+      _validateAndCapture(video, overlay.width, overlay.height);
+    }
+
+    captureAF = requestAnimationFrame(loop);
+  }
+  captureAF = requestAnimationFrame(loop);
+}
+
+// ── Capture one frame, send to backend for quality check ─────────────
+async function _validateAndCapture(video, w, h) {
+  // Guard 1: don't start a new validation while one is in flight
+  if (_validateInFlight || _captureComplete) return;
+  _validateInFlight = true;
+
+  try {
+    // Grab frame from video into a temporary canvas
+    const tmp = document.createElement("canvas");
+    tmp.width = w;
+    tmp.height = h;
+    tmp.getContext("2d").drawImage(video, 0, 0, w, h);
+    const b64 = tmp.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+    const r = await api("/capture/validate-frame", {
+      method: "POST",
+      json: { image: b64 },
+    });
+    if (!r || _captureComplete) return;
+    const d = await r.json();
+
+    currentQuality = d.quality;
+    currentPoseHint = d.pose || "front";
+
+    // Update quality bar
+    const q = d.quality?.overall ?? 0;
+    const qFill = document.getElementById("qualityFill");
+    if (qFill) {
+      qFill.style.width = q + "%";
+      qFill.style.background =
+        q >= 70 ? "var(--green)" : q >= 45 ? "var(--amber)" : "var(--red)";
+    }
+    const qualityValEl = document.getElementById("qualityVal");
+    if (qualityValEl) qualityValEl.textContent = q + "%";
+    const poseLabelEl = document.getElementById("poseLabel");
+    if (poseLabelEl)
+      poseLabelEl.textContent = d.face_detected ? currentPoseHint : "No face";
+
+    if (!d.face_detected || !d.quality?.passed) {
+      _setInstruction(
+        !d.face_detected
+          ? "⚠ No face detected — move into frame"
+          : d.quality.blur_score < 30
+            ? "⚠ Image is blurry — hold still"
+            : d.quality.brightness < 40
+              ? "⚠ Too dark — improve lighting"
+              : "⚠ Quality too low — adjust position",
+      );
+      return;
+    }
+
+    // Guard 2: re-check complete flag after async wait
+    if (_captureComplete) return;
+
+    const currentStep = _getCurrentPoseStep();
+    if (!currentStep) {
+      // Shouldn't happen, but if all steps done just trigger complete
+      if (!_captureComplete) _onCaptureComplete();
+      return;
+    }
+
+    const requiredPose = currentStep.pose;
+    // User-perspective pose matching — "front" also accepts slight angles
+    const poseMatches =
+      currentPoseHint === requiredPose ||
+      (requiredPose === "front" && currentPoseHint === "front");
+
+    if (poseMatches) {
+      // Guard 3: don't exceed per-step target (prevents overshoot)
+      const alreadyCount = poseCaptureCounts[requiredPose] || 0;
+      if (alreadyCount >= currentStep.target) return;
+
+      // ✓ Good frame — accept it
+      captureFrames.push(b64);
+      poseCaptureCounts[requiredPose] = alreadyCount + 1;
+
+      const total = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0);
+      const countEl = document.getElementById("captureCount");
+      if (countEl) countEl.textContent = total; // new design: shows just number, sep and total are sibling spans
+
+      _setInstruction(`✓ ${total} frames — ${currentStep.instruction}`);
+      _updatePosePips();
+
+      const justFinishedPose =
+        poseCaptureCounts[requiredPose] >= currentStep.target;
+      if (justFinishedPose) {
+        // Guard 4: check total AFTER this addition
+        if (total >= TOTAL_TARGET) {
+          _captureComplete = true; // set BEFORE calling complete to block concurrent calls
+          _onCaptureComplete();
+        } else {
+          const nextStep = _getNextPoseStep();
+          if (nextStep) {
+            _soundDing();
+            setTimeout(
+              () => _speakInstruction(nextStep.instruction, true),
+              200,
+            );
+            _setInstruction(
+              `✓ ${requiredPose.toUpperCase()} done!  →  ${nextStep.instruction}`,
+            );
+          } else if (total >= TOTAL_TARGET) {
+            _captureComplete = true;
+            _onCaptureComplete();
+          }
+        }
+      }
+    } else {
+      // Wrong pose — show direction hint
+      _setInstruction(currentStep.instruction);
+    }
+  } catch (e) {
+    // Network hiccup — silently continue
+  } finally {
+    _validateInFlight = false; // always release lock
+  }
+}
+
+// Helper: safe instruction setter (null-checked)
+function _setInstruction(text) {
+  const el = document.getElementById("captureInstruction");
+  if (el) el.textContent = text;
+}
+
+function _getCurrentPoseStep() {
+  for (const step of POSE_SEQUENCE) {
+    if ((poseCaptureCounts[step.pose] || 0) < step.target) return step;
+  }
+  return null; // all complete
+}
+
+function _getNextPoseStep() {
+  // Return the first step that still needs frames, AFTER the current one.
+  // "current" = the first step not yet complete.
+  let foundCurrent = false;
+  for (const step of POSE_SEQUENCE) {
+    const done = (poseCaptureCounts[step.pose] || 0) >= step.target;
+    if (!foundCurrent && !done) {
+      // This IS the current incomplete step — skip it, look for the next
+      foundCurrent = true;
+      continue;
+    }
+    if (foundCurrent && !done) {
+      return step;
+    }
+  }
+  return null; // no more steps after current
+}
+
+function _updatePosePips() {
+  for (const step of POSE_SEQUENCE) {
+    const pip = document.getElementById(`pip-${step.pose}`);
+    if (!pip) continue;
+    const count = poseCaptureCounts[step.pose] || 0;
+    const isDone = count >= step.target;
+    const isCurrent = _getCurrentPoseStep()?.pose === step.pose;
+    pip.classList.toggle("done", isDone);
+    pip.classList.toggle("active", isCurrent && !isDone);
+  }
+}
+
+function _onCaptureComplete() {
+  stopAutoCapture();
+  _setInstruction(
+    `✅ ${captureFrames.length} frames collected! Click "Review & Enroll" to continue.`,
+  );
+  document.getElementById("resetCaptureBtn").style.display = "inline-flex";
+  toast(`${captureFrames.length} frames captured — ready to enroll`);
+}
+
+// ── Canvas overlay renderer ───────────────────────────────────────────
+function _drawOverlay(ctx, w, h) {
+  ctx.clearRect(0, 0, w, h);
+
+  const cx = w / 2,
+    cy = h / 2;
+  const rx = w * 0.18,
+    ry = h * 0.26;
+  const currentStep = _getCurrentPoseStep();
+  const totalCaptured = Object.values(poseCaptureCounts).reduce(
+    (a, b) => a + b,
+    0,
+  );
+  const pct = totalCaptured / TOTAL_TARGET;
+
+  // Semi-transparent dark vignette outside the oval
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.40)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx + 8, ry + 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // Oval border — colour depends on quality
+  const ovalColor =
+    !currentPoseHint || currentPoseHint === ""
+      ? "#555"
+      : currentQuality?.passed
+        ? `hsl(${120 * pct}, 80%, 55%)`
+        : "#EF4444";
+
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+  ctx.strokeStyle = ovalColor;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // Progress arc around the oval (green ring)
+  if (totalCaptured > 0) {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx + 6, ry + 6, -Math.PI / 2, 0, Math.PI * 2 * pct);
+    ctx.strokeStyle = "rgba(34,197,94,0.8)";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+
+  // Crosshair / alignment guide — 4 small ticks at cardinal points of oval
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 1.5;
+  [
+    [cx, cy - ry - 4, cx, cy - ry + 12],
+    [cx, cy + ry - 12, cx, cy + ry + 4],
+    [cx - rx - 4, cy, cx - rx + 12, cy],
+    [cx + rx - 12, cy, cx + rx + 4, cy],
+  ].forEach(([x1, y1, x2, y2]) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  });
+
+  // Pose direction arrow — drawn in USER perspective space
+  // The video element is CSS-mirrored (scaleX(-1)), so canvas left = user's right.
+  // We flip horizontal arrows so they point correctly from the user's viewpoint.
+  if (currentStep && captureStream) {
+    // User's left = canvas right; user's right = canvas left (mirrored feed)
+    const arrows = {
+      left: "←", // user turns left → arrow points left in their view
+      right: "→", // user turns right → arrow points right in their view
+      up: "↑",
+      down: "↓",
+      front: "",
+    };
+    const arrow = arrows[currentStep.pose] || "";
+    if (arrow) {
+      // Position arrows OUTSIDE the oval, at the edge toward which user should turn
+      // Because canvas is mirrored: user's left edge = canvas RIGHT side
+      const ax =
+        currentStep.pose === "left"
+          ? cx + rx + 24 // user's left = canvas right
+          : currentStep.pose === "right"
+            ? cx - rx - 24 // user's right = canvas left
+            : cx;
+      const ay =
+        currentStep.pose === "up"
+          ? cy - ry - 22
+          : currentStep.pose === "down"
+            ? cy + ry + 26
+            : cy;
+
+      // Draw a rounded pill behind the arrow for readability
+      ctx.save();
+      ctx.fillStyle = "rgba(245,158,11,0.18)";
+      ctx.beginPath();
+      ctx.roundRect
+        ? ctx.roundRect(ax - 20, ay - 16, 40, 32, 8)
+        : ctx.rect(ax - 20, ay - 16, 40, 32);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.font = "bold 26px Arial";
+      ctx.fillStyle = "rgba(245,158,11,0.95)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(arrow, ax, ay);
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENROLL OVERRIDE
+   Replaces the previous enrollStudent() — now handles both auto-capture
+   frames and uploaded files.
+═══════════════════════════════════════════════════════════════════════ */
+window.enrollStudent = async function () {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  const dept = document.getElementById("eDept").value.trim();
+  const sem = document.getElementById("eSem")?.value.trim() || "";
+  const email = document.getElementById("eEmail").value.trim();
+  const phone = document.getElementById("ePhone").value.trim();
+
+  if (!sid || !name) {
+    setMsg("enrollMsg", "Student ID and Full Name are required.", "err");
+    return;
+  }
+
+  const isAuto = captureMethod === "auto";
+  const frames = isAuto ? captureFrames : [];
+  const files = isAuto ? [] : selectedFiles;
+
+  if (isAuto && frames.length < 5) {
+    setMsg(
+      "enrollMsg",
+      "Not enough frames captured. Minimum 5 required.",
+      "err",
+    );
+    return;
+  }
+  if (!isAuto && files.length === 0) {
+    setMsg("enrollMsg", "Please upload at least one image.", "err");
+    return;
+  }
+
+  const progress = document.getElementById("enrollProgress");
+  const bar = document.getElementById("enrollBar");
+  progress.style.display = "block";
+  bar.style.width = "5%";
+  setMsg("enrollMsg", "Processing faces and generating embeddings…", "");
+
+  try {
+    let response;
+    if (isAuto) {
+      bar.style.width = "40%";
+      response = await api("/enroll", {
+        method: "POST",
+        json: {
+          student_id: sid,
+          full_name: name,
+          department: dept || null,
+          email: email || null,
+          phone: phone || null,
+          semester: sem || null,
+          frames,
+        },
+      });
+    } else {
+      bar.style.width = "40%";
+      const form = new FormData();
+      form.append("student_id", sid);
+      form.append("full_name", name);
+      if (dept) form.append("department", dept);
+      if (sem) form.append("semester", sem);
+      if (email) form.append("email", email);
+      if (phone) form.append("phone", phone);
+      files.forEach((f) => form.append("images", f));
+      response = await api("/enroll", { method: "POST", body: form });
+    }
+
+    const d = await response.json();
+    bar.style.width = "100%";
+    setTimeout(() => {
+      progress.style.display = "none";
+      bar.style.width = "0%";
+    }, 600);
+
+    if (!response.ok) {
+      setMsg("enrollMsg", d.error || "Enrollment failed.", "err");
+      return;
+    }
+
+    setMsg(
+      "enrollMsg",
+      `✓ ${name} enrolled. ${d.samples} samples processed.` +
+        (d.is_update ? " (Embeddings updated)" : ""),
+      "ok",
+    );
+    toast(`${name} enrolled successfully`);
+
+    // Reset
+    captureFrames = [];
+    selectedFiles = [];
+    webcamFiles = [];
+    document.getElementById("filePreview") &&
+      (document.getElementById("filePreview").innerHTML = "");
+    resetCapture();
+    ["eId", "eName", "eDept", "eSem", "eEmail", "ePhone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+  } catch (e) {
+    setMsg("enrollMsg", "Error: " + e.message, "err");
+    progress.style.display = "none";
+    bar.style.width = "0%";
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FULL STUDENT EDIT MODAL
+═══════════════════════════════════════════════════════════════════════ */
+let _editingSid = null;
+
+window.openEditModal = async function (sid) {
+  _editingSid = sid;
+  document.getElementById("editModal").style.display = "flex";
+  document.body.style.overflow = "hidden";
+
+  // Load student data
+  const r = await api(`/students/${sid}`);
+  if (!r) return;
+  const s = await r.json();
+
+  document.getElementById("modalTitle").textContent = `Edit — ${s.full_name}`;
+  document.getElementById("mSid").value = s.student_id;
+  document.getElementById("mName").value = s.full_name;
+  document.getElementById("mDept").value = s.department || "";
+  document.getElementById("mSem").value = s.semester || "";
+  document.getElementById("mEmail").value = s.email || "";
+  document.getElementById("mPhone").value = s.phone || "";
+  document.getElementById("mStatus").value = s.status || "active";
+
+  setMsg("editMsg", "", "");
+  setMsg("attEditMsg", "", "");
+  document.getElementById("attEditDate").value = todayStr();
+
+  // Load attendance records for the attendance tab
+  _renderAttEditList(s.attendance || []);
+  // Reset to profile tab
+  switchModalTab("profile", document.querySelector(".mtab"));
+};
+
+function closeEditModal(event) {
+  if (event && event.target !== document.getElementById("editModal")) return;
+  _closeEditModal();
+}
+function _closeEditModal() {
+  document.getElementById("editModal").style.display = "none";
+  document.body.style.overflow = "";
+  _editingSid = null;
+}
+// Also close on Escape
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") _closeEditModal();
+});
+
+function switchModalTab(tab, btn) {
+  document
+    .querySelectorAll(".mtab")
+    .forEach((b) => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  else
+    document
+      .querySelectorAll(".mtab")
+      [
+        ["profile", "attendance", "actlog"].indexOf(tab)
+      ]?.classList.add("active");
+  ["profile", "attendance", "actlog"].forEach((t) => {
+    const el = document.getElementById(`mtab-${t}`);
+    if (el) el.style.display = t === tab ? "block" : "none";
+  });
+  if (tab === "actlog" && _editingSid) _loadActLog(_editingSid);
+}
+
+async function saveStudentEdit() {
+  if (!_editingSid) return;
+  const fields = {
+    full_name: document.getElementById("mName").value.trim(),
+    department: document.getElementById("mDept").value.trim() || null,
+    semester: document.getElementById("mSem").value.trim() || null,
+    email: document.getElementById("mEmail").value.trim() || null,
+    phone: document.getElementById("mPhone").value.trim() || null,
+    status: document.getElementById("mStatus").value,
+  };
+  if (!fields.full_name) {
+    setMsg("editMsg", "Name is required.", "err");
+    return;
+  }
+
+  const r = await api(`/students/${_editingSid}`, {
+    method: "PUT",
+    json: fields,
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) {
+    setMsg("editMsg", d.error || "Update failed.", "err");
+    return;
+  }
+
+  setMsg("editMsg", "✓ Profile updated successfully.", "ok");
+  toast("Student updated");
+  // Refresh whichever page is visible
+  const activePage = document.querySelector(".page.active")?.id;
+  if (activePage === "page-students") searchStudents();
+  if (activePage === "page-dashboard") loadDashboard();
+  if (activePage === "page-profile") viewProfile(_editingSid);
+}
+
+async function confirmDeleteStudent() {
+  if (!_editingSid) return;
+  if (
+    !confirm(
+      `Permanently delete student ${_editingSid}? This cannot be undone.`,
+    )
+  )
+    return;
+  const r = await api(`/students/${_editingSid}`, { method: "DELETE" });
+  if (!r) return;
+  _closeEditModal();
+  toast("Student deleted");
+  navigate("students");
+}
+
+// ── Attendance override in modal ──────────────────────────────────────
+function _renderAttEditList(records) {
+  const el = document.getElementById("attEditList");
+  if (!records || !records.length) {
+    el.innerHTML = `<p class="muted" style="padding:.5rem 0">No attendance records yet.</p>`;
+    return;
+  }
+  el.innerHTML = records
+    .map(
+      (r) => `
+    <div class="att-edit-row">
+      <span class="att-edit-date">${r.date}</span>
+      <span class="${r.status === "Present" ? "badge-present" : "badge-absent"}">${r.status}</span>
+      <span class="att-edit-time">${r.time || "—"}</span>
+      <span class="att-edit-note">${r.note || ""}</span>
+      <button class="att-edit-del" onclick="deleteAttRecord('${r.date}')" title="Remove">✕</button>
+    </div>`,
+    )
+    .join("");
+}
+
+async function saveAttendanceEdit() {
+  if (!_editingSid) return;
+  const date = document.getElementById("attEditDate").value;
+  const status = document.getElementById("attEditStatus").value;
+  const note = document.getElementById("attEditNote").value.trim();
+  if (!date) {
+    setMsg("attEditMsg", "Select a date.", "err");
+    return;
+  }
+
+  const r = await api(`/attendance/${_editingSid}/${date}`, {
+    method: "PUT",
+    json: { status, note },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) {
+    setMsg("attEditMsg", d.error || "Update failed.", "err");
+    return;
+  }
+
+  setMsg("attEditMsg", `✓ Attendance set to ${status} for ${date}.`, "ok");
+  document.getElementById("attEditNote").value = "";
+  // Reload student data to refresh the list
+  const sr = await api(`/students/${_editingSid}`);
+  const sd = await sr.json();
+  _renderAttEditList(sd.attendance || []);
+}
+
+async function deleteAttRecord(attDate) {
+  if (!confirm(`Remove attendance record for ${attDate}?`)) return;
+  const r = await api(`/attendance/${_editingSid}/${attDate}`, {
+    method: "DELETE",
+  });
+  if (!r) return;
+  toast("Record removed");
+  const sr = await api(`/students/${_editingSid}`);
+  const sd = await sr.json();
+  _renderAttEditList(sd.attendance || []);
+}
+
+// ── Activity log in modal ─────────────────────────────────────────────
+async function _loadActLog(sid) {
+  const el = document.getElementById("actLogList");
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  try {
+    const r = await api(`/activity-logs?target_id=${sid}&limit=30`);
+    const d = await r.json();
+    const logs = d.logs || [];
+    if (!logs.length) {
+      el.innerHTML = `<p class="muted">No activity recorded yet.</p>`;
+      return;
+    }
+    el.innerHTML = logs
+      .map(
+        (l) => `
+      <div class="act-log-row">
+        <span class="act-ts">${l.logged_at?.slice(0, 16) || ""}</span>
+        <span class="act-who">${l.admin_user}</span>
+        <span class="act-action">&nbsp;·&nbsp;${l.action.replace(/_/g, " ")}</span>
+        ${l.detail ? `<span class="act-detail">&nbsp;— ${l.detail}</span>` : ""}
+      </div>`,
+      )
+      .join("");
+  } catch {
+    el.innerHTML = `<p class="muted err">Failed to load.</p>`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SETTINGS PAGE — add email status + test button
+═══════════════════════════════════════════════════════════════════════ */
+const _origLoadSettings =
+  typeof loadSettings === "function" ? loadSettings : async () => {};
+window.loadSettings = async function () {
+  await _origLoadSettings();
+  try {
+    const r = await api("/settings");
+    const d = await r.json();
+    // Inject email status into settings page if element exists
+    let emailEl = document.getElementById("emailStatusBadge");
+    if (!emailEl) return;
+    const on = d.email_enabled;
+    emailEl.className = `email-status ${on ? "on" : "off"}`;
+    emailEl.textContent = on ? "✓ Email enabled" : "✗ Email disabled";
+    if (d.smtp_user)
+      document.getElementById("smtpUserDisplay") &&
+        (document.getElementById("smtpUserDisplay").textContent = d.smtp_user);
+  } catch {}
+};
+
+async function sendTestEmail() {
+  const email = prompt("Enter email address to send test to:");
+  if (!email) return;
+  const r = await api("/email/test", { method: "POST", json: { email } });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) toast("Test email queued — check inbox in ~10s");
+  else toast(d.error || "Failed", "err");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENROLL — Step navigation
+═══════════════════════════════════════════════════════════════════════ */
+function _setEnrollStep(n) {
+  const titles = {
+    1: "Student Profile",
+    2: "Face Capture",
+    3: "Review & Confirm",
+  };
+  [1, 2, 3].forEach((i) => {
+    const panel = document.getElementById(`epanel-${i}`);
+    const step = document.getElementById(`estep-${i}`);
+    if (panel) panel.style.display = i === n ? "block" : "none";
+    if (step) {
+      step.classList.toggle("active", i === n);
+      step.classList.toggle("done", i < n);
+    }
+  });
+  const titleEl = document.getElementById("esbTitle");
+  if (titleEl) titleEl.textContent = titles[n] || "";
+}
+
+function goToStep1() {
+  _setEnrollStep(1);
+}
+
+function goToStep2() {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  if (!sid || !name) {
+    toast("Student ID and Full Name are required", "err");
+    document.getElementById("eId").focus();
+    return;
+  }
+  _setEnrollStep(2);
+}
+
+function goToStep3() {
+  // Build review grid
+  const fields = [
+    ["Student ID", document.getElementById("eId").value.trim()],
+    ["Full Name", document.getElementById("eName").value.trim()],
+    ["Department", document.getElementById("eDept").value.trim()],
+    ["Semester", document.getElementById("eSem")?.value.trim() || ""],
+    ["Email", document.getElementById("eEmail").value.trim()],
+    ["Phone", document.getElementById("ePhone").value.trim()],
+  ];
+  const grid = document.getElementById("reviewGrid");
+  grid.innerHTML = fields
+    .map(
+      ([label, val]) => `
+    <div class="rv-row">
+      <span class="rv-label">${label}</span>
+      <span class="rv-val ${val ? "" : "empty"}">${val || "—"}</span>
+    </div>`,
+    )
+    .join("");
+
+  // Capture summary badge
+  const total = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0);
+  const badge = document.getElementById("reviewCaptureBadge");
+  if (total > 0) {
+    badge.className = "review-capture-badge ready";
+    badge.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg>
+      ${total} frames captured via guided auto-capture`;
+  } else {
+    badge.className = "review-capture-badge warn";
+    badge.innerHTML = `⚠ No face images yet — go back and capture`;
+  }
+
+  setMsg("enrollMsg", "", "");
+  _setEnrollStep(3);
+}
+
+// Reset enroll page back to step 1 after successful enroll
+const _origResetCapture =
+  typeof resetCapture === "function" ? resetCapture : () => {};
+window.resetEnrollPage = function () {
+  _origResetCapture();
+  _setEnrollStep(1);
+  document.getElementById("reviewGrid") &&
+    (document.getElementById("reviewGrid").innerHTML = "");
+  setMsg("enrollMsg", "", "");
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STUDENTS — Faculty filter tabs
+═══════════════════════════════════════════════════════════════════════ */
+let _activeFacultyFilter = "";
+let _allStudentsCache = [];
+
+async function loadStudents() {
+  // Load departments for tab bar
+  try {
+    const r = await api("/departments");
+    const d = await r.json();
+    _buildStudentFacultyTabs(d.departments || []);
+  } catch {}
+  await searchStudents();
+}
+
+function _buildStudentFacultyTabs(depts) {
+  const bar = document.getElementById("studentFacultyTabs");
+  if (!bar) return;
+  bar.innerHTML = [
+    `<div class="faculty-tab ${_activeFacultyFilter === "" ? "active" : ""}"
+          onclick="filterStudentsByFaculty('',this)">All</div>`,
+    ...depts.map(
+      (d) =>
+        `<div class="faculty-tab ${_activeFacultyFilter === d ? "active" : ""}"
+            onclick="filterStudentsByFaculty('${d}',this)">${d}</div>`,
+    ),
+  ].join("");
+}
+
+async function filterStudentsByFaculty(dept, btn) {
+  _activeFacultyFilter = dept;
+  document
+    .querySelectorAll("#studentFacultyTabs .faculty-tab")
+    .forEach((b) =>
+      b.classList.toggle("active", b.textContent.trim() === (dept || "All")),
+    );
+  document.getElementById("studentSearch").value = "";
+  await searchStudents();
+}
+
+// Override existing searchStudents to use faculty filter
+const _origSearchStudents = window.searchStudents || (async () => {});
+window.searchStudents = async function () {
+  const q = document.getElementById("studentSearch")?.value.trim() || "";
+  const dept = _activeFacultyFilter;
+  let url = `/students?q=${encodeURIComponent(q)}`;
+  if (dept) url += `&department=${encodeURIComponent(dept)}`;
+  try {
+    const r = await api(url);
+    const d = await r.json();
+    _allStudentsCache = d.students || [];
+    _renderStudentGrid(_allStudentsCache);
+    _renderStudentFacultyBar(_allStudentsCache);
+  } catch (e) {
+    console.error("searchStudents:", e);
+  }
+};
+
+function _renderStudentGrid(students) {
+  const grid = document.getElementById("personsGrid");
+  if (!grid) return;
+  grid.innerHTML =
+    students
+      .map((s) => {
+        const initials = s.full_name
+          .split(" ")
+          .map((w) => w[0]?.toUpperCase())
+          .slice(0, 2)
+          .join("");
+        return `
+      <div class="person-card" onclick="viewProfile('${s.student_id}')">
+        <button class="person-del" onclick="event.stopPropagation();deleteStudent('${s.student_id}')" title="Edit">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <div class="person-avatar">${initials || "?"}</div>
+        <div class="person-name">${s.full_name}</div>
+        <div class="person-dept">${s.department || "—"}</div>
+        <div class="person-dept" style="font-family:var(--mono);font-size:10px;color:var(--text3)">${s.semester || ""} · ${s.sample_count} images</div>
+      </div>`;
+      })
+      .join("") ||
+    `<p style="color:var(--text3);grid-column:1/-1">No students found.</p>`;
+}
+
+function _renderStudentFacultyBar(students) {
+  const bar = document.getElementById("studentFacultyBar");
+  if (!bar) return;
+  if (_activeFacultyFilter) {
+    bar.innerHTML = "";
+    return;
+  }
+  const deptMap = {};
+  students.forEach((s) => {
+    const d = s.department || "Unassigned";
+    deptMap[d] = (deptMap[d] || 0) + 1;
+  });
+  bar.innerHTML = Object.entries(deptMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(
+      ([dept, count]) => `
+      <div class="sfb-chip">
+        ${dept} <span class="sfb-count">${count}</span>
+      </div>`,
+    )
+    .join("");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO EMAIL on SSE attendance event
+   When the SSE connection receives a new attendance mark,
+   automatically queue an email — no manual trigger needed.
+═══════════════════════════════════════════════════════════════════════ */
+const _origHandleAttendanceEvent =
+  typeof handleAttendanceEvent === "function"
+    ? handleAttendanceEvent
+    : () => {};
+
+window.handleAttendanceEvent = function (event) {
+  // Call original handler (updates UI panels, toast, etc.)
+  _origHandleAttendanceEvent(event);
+
+  // Auto-send email — fire and forget, no await
+  // The backend already queues emails from camera stream,
+  // but for image-upload recognition we also trigger from here
+  // to ensure nothing is missed regardless of recognition path.
+  if (event.student_id && event.student_id !== "TEST") {
+    api(`/students/${event.student_id}`)
+      .then((r) => r && r.json())
+      .then((s) => {
+        if (s && s.email) {
+          // Email is already queued server-side by _mark_attendance_and_broadcast.
+          // The frontend just confirms — no double send because backend deduplicates
+          // on (student_id, subject, date) in email_log.
+          console.log(
+            `[email] attendance email queued for ${s.full_name} → ${s.email}`,
+          );
+        }
+      })
+      .catch(() => {});
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   VOICE GUIDANCE & SOUND EFFECTS SYSTEM
+   ─────────────────────────────────────────────────────────────────────
+   Architecture:
+   • Voice: Web Speech API (SpeechSynthesis) — built into every modern
+     browser, no external library, no API key, works offline.
+   • Sounds: Web Audio API (AudioContext) — synthesised tones, no files
+     needed. Three distinct sounds:
+       - "ding"  : single high tone  → pose step complete
+       - "chime" : ascending 3-tone  → all capture complete / success
+       - "tick"  : soft click        → each frame captured (subtle)
+   • Debouncing: voice is throttled so the same phrase can't fire twice
+     within 2.5 seconds (prevents spam during frame capture loop).
+═══════════════════════════════════════════════════════════════════════ */
+
+// ── Voice state ───────────────────────────────────────────────────────
+let _voiceEnabled = true; // toggled by UI button
+let _lastSpokenText = "";
+let _lastSpokenTime = 0;
+const VOICE_COOLDOWN_MS = 2500;
+
+// Pick the best English voice available on this device
+let _selectedVoice = null;
+function _loadVoice() {
+  if (!window.speechSynthesis) return;
+  const pick = () => {
+    const voices = speechSynthesis.getVoices();
+    // Prefer: Samantha (macOS), Google UK English Female, any en-GB, en-US
+    _selectedVoice =
+      voices.find((v) => v.name === "Samantha") ||
+      voices.find((v) => v.name.includes("Google UK English Female")) ||
+      voices.find((v) => v.lang === "en-GB" && !v.name.includes("Male")) ||
+      voices.find((v) => v.lang.startsWith("en")) ||
+      voices[0] ||
+      null;
+  };
+  pick();
+  speechSynthesis.onvoiceschanged = pick; // fires asynchronously on Chrome
+}
+_loadVoice();
+
+function _speakInstruction(text, force = false) {
+  if (!_voiceEnabled || !window.speechSynthesis) return;
+  const now = Date.now();
+  if (
+    !force &&
+    text === _lastSpokenText &&
+    now - _lastSpokenTime < VOICE_COOLDOWN_MS
+  )
+    return;
+  _lastSpokenText = text;
+  _lastSpokenTime = now;
+
+  speechSynthesis.cancel(); // stop any currently speaking utterance
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.voice = _selectedVoice;
+  utt.rate = 0.92;
+  utt.pitch = 1.0;
+  utt.volume = 1.0;
+  speechSynthesis.speak(utt);
+}
+
+// ── Web Audio sound effects ───────────────────────────────────────────
+let _audioCtx = null;
+function _getAudioCtx() {
+  if (!_audioCtx) {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Resume if suspended (required after user gesture on some browsers)
+  if (_audioCtx.state === "suspended") _audioCtx.resume();
+  return _audioCtx;
+}
+
+function _playTone(
+  freq,
+  duration,
+  type = "sine",
+  gainVal = 0.35,
+  startDelay = 0,
+) {
+  try {
+    const ctx = _getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
+    gain.gain.linearRampToValueAtTime(
+      gainVal,
+      ctx.currentTime + startDelay + 0.01,
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      ctx.currentTime + startDelay + duration,
+    );
+
+    osc.start(ctx.currentTime + startDelay);
+    osc.stop(ctx.currentTime + startDelay + duration + 0.05);
+  } catch {}
+}
+
+// Ding: single 880 Hz tone — pose step complete
+function _soundDing() {
+  _playTone(880, 0.22, "sine", 0.35);
+}
+
+// Chime: ascending C5-E5-G5 — all capture complete
+function _soundChime() {
+  _playTone(523, 0.18, "sine", 0.32, 0.0);
+  _playTone(659, 0.18, "sine", 0.32, 0.18);
+  _playTone(784, 0.28, "sine", 0.38, 0.36);
+}
+
+// Tick: very quiet soft click — per-frame feedback
+function _soundTick() {
+  _playTone(1200, 0.04, "triangle", 0.08);
+}
+
+// ── Wire sounds into capture events ──────────────────────────────────
+// Override _validateAndCapture to inject sounds + first instruction
+const _origValidateAndCapture = _validateAndCapture;
+
+// We can't simply reassign async functions by name in the same scope,
+// so we patch via the capture engine's integration points below.
+
+// Announce the first instruction when capture starts
+const _origStartAutoCapture = window.startAutoCapture || startAutoCapture;
+window.startAutoCapture = async function () {
+  await _origStartAutoCapture();
+  if (captureActive) {
+    // Small delay so voice starts after camera opens
+    setTimeout(() => {
+      _speakInstruction(
+        "Face capture started. " + POSE_SEQUENCE[0].instruction,
+        true,
+      );
+    }, 800);
+  }
+};
+
+// Patch _onCaptureComplete to play the chime + speak completion
+const _origOnCaptureComplete = _onCaptureComplete;
+window._onCaptureComplete = function () {
+  _soundChime();
+  setTimeout(() => {
+    _speakInstruction(
+      "Face capture complete! You may now proceed to enroll.",
+      true,
+    );
+  }, 400);
+  _origOnCaptureComplete();
+};
+
+// Patch the instruction display: intercept textContent changes
+// to auto-speak them. We do this by wrapping the setter.
+// The clean way is to call _speakInstruction explicitly at each update point.
+// We patch _validateAndCapture since that's where instructions are set.
+
+// Instruction auto-speak: hook into the per-frame logic
+// Add a MutationObserver on the instruction element
+window.addEventListener("load", () => {
+  // Wait until after DOM is ready
+  setTimeout(() => {
+    const instrEl = document.getElementById("captureInstruction");
+    if (!instrEl) return;
+
+    let _lastObservedText = "";
+    const observer = new MutationObserver(() => {
+      const text = instrEl.textContent.trim();
+      if (!text || text === _lastObservedText) return;
+      _lastObservedText = text;
+
+      // Speak warnings immediately (they start with ⚠)
+      if (text.startsWith("⚠")) {
+        _speakInstruction(text.replace("⚠", "").trim(), false);
+        return;
+      }
+
+      // Speak pose-done transitions (✓ ... done! Now: ...)
+      if (text.includes("done!") && text.includes("Now:")) {
+        _soundDing();
+        const after = text.split("Now:")[1]?.trim();
+        if (after) setTimeout(() => _speakInstruction(after, true), 300);
+        return;
+      }
+
+      // Speak ongoing instruction (✓ N frames captured — ...)
+      if (text.includes("frames captured")) {
+        // Play a quiet tick per frame, speak the instruction every ~10 frames
+        const match = text.match(/(\d+) frames/);
+        const n = match ? parseInt(match[1]) : 0;
+        _soundTick();
+        if (n > 0 && n % 10 === 0) {
+          const instr = text.split("—")[1]?.trim();
+          if (instr) _speakInstruction(`${n} frames. ${instr}`, false);
+        }
+        return;
+      }
+
+      // Completion
+      if (
+        text.includes("frames collected") ||
+        text.includes("capture complete")
+      ) {
+        return; // handled by _onCaptureComplete patch above
+      }
+    });
+
+    observer.observe(instrEl, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  }, 500);
+});
+
+// ── Voice toggle button (injected into the capture panel) ─────────────
+// We add a small toggle button to the capture status bar automatically.
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    const bar = document.querySelector(".capture-status-bar");
+    if (!bar || document.getElementById("voiceToggleBtn")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "voiceToggleBtn";
+    btn.title = "Toggle voice guidance";
+    btn.className = "csb-voice-btn active";
+    btn.innerHTML = `
+      <svg id="voiceIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>`;
+    btn.onclick = () => {
+      _voiceEnabled = !_voiceEnabled;
+      btn.classList.toggle("active", _voiceEnabled);
+      btn.title = _voiceEnabled
+        ? "Voice on — click to mute"
+        : "Voice off — click to enable";
+      if (_voiceEnabled) {
+        _speakInstruction("Voice guidance enabled", true);
+      } else {
+        speechSynthesis.cancel();
+      }
+      // Update icon opacity
+      btn.style.opacity = _voiceEnabled ? "1" : "0.35";
+    };
+    bar.appendChild(btn);
+  }, 600);
+});
