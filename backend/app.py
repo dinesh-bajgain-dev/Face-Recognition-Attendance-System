@@ -55,6 +55,18 @@ def qexec(conn, sql, p=()):
     with conn.cursor() as c:
         c.execute(sql, p); return c.rowcount
 
+def total_attendance_days(conn, dept=None):
+    if dept:
+        row = qone(conn, """
+            SELECT COUNT(DISTINCT a.date) AS total_days
+            FROM attendance a
+            JOIN students s ON s.student_id = a.student_id
+            WHERE s.department = %s
+        """, (dept,))
+    else:
+        row = qone(conn, "SELECT COUNT(DISTINCT date) AS total_days FROM attendance")
+    return int(row["total_days"] or 0) if row else 0
+
 def init_db():
     conn = psycopg2.connect(PG_DSN)
     conn.autocommit = True
@@ -341,11 +353,12 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
     pct = "—"
     try:
         with get_db() as conn:
+            total_days = total_attendance_days(conn)
             row = qone(conn, """
                 SELECT ROUND(100.0*COUNT(*) FILTER(WHERE status='Present')
-                       /NULLIF(COUNT(DISTINCT date),0),1) AS pct
+                       /NULLIF(%s,0),1) AS pct
                 FROM attendance WHERE student_id=%s
-            """, (student_id,))
+            """, (total_days, student_id))
             if row and row["pct"] is not None:
                 pct = f"{row['pct']}%"
     except: pass
@@ -653,13 +666,14 @@ def get_student(sid):
         """, (sid,))
         if not s: return jsonify({"error":"Not found"}), 404
 
+        total_days = total_attendance_days(conn)
         stats = qone(conn, """
             SELECT COUNT(*) FILTER(WHERE status='Present') AS total_present,
-                   COUNT(DISTINCT date) AS total_days,
+                   %s::int AS total_days,
                    ROUND(100.0*COUNT(*) FILTER(WHERE status='Present')
-                         /NULLIF(COUNT(DISTINCT date),0),1) AS percentage
+                         /NULLIF(%s::int,0),1) AS percentage
             FROM attendance WHERE student_id=%s
-        """, (sid,))
+        """, (total_days, total_days, sid))
 
         monthly = qall(conn, """
             SELECT TO_CHAR(date,'Mon YYYY') AS month,
@@ -1127,15 +1141,16 @@ def attendance_history():
 def attendance_stats():
     dept = request.args.get("department","").strip()
     with get_db() as conn:
+        total_days = total_attendance_days(conn, dept or None)
         sql = """
             SELECT s.student_id, s.full_name, s.department,
                    COUNT(a.id) FILTER(WHERE a.status='Present') AS present_days,
-                   COUNT(DISTINCT a.date) AS total_days,
+                   %s::int AS total_days,
                    ROUND(100.0*COUNT(a.id) FILTER(WHERE a.status='Present')
-                         /NULLIF(COUNT(DISTINCT a.date),0),1) AS pct
+                         /NULLIF(%s::int,0),1) AS pct
             FROM students s LEFT JOIN attendance a ON a.student_id=s.student_id
         """
-        params = []
+        params = [total_days, total_days]
         if dept: sql += " WHERE s.department=%s"; params.append(dept)
         sql += " GROUP BY s.student_id,s.full_name,s.department ORDER BY pct DESC NULLS LAST"
         rows = qall(conn, sql, params)
