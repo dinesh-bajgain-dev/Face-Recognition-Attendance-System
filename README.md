@@ -50,11 +50,11 @@ Flask API  ───────────────────────
 
 ## Prerequisites
 
-| Tool | Version | Notes |
-|------|---------|-------|
-| Python | 3.11 or 3.12 | 3.13 works but insightface may need manual build |
-| PostgreSQL | 16+ | With `pgvector` extension |
-| pgvector | 0.7+ | Installed as a PostgreSQL extension |
+| Tool       | Version      | Notes                                            |
+| ---------- | ------------ | ------------------------------------------------ |
+| Python     | 3.11 or 3.12 | 3.13 works but insightface may need manual build |
+| PostgreSQL | 16+          | With `pgvector` extension                        |
+| pgvector   | 0.7+         | Installed as a PostgreSQL extension              |
 
 > **No TensorFlow, no dlib, no MongoDB.** The stack was completely redesigned. InsightFace with ONNX Runtime handles all face detection and recognition without TensorFlow.
 
@@ -65,6 +65,7 @@ Flask API  ───────────────────────
 ### 1. Install PostgreSQL and pgvector
 
 **Mac**
+
 ```bash
 brew install postgresql@16 pgvector
 brew services start postgresql@16
@@ -72,6 +73,7 @@ export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"   # add to ~/.zshrc
 ```
 
 **Ubuntu / Debian**
+
 ```bash
 sudo apt update
 sudo apt install postgresql postgresql-contrib postgresql-16-pgvector
@@ -141,6 +143,7 @@ The server starts on `http://0.0.0.0:5050`. On first start, `init_db()` creates 
 ```
 
 Verify everything is healthy:
+
 ```bash
 curl http://localhost:5050/api/health
 # {"status":"ok","db":"ok","pgvector":"ok"}
@@ -169,6 +172,7 @@ Visit **http://localhost:8080** and sign in with:
 ## Using the System
 
 ### Enroll a Student
+
 1. Go to the **Enroll** page
 2. Fill in Student ID, Full Name, Department, Email, Phone
 3. Either:
@@ -181,6 +185,7 @@ The backend detects faces in every image, averages all embeddings into one vecto
 > If the same face already exists under a different student ID (similarity > 92%), enrollment is rejected to prevent duplicate registrations.
 
 ### Live Recognition
+
 1. Go to the **Recognize** page
 2. Click **▶ Start Camera** — the backend opens the webcam and streams MJPEG to the browser
 3. Students in frame are identified automatically. Bounding boxes are drawn — green for known, red for unknown
@@ -189,6 +194,7 @@ The backend detects faces in every image, averages all embeddings into one vecto
 6. Alternatively, click **Upload Image** to recognize a single photo
 
 ### Attendance Page
+
 - **Faculty tabs** across the top — one tab per department (auto-generated from enrolled students)
 - **All tab** shows a summary card per faculty with present/absent counts and an attendance rate bar
 - **Individual faculty tab** shows a header card with stats and a student-by-student table
@@ -196,18 +202,21 @@ The backend detects faces in every image, averages all embeddings into one vecto
 - **Export CSV** — on the All tab exports all students; on a faculty tab exports a formatted CSV with a faculty header block (name, date, enrolled count, present, absent, rate)
 
 ### Dashboard
+
 - 4 stat cards: registered students, present today, absent today, attendance rate
 - 30-day stacked bar chart
 - Live recognition event feed (updates via SSE when camera is active)
 - Today's searchable attendance table
 
 ### Reports & Analytics
+
 - Date-range selector for historical analysis
 - Monthly attendance trend (line chart)
 - Per-department attendance rate (bar chart)
 - Per-student percentage table with color-coded status: **On Track** (≥75%), **At Risk** (≥50%), **Critical** (<50%)
 
 ### Students Page
+
 - Card grid with search and department filter
 - Click any card to open the full student profile
 - Profile shows: metadata, attendance percentage with progress bar, monthly chart, recent recognition log
@@ -218,31 +227,31 @@ The backend detects faces in every image, averages all embeddings into one vecto
 
 All routes are served on port `5050`. Write routes require `Authorization: Bearer <token>` header.
 
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/api/health` | — | DB + pgvector status check |
-| POST | `/api/auth/login` | — | Login, returns auth token |
-| GET | `/api/auth/me` | ✓ | Current user info |
-| GET | `/api/students` | — | List students; `?q=` search, `?department=` filter |
-| GET | `/api/students/<id>` | — | Full profile with stats, monthly data, recognition logs |
-| GET | `/api/students/<id>/photo` | — | Enrolled face thumbnail (JPEG) |
-| PUT | `/api/students/<id>` | ✓ | Update student profile fields |
-| DELETE | `/api/students/<id>` | ✓ | Remove student (cascades attendance) |
-| GET | `/api/departments` | — | Distinct department list for dropdowns |
-| POST | `/api/enroll` | — | Enroll student — accepts images or JSON webcam frames, generates embedding |
-| POST | `/api/recognize` | — | Identify face in base64 image, mark attendance |
-| POST | `/api/camera/start` | — | Activate live camera stream |
-| POST | `/api/camera/stop` | — | Stop camera and release resource |
-| GET | `/api/stream` | — | MJPEG live stream (annotated frames) |
-| GET | `/api/events` | — | Server-Sent Events — pushes `{"type":"attendance",...}` on each mark |
-| GET | `/api/attendance` | — | Attendance for `?date=YYYY-MM-DD`; `?department=` filter |
-| GET | `/api/attendance/faculty-summary` | — | Per-faculty breakdown with student lists for a date |
-| GET | `/api/attendance/history` | — | 30-day present/absent counts for charts |
-| GET | `/api/attendance/stats` | — | Per-student attendance percentages |
-| GET | `/api/attendance/export` | — | CSV download; `?department=` adds faculty header block |
-| GET | `/api/logs` | — | Recent recognition events; `?limit=N` |
-| GET | `/api/settings` | — | Current threshold and frame-skip values |
-| PUT | `/api/settings` | ✓ | Update threshold/frame-skip at runtime |
+| Method | Endpoint                          | Auth | Description                                                                |
+| ------ | --------------------------------- | ---- | -------------------------------------------------------------------------- |
+| GET    | `/api/health`                     | —    | DB + pgvector status check                                                 |
+| POST   | `/api/auth/login`                 | —    | Login, returns auth token                                                  |
+| GET    | `/api/auth/me`                    | ✓    | Current user info                                                          |
+| GET    | `/api/students`                   | —    | List students; `?q=` search, `?department=` filter                         |
+| GET    | `/api/students/<id>`              | —    | Full profile with stats, monthly data, recognition logs                    |
+| GET    | `/api/students/<id>/photo`        | —    | Enrolled face thumbnail (JPEG)                                             |
+| PUT    | `/api/students/<id>`              | ✓    | Update student profile fields                                              |
+| DELETE | `/api/students/<id>`              | ✓    | Remove student (cascades attendance)                                       |
+| GET    | `/api/departments`                | —    | Distinct department list for dropdowns                                     |
+| POST   | `/api/enroll`                     | —    | Enroll student — accepts images or JSON webcam frames, generates embedding |
+| POST   | `/api/recognize`                  | —    | Identify face in base64 image, mark attendance                             |
+| POST   | `/api/camera/start`               | —    | Activate live camera stream                                                |
+| POST   | `/api/camera/stop`                | —    | Stop camera and release resource                                           |
+| GET    | `/api/stream`                     | —    | MJPEG live stream (annotated frames)                                       |
+| GET    | `/api/events`                     | —    | Server-Sent Events — pushes `{"type":"attendance",...}` on each mark       |
+| GET    | `/api/attendance`                 | —    | Attendance for `?date=YYYY-MM-DD`; `?department=` filter                   |
+| GET    | `/api/attendance/faculty-summary` | —    | Per-faculty breakdown with student lists for a date                        |
+| GET    | `/api/attendance/history`         | —    | 30-day present/absent counts for charts                                    |
+| GET    | `/api/attendance/stats`           | —    | Per-student attendance percentages                                         |
+| GET    | `/api/attendance/export`          | —    | CSV download; `?department=` adds faculty header block                     |
+| GET    | `/api/logs`                       | —    | Recent recognition events; `?limit=N`                                      |
+| GET    | `/api/settings`                   | —    | Current threshold and frame-skip values                                    |
+| PUT    | `/api/settings`                   | ✓    | Update threshold/frame-skip at runtime                                     |
 
 ---
 
@@ -296,16 +305,16 @@ Everything else — recognition, attendance marking, SSE broadcast — is identi
 
 ## Troubleshooting
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| `set_session cannot be used inside a transaction` | Old psycopg2 misuse | Ensure `get_db()` does **not** set `conn.autocommit` after connecting — it's the default |
-| `pgvector: "missing"` in health check | Extension not enabled | Run `psql -d frs -c "CREATE EXTENSION vector;"` |
-| `could not find a version that satisfies tensorflow` | Python 3.13 not supported by TF | Not needed — project uses InsightFace + ONNX Runtime instead |
-| `insightface` install error | Missing C++ build tools | Mac: `xcode-select --install` · Ubuntu: `sudo apt install build-essential` |
-| Camera not opening | Permission denied | macOS: System Settings → Privacy → Camera → allow Terminal/Python |
-| `No face detected` | Poor lighting or angle | Use frontal face, adequate light. Threshold can be lowered to `0.75` for testing |
-| CORS error in browser | Wrong API port | Confirm backend runs on port `5050` and `flask-cors` is installed |
-| Login fails with correct password | DB not seeded | Backend `init_db()` inserts default admin on first start — ensure it ran successfully |
+| Error                                                | Cause                           | Fix                                                                                      |
+| ---------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `set_session cannot be used inside a transaction`    | Old psycopg2 misuse             | Ensure `get_db()` does **not** set `conn.autocommit` after connecting — it's the default |
+| `pgvector: "missing"` in health check                | Extension not enabled           | Run `psql -d frs -c "CREATE EXTENSION vector;"`                                          |
+| `could not find a version that satisfies tensorflow` | Python 3.13 not supported by TF | Not needed — project uses InsightFace + ONNX Runtime instead                             |
+| `insightface` install error                          | Missing C++ build tools         | Mac: `xcode-select --install` · Ubuntu: `sudo apt install build-essential`               |
+| Camera not opening                                   | Permission denied               | macOS: System Settings → Privacy → Camera → allow Terminal/Python                        |
+| `No face detected`                                   | Poor lighting or angle          | Use frontal face, adequate light. Threshold can be lowered to `0.75` for testing         |
+| CORS error in browser                                | Wrong API port                  | Confirm backend runs on port `5050` and `flask-cors` is installed                        |
+| Login fails with correct password                    | DB not seeded                   | Backend `init_db()` inserts default admin on first start — ensure it ran successfully    |
 
 ---
 
