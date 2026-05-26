@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   FRS · app.js  –  Frontend application logic
+   वेदनेत्रम् · app.js  –  Frontend application logic
    Architecture:
      • All server communication through api() helper (adds auth token)
      • navigate() switches pages and fires load functions
