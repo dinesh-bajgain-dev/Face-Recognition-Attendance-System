@@ -1,4 +1,4 @@
-# FRS · Face Recognition Attendance System
+# वेदनेत्रम् · Face Recognition Attendance System
 
 An AI-powered attendance management system for academic institutions. Students are identified automatically from a webcam or CCTV feed using facial recognition, attendance is marked in real time, and faculty-wise reports are available instantly from a web dashboard.
 
