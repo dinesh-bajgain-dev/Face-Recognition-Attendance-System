@@ -349,7 +349,6 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
     """
     if not EMAIL_ENABLED or not email_to:
         return
-    # Fetch attendance percentage for the email body
     pct = "—"
     try:
         with get_db() as conn:
@@ -370,6 +369,126 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
 <head><meta charset="utf-8"/></head>
 <body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
+    <tr><td align="center">
+        <table width="560" cellpadding="0" cellspacing="0"
+                     style="background:#ffffff;border-radius:10px;overflow:hidden;
+                                    box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+            <!-- Header -->
+            <tr><td style="background:#1B2A4A;padding:28px 36px;">
+                <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;
+                                letter-spacing:0.04em;">वेदनेत्रम्</p>
+                <p style="margin:4px 0 0;font-size:13px;color:#93C5FD;">
+                    Automated Attendance Notification</p>
+            </td></tr>
+
+            <!-- Green status bar -->
+            <tr><td style="background:#166534;padding:14px 36px;">
+                <p style="margin:0;font-size:15px;font-weight:600;color:#DCFCE7;">
+                    ✓ &nbsp;Attendance Marked Successfully</p>
+            </td></tr>
+
+            <!-- Body -->
+            <tr><td style="padding:32px 36px;">
+                <p style="margin:0 0 20px;font-size:15px;color:#374151;">
+                    Dear <strong>{name}</strong>,</p>
+                <p style="margin:0 0 24px;font-size:14px;color:#6B7280;line-height:1.7;">
+                    Your attendance has been recorded for today's session.
+                    Below are the details of your attendance entry.</p>
+
+                <!-- Details table -->
+                <table width="100%" cellpadding="0" cellspacing="0"
+                             style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;
+                                            margin-bottom:24px;">
+                    <tr style="background:#F9FAFB;">
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;width:40%;">Student ID</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{student_id}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;">Department</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{dept or '—'}</td>
+                    </tr>
+                    <tr style="background:#F9FAFB;">
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;">Date</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{att_date}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;">Time</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{att_time}</td>
+                    </tr>
+                    <tr style="background:#F9FAFB;">
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;">
+                            Attendance Rate</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:700;
+                                             color:#166534;">{pct}</td>
+                    </tr>
+                </table>
+
+                <p style="margin:0 0 8px;font-size:13px;color:#6B7280;line-height:1.6;">
+                    This is an automated message from the Face Recognition Attendance System.
+                    Please do not reply to this email.</p>
+            </td></tr>
+
+            <!-- Footer -->
+            <tr><td style="background:#F9FAFB;padding:20px 36px;
+                                         border-top:1px solid #E5E7EB;">
+                <p style="margin:0;font-size:12px;color:#9CA3AF;">
+                    © 2026 Face Recognition Attendance System · Automated Notification</p>
+            </td></tr>
+        </table>
+    </td></tr>
+</table>
+</body>
+</html>"""
+    try:
+        _email_queue.put_nowait({
+            "to_addr":    email_to,
+            "subject":    subject,
+            "html_body":  html,
+            "student_id": student_id,
+        })
+    except queue.Full:
+        pass  # queue full — skip silently, don't slow recognition
+
+def queue_attendance_summary_email(student_id, name, dept, att_date, att_time, status, email_to):
+    """Queue a personalized attendance summary email for one student."""
+    if not EMAIL_ENABLED or not email_to:
+        return
+    pct = "—"
+    try:
+        with get_db() as conn:
+            total_days = total_attendance_days(conn)
+            row = qone(conn, """
+                SELECT ROUND(100.0*COUNT(*) FILTER(WHERE status='Present')
+                       /NULLIF(%s,0),1) AS pct
+                FROM attendance WHERE student_id=%s
+            """, (total_days, student_id))
+            if row and row["pct"] is not None:
+                pct = f"{row['pct']}%"
+    except: pass
+
+    status_label = status if status else "Absent"
+    status_color = "#166534" if status_label == "Present" else "#991b1b"
+    status_bg = "#DCFCE7" if status_label == "Present" else "#FEE2E2"
+    status_text = (
+        f"Marked present at {att_time}" if status_label == "Present"
+        else "Not marked present today"
+    )
+    subject = f"Daily Attendance Summary — {att_date}"
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"/></head>
+<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
   <tr><td align="center">
     <table width="560" cellpadding="0" cellspacing="0"
            style="background:#ffffff;border-radius:10px;overflow:hidden;
@@ -378,15 +497,15 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
       <!-- Header -->
       <tr><td style="background:#1B2A4A;padding:28px 36px;">
         <p style="margin:0;font-size:22px;font-weight:700;color:#ffffff;
-                  letter-spacing:0.04em;">FRS Attendance System</p>
+              letter-spacing:0.04em;">वेदनेत्रम्</p>
         <p style="margin:4px 0 0;font-size:13px;color:#93C5FD;">
           Automated Attendance Notification</p>
       </td></tr>
 
-      <!-- Green status bar -->
-      <tr><td style="background:#166534;padding:14px 36px;">
-        <p style="margin:0;font-size:15px;font-weight:600;color:#DCFCE7;">
-          ✓ &nbsp;Attendance Marked Successfully</p>
+            <!-- Status bar -->
+            <tr><td style="background:{status_color};padding:14px 36px;">
+                <p style="margin:0;font-size:15px;font-weight:600;color:{status_bg};">
+                    {'✓' if status_label == 'Present' else '○'} &nbsp;Attendance {status_label}</p>
       </td></tr>
 
       <!-- Body -->
@@ -394,8 +513,7 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
         <p style="margin:0 0 20px;font-size:15px;color:#374151;">
           Dear <strong>{name}</strong>,</p>
         <p style="margin:0 0 24px;font-size:14px;color:#6B7280;line-height:1.7;">
-          Your attendance has been recorded for today's session.
-          Below are the details of your attendance entry.</p>
+                    Here is your attendance summary for today's session.</p>
 
         <!-- Details table -->
         <table width="100%" cellpadding="0" cellspacing="0"
@@ -422,8 +540,20 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
           <tr>
             <td style="padding:12px 16px;font-size:13px;color:#6B7280;
                        border-bottom:1px solid #E5E7EB;">Time</td>
-            <td style="padding:12px 16px;font-size:13px;font-weight:600;
-                       color:#111827;border-bottom:1px solid #E5E7EB;">{att_time}</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{att_time or '—'}</td>
+                    </tr>
+                    <tr style="background:#F9FAFB;">
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;">Status</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{status_label}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding:12px 16px;font-size:13px;color:#6B7280;
+                                             border-bottom:1px solid #E5E7EB;">Summary</td>
+                        <td style="padding:12px 16px;font-size:13px;font-weight:600;
+                                             color:#111827;border-bottom:1px solid #E5E7EB;">{status_text}</td>
           </tr>
           <tr style="background:#F9FAFB;">
             <td style="padding:12px 16px;font-size:13px;color:#6B7280;">
@@ -458,6 +588,34 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to)
         })
     except queue.Full:
         pass  # queue full — skip silently, don't slow recognition
+
+def _send_bulk_attendance_emails(att_date):
+    with get_db() as conn:
+        total_days = total_attendance_days(conn)
+        rows = qall(conn, """
+            SELECT s.student_id, s.full_name, s.department, s.email,
+                   COALESCE(a.time::text, '') AS time,
+                   COALESCE(a.status, 'Absent') AS status
+            FROM students s
+            LEFT JOIN attendance a
+                   ON a.student_id = s.student_id AND a.date = %s
+            WHERE s.email IS NOT NULL AND s.email <> ''
+            ORDER BY s.full_name
+        """, (att_date,))
+
+    queued = 0
+    for r in rows:
+        queue_attendance_summary_email(
+            r["student_id"],
+            r["full_name"],
+            r["department"],
+            att_date,
+            r["time"] or "—",
+            r["status"],
+            r["email"],
+        )
+        queued += 1
+    return {"total_days": total_days, "queued": queued}
 
 # ── SSE ───────────────────────────────────────────────────────────────────
 _sse_clients = []
@@ -1228,6 +1386,23 @@ def email_logs():
             FROM email_log ORDER BY sent_at DESC LIMIT 50
         """)
     return jsonify({"logs": rows})
+
+@app.route("/api/email/send-attendance-summary", methods=["POST"])
+@require_auth
+def send_attendance_summary():
+    if not EMAIL_ENABLED:
+        return jsonify({"error": "Email not configured. Set SENDGRID_API_KEY and SENDGRID_FROM in .env"}), 503
+
+    att_date = (request.json or {}).get("date", date.today().isoformat())
+
+    def _worker():
+        try:
+            _send_bulk_attendance_emails(att_date)
+        except Exception as e:
+            print(f"[bulk_email] Unhandled error: {e}")
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"queued": True, "date": att_date})
 
 # ── Settings ──────────────────────────────────────────────────────────────
 @app.route("/api/settings")
