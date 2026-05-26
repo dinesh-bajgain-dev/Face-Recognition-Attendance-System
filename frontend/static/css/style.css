@@ -108,7 +108,7 @@ body {
 .sidebar-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 15px;
   padding: 0 1.25rem 1.5rem;
   border-bottom: 1px solid var(--border);
   margin-bottom: 0.75rem;
@@ -121,7 +121,7 @@ body {
 }
 .logo-text {
   font-family: var(--mono);
-  font-size: 15px;
+  font-size: 30px;
   font-weight: 700;
   letter-spacing: 0.12em;
 }
