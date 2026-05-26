@@ -1,12 +1,12 @@
 #!/bin/bash
-# FRS - Face Recognition System startup script
+# वेदनेत्रम् - Face Recognition System startup script
 
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo "  ┌─────────────────────────────────────┐"
-echo "  │   FRS · Face Recognition System     │"
+echo "  │   वेदनेत्रम् · Face Recognition System     │"
 echo "  └─────────────────────────────────────┘"
 echo ""
 
