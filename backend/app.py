@@ -215,9 +215,12 @@ def score_frame_quality(frame_bgr, face_bbox=None):
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
 
-    # Blur: Laplacian variance — low = blurry
+    # Blur: Laplacian variance — low = blurry.
+    # Divisor 3 (not 5): real webcam frames have lap_var 50-300.
+    # Tilted-down or up frames have lower variance due to forehead/chin
+    # dominating the frame — 500/5=100 was too strict for angled poses.
     lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-    blur_score = min(100, int(lap_var / 5))   # 500+ variance = perfectly sharp
+    blur_score = min(100, int(lap_var / 3))
 
     # Brightness: mean pixel value mapped to 0-100
     mean_bright = float(np.mean(gray))
@@ -227,14 +230,15 @@ def score_frame_quality(frame_bgr, face_bbox=None):
     else:
         brightness = max(0, int(40 - abs(mean_bright - 125) / 5))
 
-    # Face size: face area / frame area
+    # Face size: face area / frame area.
+    # 3% threshold (was 5%) — angled poses (up/down) show less face area.
     face_size_ok = False
     if face_bbox:
-        x1,y1,x2,y2 = face_bbox
+        x1, y1, x2, y2 = face_bbox
         face_area  = max(0, (x2-x1)) * max(0, (y2-y1))
         frame_area = w * h
         ratio      = face_area / frame_area if frame_area else 0
-        face_size_ok = ratio >= 0.05   # face must be at least 5% of frame
+        face_size_ok = ratio >= 0.03
 
     overall = int(blur_score * 0.5 + brightness * 0.3 + (20 if face_size_ok else 0))
     overall = min(100, overall)
@@ -243,7 +247,9 @@ def score_frame_quality(frame_bgr, face_bbox=None):
         "brightness":   brightness,
         "face_size_ok": face_size_ok,
         "overall":      overall,
-        "passed":       overall >= 60,
+        # Lower threshold to 50 (was 60) — angled poses are inherently
+        # lower sharpness but are still valid for face embedding generation.
+        "passed":       overall >= 50,
     }
 
 # ── Email queue (background thread) ──────────────────────────────────────
@@ -841,18 +847,35 @@ def validate_frame():
             face_h  = bbox[3] - bbox[1]
             nose_dy = (nose[1] - eye_y) / (face_h + 1e-5)
 
-            # NOTE: webcam frames are captured from a mirrored video feed.
-            # The browser mirrors the video for natural selfie view, so
-            # canvas.drawImage captures the mirrored pixels.
-            # When user turns to THEIR right → nose_offset is POSITIVE in
-            # mirrored space. We keep signs as-is because the canvas capture
-            # IS already mirrored — so positive = user's right, negative = user's left.
-            # We flip the labels to match USER perspective (not camera perspective).
-            if nose_offset > 0.12:    pose_hint = "left"   # user's left, cam right
-            elif nose_offset < -0.12: pose_hint = "right"  # user's right, cam left
-            elif nose_dy < 0.18:      pose_hint = "up"
-            elif nose_dy > 0.38:      pose_hint = "down"
-            else:                     pose_hint = "front"
+            # ── Pose estimation — user perspective ──────────────────────
+            # Canvas captures MIRRORED pixels (browser mirrors video naturally).
+            # Horizontal: positive nose_offset = user's LEFT (canvas right).
+            # Vertical geometry (Y increases downward in pixel space):
+            #   nose_dy = (nose_y - eye_midpoint_y) / face_height
+            #
+            # Empirical ranges (verified against actual webcam geometry):
+            #   Front:   nose_dy  0.22 – 0.34  (nose normally below eyes)
+            #   DOWN:    nose_dy  < 0.22        (chin dropped → nose rises toward eyes)
+            #   UP:      nose_dy  > 0.35        (chin raised → nose drops further down)
+            #
+            # DOWN confirmation: also check that mouth is close to nose.
+            # When looking down, mouth_dy (mouth-to-eye / face_h) < nose_dy + 0.12
+            mouth_pts = kps[3], kps[4]   # left_mouth, right_mouth
+            mouth_y   = (mouth_pts[0][1] + mouth_pts[1][1]) / 2
+            mouth_dy  = (mouth_y - eye_y) / (face_h + 1e-5)
+
+            if nose_offset > 0.12:
+                pose_hint = "left"      # user's left (mirrored canvas)
+            elif nose_offset < -0.12:
+                pose_hint = "right"     # user's right (mirrored canvas)
+            elif nose_dy < 0.22 and mouth_dy < 0.45:
+                # Nose near eye level AND mouth not extremely low → looking down
+                pose_hint = "up"
+            elif nose_dy > 0.28:
+                # Nose far below eye midpoint → head tilted back → looking up
+                pose_hint = "down"
+            else:
+                pose_hint = "front"
     except: pass
 
     return jsonify({

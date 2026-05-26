@@ -82,6 +82,19 @@ function badge(status) {
   return `<span class="${status === "Present" ? "badge-present" : "badge-absent"}">${status}</span>`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getStudentName(record) {
+  return (record?.name || record?.full_name || "").trim();
+}
+
 /* ── Auth ────────────────────────────────────────────────────────────── */
 function showLogin() {
   document.getElementById("loginOverlay").classList.remove("hidden");
@@ -199,9 +212,9 @@ async function loadDashboard() {
     document.getElementById("statRate").textContent = rate;
 
     renderHistoryChart(hist.history);
-    renderRecentLogs(logs.logs);
     dashRecords = att.records;
     renderDashTable(dashRecords);
+    renderRecentLogs(logs.logs);
   } catch (e) {
     console.error(e);
   }
@@ -238,6 +251,7 @@ function renderHistoryChart(history) {
 
 function renderRecentLogs(logs) {
   const el = document.getElementById("recentLogs");
+  if (!el) return;
   el.innerHTML =
     logs
       .slice(0, 15)
@@ -252,12 +266,12 @@ function renderRecentLogs(logs) {
 }
 
 function renderDashTable(records) {
-  document.getElementById("dashTableBody").innerHTML = records
+  document.getElementById("dashTableBody").innerHTML = (records || [])
     .map(
       (r) => `
     <tr>
       <td style="font-family:var(--mono);font-size:12px">${r.student_id}</td>
-      <td><a onclick="viewProfile('${r.student_id}')">${r.name}</a></td>
+      <td><a onclick="viewProfile('${r.student_id}')">${escapeHtml(getStudentName(r))}</a></td>
       <td style="color:var(--text3)">${r.department || "—"}</td>
       <td style="font-family:var(--mono);font-size:12px">${r.time}</td>
       <td>${badge(r.status)}</td>
@@ -267,8 +281,9 @@ function renderDashTable(records) {
 }
 
 function filterDashTable(q) {
+  const query = q.toLowerCase();
   const filtered = dashRecords.filter((r) =>
-    r.name.toLowerCase().includes(q.toLowerCase()),
+    getStudentName(r).toLowerCase().includes(query),
   );
   renderDashTable(filtered);
 }
@@ -1464,11 +1479,36 @@ window.enrollStudent = async function () {
 ═══════════════════════════════════════════════════════════════════════ */
 
 const POSE_SEQUENCE = [
-  { pose: "front", target: 20, instruction: "Look straight at the camera" },
-  { pose: "left", target: 10, instruction: "Slowly turn your head LEFT" },
-  { pose: "right", target: 10, instruction: "Slowly turn your head RIGHT" },
-  { pose: "up", target: 10, instruction: "Tilt your head slightly UP" },
-  { pose: "down", target: 10, instruction: "Tilt your head slightly DOWN" },
+  {
+    pose: "front",
+    target: 20,
+    instruction: "Look straight at the camera",
+    voiceInstruction: "Look straight at the camera",
+  },
+  {
+    pose: "left",
+    target: 10,
+    instruction: "Turn your head to your LEFT",
+    voiceInstruction: "Turn your head to your left",
+  },
+  {
+    pose: "right",
+    target: 10,
+    instruction: "Turn your head to your RIGHT",
+    voiceInstruction: "Turn your head to your right",
+  },
+  {
+    pose: "up",
+    target: 10,
+    instruction: "Raise your chin slightly upward",
+    voiceInstruction: "Raise your chin slightly upward",
+  },
+  {
+    pose: "down",
+    target: 10,
+    instruction: "Lower your chin toward your chest",
+    voiceInstruction: "Lower your chin toward your chest",
+  },
 ];
 const TOTAL_TARGET = 60;
 
@@ -1691,15 +1731,25 @@ async function _validateAndCapture(video, w, h) {
           _captureComplete = true; // set BEFORE calling complete to block concurrent calls
           _onCaptureComplete();
         } else {
-          const nextStep = _getNextPoseStep();
+          // Use _getCurrentPoseStep() — it returns the FIRST step still incomplete.
+          // After incrementing requiredPose to its target, this is correctly the
+          // NEXT pose to collect (e.g. after front→left, it returns left).
+          // _getNextPoseStep() was wrong here: it returned the step AFTER left (right)
+          // because left had just become the "current" incomplete step.
+          const nextStep = _getCurrentPoseStep();
           if (nextStep) {
             _soundDing();
+            // Speak the next instruction with a short delay so the ding plays first
             setTimeout(
-              () => _speakInstruction(nextStep.instruction, true),
-              200,
+              () =>
+                _speakInstruction(
+                  nextStep.voiceInstruction || nextStep.instruction,
+                  true,
+                ),
+              300,
             );
             _setInstruction(
-              `✓ ${requiredPose.toUpperCase()} done!  →  ${nextStep.instruction}`,
+              `✓ ${requiredPose.toUpperCase()} done!  Now: ${nextStep.instruction}`,
             );
           } else if (total >= TOTAL_TARGET) {
             _captureComplete = true;
@@ -1708,8 +1758,13 @@ async function _validateAndCapture(video, w, h) {
         }
       }
     } else {
-      // Wrong pose — show direction hint
-      _setInstruction(currentStep.instruction);
+      // Wrong pose — show direction hint WITH what the system currently sees
+      // so the user knows the camera is working and what to adjust
+      const seenLabel =
+        currentPoseHint && currentPoseHint !== requiredPose
+          ? ` (seeing: ${currentPoseHint})`
+          : "";
+      _setInstruction(currentStep.instruction + seenLabel);
     }
   } catch (e) {
     // Network hiccup — silently continue
@@ -2592,7 +2647,8 @@ window.startAutoCapture = async function () {
     // Small delay so voice starts after camera opens
     setTimeout(() => {
       _speakInstruction(
-        "Face capture started. " + POSE_SEQUENCE[0].instruction,
+        "Face capture started. " +
+          (POSE_SEQUENCE[0].voiceInstruction || POSE_SEQUENCE[0].instruction),
         true,
       );
     }, 800);
@@ -2637,17 +2693,19 @@ window.addEventListener("load", () => {
         return;
       }
 
-      // Speak pose-done transitions (✓ ... done! Now: ...)
+      // Speak pose-done transitions (✓ ... done!  Now: ...)
+      // The transition message format is: "✓ POSE done!  Now: <next instruction>"
       if (text.includes("done!") && text.includes("Now:")) {
-        _soundDing();
-        const after = text.split("Now:")[1]?.trim();
-        if (after) setTimeout(() => _speakInstruction(after, true), 300);
+        // Sound is already played in _validateAndCapture — don't double-play.
+        // Voice is also already queued with 300ms delay in _validateAndCapture.
+        // Observer just needs to not interfere, so return early.
         return;
       }
 
-      // Speak ongoing instruction (✓ N frames captured — ...)
-      if (text.includes("frames captured")) {
-        // Play a quiet tick per frame, speak the instruction every ~10 frames
+      // Speak ongoing instruction (✓ N frames — <instruction>)
+      // Format: "✓ 12 frames — Look straight at the camera"
+      if (text.startsWith("✓") && text.includes("frames —")) {
+        // Play a quiet tick per frame, speak the instruction every 10 frames
         const match = text.match(/(\d+) frames/);
         const n = match ? parseInt(match[1]) : 0;
         _soundTick();
