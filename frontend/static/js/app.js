@@ -2282,6 +2282,26 @@ async function sendTestEmail() {
   else toast(d.error || "Failed", "err");
 }
 
+async function sendBulkAttendanceEmail() {
+  if (
+    !confirm(
+      "Send today's attendance summary to all registered students with email addresses?",
+    )
+  )
+    return;
+  const r = await api("/email/send-attendance-summary", {
+    method: "POST",
+    json: { date: todayStr() },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    toast(`Attendance emails queued for ${d.date}`);
+  } else {
+    toast(d.error || "Failed", "err");
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    ENROLL — Step navigation
 ═══════════════════════════════════════════════════════════════════════ */
