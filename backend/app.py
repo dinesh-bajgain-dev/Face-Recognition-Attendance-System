@@ -1040,10 +1040,10 @@ def validate_frame():
                 pose_hint = "left"      # user's left (mirrored canvas)
             elif nose_offset < -0.12:
                 pose_hint = "right"     # user's right (mirrored canvas)
-            elif nose_dy < 0.22 and mouth_dy < 0.45:
+            elif nose_dy < 0.18 and mouth_dy < 0.38:
                 # Nose near eye level AND mouth not extremely low → looking down
                 pose_hint = "up"
-            elif nose_dy > 0.28:
+            elif nose_dy > 0.25:
                 # Nose far below eye midpoint → head tilted back → looking up
                 pose_hint = "down"
             else:
