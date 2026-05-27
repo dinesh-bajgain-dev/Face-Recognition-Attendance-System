@@ -20,12 +20,18 @@ PG_DSN    = os.getenv("DATABASE_URL", "postgresql://frs_user:frs123@localhost:54
 THRESHOLD = float(os.getenv("RECOGNITION_THRESHOLD", "0.80"))
 SKIP      = int(os.getenv("FRAME_SKIP", "2"))
 
-# Email config — uses SendGrid API (more reliable than raw SMTP)
-# Sign up free at sendgrid.com, verify a sender address, generate an API key.
+# Email config — uses BREVO API (more reliable than raw SMTP)
+# Sign up free at brevo.com, verify a sender address, generate an API key.
 # Free tier: 100 emails/day indefinitely.
-SENDGRID_API_KEY  = os.getenv("SENDGRID_API_KEY", "")
-SENDGRID_FROM     = os.getenv("SENDGRID_FROM", "")     # verified sender email
-EMAIL_ENABLED     = bool(SENDGRID_API_KEY and SENDGRID_FROM)
+BREVO_API_KEY  = os.getenv("BREVO_API_KEY", "")
+BREVO_FROM     = os.getenv("BREVO_FROM", "")
+EMAIL_ENABLED  = bool(BREVO_API_KEY and BREVO_FROM)
+
+BREVO_HEADERS = {
+    "accept": "application/json",
+    "api-key": BREVO_API_KEY,
+    "content-type": "application/json"
+}
 
 # ── DB ────────────────────────────────────────────────────────────────────
 @contextmanager
@@ -283,64 +289,83 @@ def _email_worker():
 
 def _send_email_now(to_addr, subject, html_body, student_id, retry=0):
     """
-    Sends via SendGrid Web API (HTTPS POST).
-    No raw SMTP, no TLS port issues, works from any network.
-    Fallback: if sendgrid package not installed, uses urllib.
+    Sends email using Brevo API
     """
     if not EMAIL_ENABLED:
         return
 
-    # Deduplication check
     today = date.today().isoformat()
+
+    # Prevent duplicate emails
     try:
         with get_db() as conn:
             already = qone(conn, """
                 SELECT id FROM email_log
-                WHERE student_id=%s AND subject=%s AND sent_at::date=%s AND success=true
+                WHERE student_id=%s
+                  AND subject=%s
+                  AND sent_at::date=%s
+                  AND success=true
             """, (student_id, subject, today))
+
         if already:
             return
-    except: pass
+    except:
+        pass
 
     payload = json.dumps({
-        "personalizations": [{"to": [{"email": to_addr}]}],
-        "from":    {"email": SENDGRID_FROM},
+        "sender": {
+            "name": "Vedanetram",
+            "email": BREVO_FROM
+        },
+        "to": [
+            {
+                "email": to_addr
+            }
+        ],
         "subject": subject,
-        "content": [{"type": "text/html", "value": html_body}]
+        "htmlContent": html_body
     }).encode("utf-8")
 
     try:
-        import urllib.request, urllib.error
         req = urllib.request.Request(
-            "https://api.sendgrid.com/v3/mail/send",
-            data    = payload,
-            method  = "POST",
-            headers = {
-                "Content-Type":  "application/json",
-                "Authorization": f"Bearer {SENDGRID_API_KEY}",
-            }
+            "https://api.brevo.com/v3/smtp/email",
+            data=payload,
+            method="POST",
+            headers=BREVO_HEADERS
         )
+
         with urllib.request.urlopen(req, timeout=15) as resp:
-            status = resp.status   # 202 = accepted
+            status = resp.status
 
         with get_db() as conn:
             qexec(conn, """
-                INSERT INTO email_log (student_id, email_to, subject, success)
+                INSERT INTO email_log
+                (student_id, email_to, subject, success)
                 VALUES (%s,%s,%s,true)
             """, (student_id, to_addr, subject))
 
     except Exception as e:
         err = str(e)
+
         try:
             with get_db() as conn:
                 qexec(conn, """
-                    INSERT INTO email_log (student_id, email_to, subject, success, error_msg)
+                    INSERT INTO email_log
+                    (student_id, email_to, subject, success, error_msg)
                     VALUES (%s,%s,%s,false,%s)
                 """, (student_id, to_addr, subject, err))
-        except: pass
+        except:
+            pass
+
         if retry < 2:
             time.sleep(8 * (retry + 1))
-            _send_email_now(to_addr, subject, html_body, student_id, retry+1)
+            _send_email_now(
+                to_addr,
+                subject,
+                html_body,
+                student_id,
+                retry + 1
+            )
 
 def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to):
     """
@@ -1370,7 +1395,7 @@ def test_email():
     to = d.get("email","").strip()
     if not to: return jsonify({"error":"email required"}), 400
     if not EMAIL_ENABLED:
-        return jsonify({"error":"Email not configured. Set SENDGRID_API_KEY and SENDGRID_FROM in .env"}), 503
+        return jsonify({"error":"Email not configured. Set BREVO_API_KEY and BREVO_FROM in .env"}), 503
     queue_attendance_email(
         "TEST", "Test Student", "Test Department",
         date.today().isoformat(), datetime.now().strftime("%H:%M:%S"), to
@@ -1391,7 +1416,7 @@ def email_logs():
 @require_auth
 def send_attendance_summary():
     if not EMAIL_ENABLED:
-        return jsonify({"error": "Email not configured. Set SENDGRID_API_KEY and SENDGRID_FROM in .env"}), 503
+        return jsonify({"error": "Email not configured. Set BREVO_API_KEY and BREVO_FROM in .env"}), 503
 
     att_date = (request.json or {}).get("date", date.today().isoformat())
 
@@ -1411,7 +1436,7 @@ def get_settings():
         "recognition_threshold": THRESHOLD,
         "frame_skip":            SKIP,
         "email_enabled":         EMAIL_ENABLED,
-        "sendgrid_from":         SENDGRID_FROM if SENDGRID_FROM else "",
+        "brevo_from": BREVO_FROM if BREVO_FROM else "",
     })
 
 @app.route("/api/settings", methods=["PUT"])
