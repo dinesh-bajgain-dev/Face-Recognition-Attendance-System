@@ -2399,8 +2399,6 @@ label .req {
 .rv-row:nth-child(odd) {
   border-right: 1px solid var(--border);
 }
-.rv-row:nth-child(even) {
-}
 .rv-label {
   font-size: 10px;
   font-family: var(--mono);
