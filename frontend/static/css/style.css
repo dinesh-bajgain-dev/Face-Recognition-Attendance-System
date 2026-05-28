@@ -1769,9 +1769,6 @@ input[type="date"] {
 .enroll-body {
   max-width: 900px;
 }
-.enroll-step-panel {
-}
-
 /* Enroll card — cleaner than generic .card */
 .enroll-card {
   background: var(--bg2);
@@ -2065,8 +2062,6 @@ label .req {
 }
 
 /* Info side card */
-.ep-side {
-}
 .ep-info-card {
   background: var(--bg2);
   border: 1px solid var(--border);
