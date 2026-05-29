@@ -16,9 +16,404 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' rx='7' fill='%23e8e8ec'/%3E%3Crect x='7' y='7' width='18' height='18' rx='4' fill='none' stroke='%230d0d0f' stroke-width='2.5'/%3E%3C/svg%3E"
     />
+    <style>
+      /* ── Role Selector ─────────────────────────────────── */
+      .role-selector {
+        display: flex;
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+      }
+      .role-btn {
+        flex: 1;
+        padding: 0.6rem 0.5rem;
+        border-radius: var(--r);
+        border: 1px solid var(--border);
+        background: var(--bg3);
+        color: var(--text2);
+        font-family: var(--sans);
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .role-btn:hover {
+        border-color: var(--border-hi);
+        color: var(--text);
+      }
+      .role-btn.active {
+        border-color: var(--blue);
+        background: var(--blue-dim);
+        color: var(--blue);
+      }
+      .role-btn svg {
+        width: 18px;
+        height: 18px;
+      }
+      .role-btn span {
+        font-size: 11px;
+        font-family: var(--mono);
+        letter-spacing: 0.04em;
+      }
+      .login-field {
+        display: block;
+      }
+      .login-field.hidden {
+        display: none;
+      }
+
+      /* ── Teacher Panel ─────────────────────────────────── */
+      .class-info-bar {
+        display: flex;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--r);
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+      }
+      .class-info-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .class-info-label {
+        font-size: 11px;
+        color: var(--text3);
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .class-info-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .teacher-recog-area {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+      }
+      @media (max-width: 900px) {
+        .teacher-recog-area {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ── Student Panel ─────────────────────────────────── */
+      #student-panel {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: var(--bg);
+        flex-direction: column;
+        overflow-y: auto;
+        z-index: 500;
+      }
+      #student-panel.active {
+        display: flex;
+      }
+      .student-header {
+        background: var(--bg2);
+        border-bottom: 1px solid var(--border);
+        padding: 1rem 2rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+      }
+      .student-header-logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .student-header-logo span {
+        font-family: var(--mono);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+      }
+      .student-body {
+        padding: 2rem;
+        max-width: 960px;
+        margin: 0 auto;
+        width: 100%;
+      }
+      .student-welcome {
+        margin-bottom: 1.5rem;
+      }
+      .student-welcome h2 {
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .student-welcome p {
+        color: var(--text2);
+        font-size: 13px;
+      }
+      .student-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      @media (max-width: 600px) {
+        .student-stats-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .student-stat-card {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--r);
+        padding: 1rem 1.25rem;
+      }
+      .student-stat-label {
+        font-size: 11px;
+        color: var(--text3);
+        font-family: var(--mono);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 4px;
+      }
+      .student-stat-val {
+        font-size: 28px;
+        font-weight: 700;
+        font-family: var(--mono);
+      }
+      .student-stat-val.green {
+        color: var(--green);
+      }
+      .student-stat-val.amber {
+        color: var(--amber);
+      }
+      .student-att-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .student-att-table th,
+      .student-att-table td {
+        padding: 0.6rem 0.75rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+      }
+      .student-att-table th {
+        color: var(--text3);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+
+      /* ── Teacher live recognition panel ──────────────── */
+      .recog-live-feed {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--r);
+        overflow: hidden;
+      }
+      .recog-live-feed video,
+      .recog-live-feed canvas {
+        width: 100%;
+        display: block;
+      }
+      .recog-controls {
+        padding: 1rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      /* ── Teacher manual attendance table ───────────── */
+      .manual-att-grid {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .manual-att-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.75rem;
+        align-items: center;
+        padding: 0.6rem 0.75rem;
+        background: var(--bg3);
+        border-radius: var(--r);
+        border: 1px solid var(--border);
+      }
+      .manual-att-name {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .manual-att-id {
+        font-size: 11px;
+        color: var(--text3);
+        font-family: var(--mono);
+      }
+      .toggle-btn {
+        padding: 0.35rem 0.9rem;
+        border-radius: var(--r);
+        border: 1px solid transparent;
+        font-size: 12px;
+        font-family: var(--mono);
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+      .toggle-btn.present {
+        background: var(--green-dim);
+        border-color: var(--green);
+        color: var(--green);
+      }
+      .toggle-btn.absent {
+        background: var(--red-dim);
+        border-color: var(--red);
+        color: var(--red);
+      }
+
+      /* ── Admin teacher management ───────────────────── */
+      .teacher-table-wrap {
+        overflow-x: auto;
+      }
+      .data-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .data-table th,
+      .data-table td {
+        padding: 0.6rem 0.8rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        font-size: 12.5px;
+      }
+      .data-table th {
+        color: var(--text3);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        background: var(--bg3);
+        position: sticky;
+        top: 0;
+      }
+      .data-table tr:hover td {
+        background: rgba(255, 255, 255, 0.02);
+      }
+      .action-btns {
+        display: flex;
+        gap: 0.4rem;
+      }
+
+      /* ── Modal ────────────────────────────────────────── */
+      .modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 2000;
+        align-items: center;
+        justify-content: center;
+      }
+      .modal-overlay.open {
+        display: flex;
+      }
+      .modal-box {
+        background: var(--bg2);
+        border: 1px solid var(--border);
+        border-radius: var(--r-lg);
+        padding: 2rem;
+        width: 520px;
+        max-width: 95vw;
+        max-height: 90vh;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .modal-title {
+        font-family: var(--mono);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .modal-form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+      @media (max-width: 500px) {
+        .modal-form-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .modal-footer {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: flex-end;
+        margin-top: 0.5rem;
+      }
+
+      /* tab sub-nav */
+      .sub-tabs {
+        display: flex;
+        gap: 0.25rem;
+        margin-bottom: 1.25rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .sub-tab {
+        padding: 0.5rem 1rem;
+        font-size: 13px;
+        cursor: pointer;
+        color: var(--text2);
+        border-bottom: 2px solid transparent;
+        transition: all 0.15s;
+        font-family: var(--mono);
+      }
+      .sub-tab.active {
+        color: var(--blue);
+        border-bottom-color: var(--blue);
+      }
+      .sub-tab-panel {
+        display: none;
+      }
+      .sub-tab-panel.active {
+        display: block;
+      }
+
+      /* pill badges */
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 99px;
+        font-size: 11px;
+        font-family: var(--mono);
+        font-weight: 600;
+      }
+      .pill-blue {
+        background: var(--blue-dim);
+        color: var(--blue);
+      }
+      .pill-green {
+        background: var(--green-dim);
+        color: var(--green);
+      }
+      .pill-red {
+        background: var(--red-dim);
+        color: var(--red);
+      }
+      .pill-amber {
+        background: var(--amber-dim);
+        color: var(--amber);
+      }
+    </style>
   </head>
   <body>
-    <!-- ── Login overlay ──────────────────────────────────────────────────── -->
+    <!-- ── Login overlay ─────────────────────────────────────────────────── -->
     <div class="login-overlay" id="loginOverlay">
       <div class="login-card">
         <div class="login-logo">
@@ -28,7 +423,6 @@
             height="28"
             viewBox="0 0 28 28"
             fill="none"
-            xmlns="http://www.w3.org/2000/svg"
           >
             <rect width="28" height="28" rx="6" fill="#e8e8ec" />
             <rect
@@ -40,25 +434,221 @@
               fill="none"
               stroke="#0d0d0f"
               stroke-width="2.2"
-            /></svg
-          ><span>वेदनेत्रम्</span>
+            />
+          </svg>
+          <span>वेदनेत्रम्</span>
         </div>
         <h2>Sign in</h2>
-        <div class="form-group">
-          <label>Username</label
-          ><input type="text" id="loginUser" placeholder="admin" />
+
+        <!-- Role selector -->
+        <div class="role-selector">
+          <button
+            class="role-btn active"
+            id="roleBtn-admin"
+            onclick="selectLoginRole('admin')"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+            >
+              <path
+                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+              />
+            </svg>
+            <span>Admin</span>
+          </button>
+          <button
+            class="role-btn"
+            id="roleBtn-teacher"
+            onclick="selectLoginRole('teacher')"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+            >
+              <rect x="3" y="4" width="18" height="14" rx="2" />
+              <path d="M8 20h8M12 18v2M7 9h10M7 13h6" />
+            </svg>
+            <span>Teacher</span>
+          </button>
+          <button
+            class="role-btn"
+            id="roleBtn-student"
+            onclick="selectLoginRole('student')"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+            >
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+            </svg>
+            <span>Student</span>
+          </button>
         </div>
-        <div class="form-group">
-          <label>Password</label
-          ><input type="password" id="loginPass" placeholder="••••••" />
+
+        <!-- Admin/Teacher fields -->
+        <div id="field-username" class="login-field">
+          <div class="form-group">
+            <label id="usernameLabel">Username</label>
+            <input
+              type="text"
+              id="loginUser"
+              placeholder="admin"
+              autocomplete="username"
+            />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input
+              type="password"
+              id="loginPass"
+              placeholder="••••••"
+              autocomplete="current-password"
+              onkeydown="if (event.key === 'Enter') doLogin();"
+            />
+          </div>
         </div>
+        <!-- Student field -->
+        <div id="field-email" class="login-field hidden">
+          <div class="form-group">
+            <label>Registered Email</label>
+            <input
+              type="email"
+              id="loginEmail"
+              placeholder="student@college.edu"
+              onkeydown="if (event.key === 'Enter') doLogin();"
+            />
+          </div>
+        </div>
+
         <button class="btn-primary full" onclick="doLogin()">Sign in</button>
-        <p class="login-hint">Default: admin / admin123</p>
-        <div id="loginErr" class="msg err" style="margin-top: 0.5rem"></div>
+        <p class="login-hint" id="loginHint">Default: admin / admin123</p>
+        <div id="loginErr" class="msg err mt-0-5rem"></div>
       </div>
     </div>
 
-    <!-- ── Sidebar ────────────────────────────────────────────────────────── -->
+    <!-- ══════════════════════════════════════════════════════════════════
+         STUDENT PANEL (full-screen overlay, shown after student login)
+    ══════════════════════════════════════════════════════════════════════ -->
+    <div id="student-panel">
+      <div class="student-header">
+        <div class="student-header-logo">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
+            <rect width="28" height="28" rx="6" fill="#e8e8ec" />
+            <rect
+              x="6"
+              y="6"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill="none"
+              stroke="#0d0d0f"
+              stroke-width="2.2"
+            />
+          </svg>
+          <span>वेदनेत्रम्</span>
+        </div>
+        <div class="flex flex-center gap-1rem">
+          <span
+            id="studentHeaderName"
+            class="text-13px text-secondary font-mono"
+          ></span>
+          <button
+            class="btn-secondary text-12px\"
+            onclick="logout()"
+          >
+            Sign out
+          </button>
+        </div>
+      </div>
+      <div class="student-body">
+        <div class="student-welcome">
+          <h2 id="studentWelcomeName">Welcome</h2>
+          <p
+            id="studentWelcomeSub"
+            class="text-secondary text-13px"
+          ></p>
+        </div>
+
+        <!-- Stats row -->
+        <div class="student-stats-grid">
+          <div class="student-stat-card">
+            <div class="student-stat-label">Present Days</div>
+            <div class="student-stat-val green" id="sStat-present">—</div>
+          </div>
+          <div class="student-stat-card">
+            <div class="student-stat-label">Total Days</div>
+            <div class="student-stat-val" id="sStat-total">—</div>
+          </div>
+          <div class="student-stat-card">
+            <div class="student-stat-label">Overall %</div>
+            <div class="student-stat-val amber" id="sStat-pct">—</div>
+          </div>
+        </div>
+
+        <!-- Two-column layout for subject summary + records -->
+        <div class="grid grid-2col mb-1rem">
+          <!-- Subject-wise breakdown -->
+          <div class="card">
+            <div class="section-title section-title-mb">
+              Subject-wise Attendance
+            </div>
+            <div id="studentSubjectSummary">
+              <div
+                class="text-muted text-12px p-1rem"
+              >
+                Loading…
+              </div>
+            </div>
+          </div>
+
+          <!-- Attendance records table -->
+          <div class="card">
+            <div class="section-title section-title-mb-1rem">
+              Attendance Records
+              <span
+                class="text-11px text-muted ml-0-5rem font-400"
+                >(last 90)</span
+              >
+            </div>
+            <div class="overflow-x-auto max-h-55vh overflow-y-auto">
+              <table class="student-att-table">
+                <thead class="sticky-top bg-primary"
+                  <tr>
+                    <th>Date</th>
+                    <th>Subject</th>
+                    <th>Teacher</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="studentAttBody">
+                  <tr>
+                    <td
+                      colspan="4"
+                      class="text-center text-muted p-2rem"
+                    >
+                      Loading…
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         MAIN APP (Admin + Teacher)
+    ══════════════════════════════════════════════════════════════════════ -->
+    <!-- ── Sidebar ───────────────────────────────────────────────────── -->
     <nav class="sidebar" id="sidebar">
       <div class="sidebar-logo">
         <svg
@@ -67,7 +657,6 @@
           height="28"
           viewBox="0 0 28 28"
           fill="none"
-          xmlns="http://www.w3.org/2000/svg"
         >
           <rect width="28" height="28" rx="6" fill="#e8e8ec" />
           <rect
@@ -83,7 +672,9 @@
         </svg>
         <span class="logo-text">वेदनेत्रम्</span>
       </div>
-      <div class="sidebar-nav">
+
+      <!-- ADMIN nav -->
+      <div class="sidebar-nav" id="adminNav">
         <a
           class="nav-item active"
           data-page="dashboard"
@@ -100,9 +691,8 @@
             <rect x="3" y="3" width="7" height="7" rx="1" />
             <rect x="14" y="3" width="7" height="7" rx="1" />
             <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
-          Dashboard
+            <rect x="14" y="14" width="7" height="7" rx="1" /></svg
+          >Dashboard
         </a>
         <a class="nav-item" data-page="students" onclick="navigate('students')">
           <svg
@@ -113,12 +703,24 @@
             stroke="currentColor"
             stroke-width="1.5"
           >
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
             <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+            <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          Students
+            <path d="M21 21v-2a4 4 0 0 0-3-3.85" /></svg
+          >Students
+        </a>
+        <a class="nav-item" data-page="teachers" onclick="navigate('teachers')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <rect x="3" y="4" width="18" height="14" rx="2" />
+            <path d="M8 20h8M12 18v2M7 9h10M7 13h6" /></svg
+          >Teachers
         </a>
         <a class="nav-item" data-page="enroll" onclick="navigate('enroll')">
           <svg
@@ -130,32 +732,9 @@
             stroke-width="1.5"
           >
             <circle cx="12" cy="8" r="4" />
-            <path d="M20 21a8 8 0 1 0-16 0" />
-            <line x1="12" y1="13" x2="12" y2="21" />
-            <line x1="8" y1="17" x2="16" y2="17" />
-          </svg>
-          Enroll
-        </a>
-        <a
-          class="nav-item"
-          data-page="recognize"
-          onclick="navigate('recognize')"
-        >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-          >
-            <path d="M9 9a3 3 0 1 1 6 0 3 3 0 0 1-6 0" />
-            <path d="M3 9V6a3 3 0 0 1 3-3h3" />
-            <path d="M21 9V6a3 3 0 0 1-3-3h-3" />
-            <path d="M3 15v3a3 3 0 0 0 3 3h3" />
-            <path d="M21 15v3a3 3 0 0 0-3 3h-3" />
-          </svg>
-          Recognize
+            <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+            <path d="M19 8v6M22 11h-6" /></svg
+          >Enroll
         </a>
         <a
           class="nav-item"
@@ -170,9 +749,10 @@
             stroke="currentColor"
             stroke-width="1.5"
           >
-            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-          </svg>
-          Attendance
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4M8 2v4M3 10h18" />
+            <path d="M9 16l2 2 4-4" /></svg
+          >Attendance
         </a>
         <a class="nav-item" data-page="reports" onclick="navigate('reports')">
           <svg
@@ -183,11 +763,24 @@
             stroke="currentColor"
             stroke-width="1.5"
           >
-            <line x1="18" y1="20" x2="18" y2="10" />
-            <line x1="12" y1="20" x2="12" y2="4" />
-            <line x1="6" y1="20" x2="6" y2="14" />
-          </svg>
-          Reports
+            <path d="M3 3v18h18" />
+            <polyline points="7 16 11 11 14 14 18 8" /></svg
+          >Reports
+        </a>
+        <a class="nav-item" data-page="manage" onclick="navigate('manage')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path
+              d="M19.07 4.93A10 10 0 1 0 4.93 19.07 10 10 0 0 0 19.07 4.93z"
+            /></svg
+          >Manage
         </a>
         <a class="nav-item" data-page="settings" onclick="navigate('settings')">
           <svg
@@ -200,143 +793,224 @@
           >
             <circle cx="12" cy="12" r="3" />
             <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-            />
-          </svg>
-          Settings
+              d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+            /></svg
+          >Settings
         </a>
       </div>
-      <div class="sidebar-footer">
-        <div class="status-dot" id="apiDot"></div>
-        <span id="apiStatus" class="status-label">Connecting…</span>
-        <button class="logout-btn" onclick="logout()" title="Sign out">
+
+      <!-- TEACHER nav -->
+      <div class="sidebar-nav hidden" id="teacherNav">
+        <a
+          class="nav-item active"
+          data-page="t-dashboard"
+          onclick="navigate('t-dashboard')"
+        >
           <svg
-            width="14"
-            height="14"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             stroke-width="1.5"
           >
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" /></svg
+          >Dashboard
+        </a>
+        <a
+          class="nav-item"
+          data-page="t-recognize"
+          onclick="navigate('t-recognize')"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path
+              d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"
+            />
+            <circle cx="12" cy="12" r="4" /></svg
+          >Take Attendance
+        </a>
+        <a class="nav-item" data-page="t-manual" onclick="navigate('t-manual')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4" /></svg
+          >Manual Mark
+        </a>
+        <a class="nav-item" data-page="t-logs" onclick="navigate('t-logs')">
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M3 3v18h18" />
+            <polyline points="7 16 11 11 14 14 18 8" /></svg
+          >Attendance Logs
+        </a>
+      </div>
+
+      <!-- Sidebar footer -->
+      <div class="sidebar-footer">
+        <div id="sidebarUserInfo"></div>
+        <div class="flex items-center gap-6px px-0-5rem">
+          <div class="status-dot" id="apiDot"></div>
+          <span
+            id="apiStatus"
+            class="text-11px text-secondary font-mono"
+            >Connecting…</span
+          >
+        </div>
+        <div id="clockDisplay" class="clock px-0-5rem"></div>
+        <button
+          class="btn-secondary text-12px"
+          onclick="logout()"
+          style="
+            margin: 0.25rem 0.5rem 0;
+            justify-content: center;
+          "
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.7"
+          >
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16,17 21,12 16,7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" /></svg
+          >Sign Out
         </button>
       </div>
     </nav>
 
-    <!-- ── Main ───────────────────────────────────────────────────────────── -->
-    <main class="main">
-      <!-- DASHBOARD -->
+    <!-- ── Main content ──────────────────────────────────────────────── -->
+    <div class="main" id="mainContent">
+      <div id="toast" class="toast"></div>
+
+      <!-- ═══════════════════ ADMIN PAGES ═══════════════════════════ -->
+
+      <!-- Dashboard -->
       <section class="page active" id="page-dashboard">
-        <!-- Header row matching reference screenshot style -->
-        <div class="dash-header">
-          <div>
-            <h1 class="dash-title">Dashboard</h1>
-            <p class="dash-subtitle" id="dashDate"></p>
+        <header class="page-header">
+          <h1>Dashboard</h1>
+          <div class="flex flex-center gap-0-75rem">
+            <span
+              id="dashDate"
+              class="text-secondary text-13px"
+            ></span>
+            <select
+              id="dashDeptFilter"
+              class="input-sm w-160px"
+              onchange="loadDashboard()"
+            >
+              <option value="">All Departments</option>
+            </select>
           </div>
-          <div class="dash-clock" id="clockDisplay"></div>
-        </div>
-
-        <!-- Stat cards — clean border style matching reference -->
-        <div class="dash-stats">
-          <div class="dstat-card">
-            <div class="dstat-label">REGISTERED</div>
-            <div class="dstat-value" id="statRegistered">—</div>
-          </div>
-          <div class="dstat-card dstat-green">
-            <div class="dstat-label">PRESENT TODAY</div>
-            <div class="dstat-value" id="statPresent">—</div>
-          </div>
-          <div class="dstat-card dstat-red">
-            <div class="dstat-label">ABSENT TODAY</div>
-            <div class="dstat-value" id="statAbsent">—</div>
-          </div>
-          <div class="dstat-card dstat-amber">
-            <div class="dstat-label">ATTENDANCE RATE</div>
-            <div class="dstat-value" id="statRate">—</div>
-          </div>
-        </div>
-
-        <!-- Chart full-width card -->
-        <div class="dash-chart-card">
-          <div class="dash-card-title">30-Day Overview</div>
-          <canvas id="attendanceChart" height="160"></canvas>
-        </div>
-
-        <!-- Today's Attendance — unchanged as requested -->
+        </header>
+        <div class="metrics-grid" id="dashMetrics"></div>
         <div class="dash-section-header">
           <span class="dash-section-title">Today's Attendance</span>
-          <input
-            type="text"
-            class="search-input dash-search"
-            placeholder="Search name…"
-            oninput="filterDashTable(this.value)"
-          />
+          <button class="btn-secondary btn-sm" onclick="loadDashboard()">
+            Refresh
+          </button>
         </div>
-        <table class="data-table" id="dashTable">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Department</th>
-              <th>Time</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="dashTableBody"></tbody>
-        </table>
+        <div id="dashAttTable"></div>
       </section>
 
-      <!-- STUDENTS -->
+      <!-- Students -->
       <section class="page" id="page-students">
         <header class="page-header">
           <h1>Students</h1>
-          <div class="header-actions">
-            <input
-              type="text"
-              class="search-input"
-              id="studentSearch"
-              placeholder="Search name or ID…"
-              oninput="searchStudents()"
-              style="min-width: 200px"
-            />
-            <button class="btn-secondary" onclick="navigate('enroll')">
-              + Enroll New
-            </button>
-          </div>
+          <input
+            class="search-input"
+            id="studentSearch"
+            type="text"
+            placeholder="Search name or ID…"
+            oninput="searchStudents()"
+          />
         </header>
-
-        <!-- Faculty filter tabs — same pattern as Attendance page -->
-        <div
-          class="faculty-tabs"
-          id="studentFacultyTabs"
-          style="margin-bottom: 1rem"
-        >
-          <div
-            class="faculty-tab active"
-            onclick="filterStudentsByFaculty('', this)"
+        <div class="filter-bar" id="studentFacultyTabs">
+          <button
+            class="filter-btn active"
+            onclick="filterStudentDept('', this)"
           >
             All
-          </div>
+          </button>
         </div>
-
-        <!-- Summary strip -->
         <div class="student-faculty-bar" id="studentFacultyBar"></div>
-
-        <div class="persons-grid" id="personsGrid"></div>
       </section>
 
-      <!-- STUDENT PROFILE (sub-page) -->
+      <!-- Student Profile sub-page -->
       <section class="page" id="page-profile">
         <header class="page-header">
           <button class="btn-secondary" onclick="navigate('students')">
             ← Back
           </button>
-          <div class="header-actions" id="profileActions"></div>
         </header>
         <div id="profileContent"></div>
+      </section>
+
+      <!-- Teachers management -->
+      <section class="page" id="page-teachers">
+        <header class="page-header">
+          <h1>Teachers</h1>
+          <button class="btn-primary" onclick="openTeacherModal()">
+            + Add Teacher
+          </button>
+        </header>
+        <div class="card">
+          <div class="teacher-table-wrap">
+            <table class="data-table" id="teacherTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Faculty</th>
+                  <th>Sem</th>
+                  <th>Subject</th>
+                  <th>Time Slot</th>
+                  <th>Email</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="teacherTableBody">
+                <tr>
+                  <td
+                    colspan="9"
+                    style="
+                      text-align: center;
+                      color: var(--text3);
+                      padding: 2rem;
+                    "
+                  >
+                    Loading…
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- ENROLL -->
@@ -385,7 +1059,7 @@
                   />
                 </div>
               </div>
-              <div class="ep-section-label" style="margin-top: 0.75rem">
+              <div class="ep-section-label ep-section-label-mt">
                 Optional
               </div>
               <div class="ep-field-row">
@@ -440,7 +1114,7 @@
                 </div>
                 <ol class="ep-info-list">
                   <li>Enter student details</li>
-                  <li>Follow guided face capture (60 frames across 5 poses)</li>
+                  <li>Follow guided face capture (50 frames across 5 poses)</li>
                   <li>Review and confirm to generate embeddings</li>
                 </ol>
                 <div class="ep-info-tip">
@@ -468,7 +1142,7 @@
         </div>
 
         <!-- ── STEP 2: Face Capture ──────────────────────────────────────── -->
-        <div class="enroll-step-panel" id="epanel-2" style="display: none">
+        <div class="enroll-step-panel hidden" id="epanel-2">
           <div class="enroll-capture-grid">
             <!-- LEFT: Camera feed — large -->
             <div class="ecap-camera-col">
@@ -502,7 +1176,7 @@
                     <path d="M23 7 16 12 23 17z" />
                     <rect x="1" y="5" width="15" height="14" rx="2" />
                   </svg>
-                  <p class="muted" style="font-size: 12px; margin-top: 8px">
+                  <p class="muted muted-12px-mt-8px">
                     Click Start Capture
                   </p>
                 </div>
@@ -567,7 +1241,7 @@
               <div class="ecap-metrics">
                 <div class="ecap-metric-row">
                   <span class="ecap-metric-label">QUALITY</span>
-                  <div class="csb-bar" style="flex: 1; margin: 0 8px">
+                  <div class="csb-bar flex-1 m-0-8px">
                     <div class="csb-fill" id="qualityFill"></div>
                   </div>
                   <span class="ecap-metric-val" id="qualityVal">—</span>
@@ -577,7 +1251,7 @@
                   <span class="ecap-metric-count">
                     <span class="ecap-count-cur" id="captureCount">0</span>
                     <span class="ecap-count-sep">/</span>
-                    <span class="ecap-count-tot">60</span>
+                    <span class="ecap-count-tot">50</span>
                   </span>
                 </div>
                 <div class="ecap-metric-row">
@@ -591,8 +1265,14 @@
                 Click Start Capture to begin guided face collection
               </div>
 
+              <!-- Pose progress div for detailed tracking -->
+              <div
+                class="pose-progress m-1rem-0"
+                id="poseProgress"
+              ></div>
+
               <!-- Spacer so buttons push to bottom -->
-              <div style="flex: 1"></div>
+              <div class="flex-1"></div>
 
               <!-- Action buttons -->
               <div class="ecap-actions">
@@ -612,10 +1292,9 @@
                   Start
                 </button>
                 <button
-                  class="ecap-btn-stop"
+                  class="ecap-btn-stop hidden"
                   id="stopCaptureBtn"
                   onclick="stopAutoCapture()"
-                  style="display: none"
                 >
                   <svg
                     width="12"
@@ -628,10 +1307,9 @@
                   Stop
                 </button>
                 <button
-                  class="ecap-btn-reset"
+                  class="ecap-btn-reset hidden"
                   id="resetCaptureBtn"
                   onclick="resetCapture()"
-                  style="display: none"
                 >
                   ↺ Reset
                 </button>
@@ -644,63 +1322,12 @@
                   Review &amp; Enroll →
                 </button>
               </div>
-
-              <!-- Upload alternative (collapsed by default) -->
-              <details class="ecap-upload-details">
-                <summary>Or upload photos instead</summary>
-                <div
-                  class="upload-zone"
-                  id="uploadZone"
-                  style="margin-top: 0.75rem"
-                >
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    opacity="0.3"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17,8 12,3 7,8" />
-                    <line x1="12" y1="3" x2="12" y2="15" />
-                  </svg>
-                  <p style="font-size: 12px">
-                    Drop or
-                    <span
-                      class="link"
-                      onclick="
-                        event.stopPropagation();
-                        document.getElementById('fileInput').click();
-                      "
-                      >browse</span
-                    >
-                  </p>
-                  <p class="muted" style="font-size: 11px">
-                    30–150 images · JPG, PNG
-                  </p>
-                  <input
-                    type="file"
-                    id="fileInput"
-                    multiple
-                    accept="image/*"
-                    style="display: none"
-                    onchange="handleFiles(this.files)"
-                  />
-                </div>
-                <div
-                  id="filePreview"
-                  class="file-preview"
-                  style="padding: 0.5rem 0"
-                ></div>
-              </details>
             </div>
           </div>
         </div>
 
         <!-- ── STEP 3: Review & Confirm ──────────────────────────────────── -->
-        <div class="enroll-step-panel" id="epanel-3" style="display: none">
+        <div class="enroll-step-panel hidden" id="epanel-3">
           <div class="enroll-review-layout">
             <div class="er-card">
               <div class="er-card-head">
@@ -718,21 +1345,19 @@
               </div>
               <div class="review-grid" id="reviewGrid"></div>
               <div
-                class="review-capture-badge"
+                class="review-capture-badge m-1rem-1-25rem-0-25rem"
                 id="reviewCaptureBadge"
-                style="margin: 1rem 1.25rem 0.25rem"
               ></div>
               <div
                 class="progress-wrap"
                 id="enrollProgress"
-                style="display: none; margin: 0.75rem 1.25rem 0"
+                class="hidden m-0-75rem-1-25rem-top"
               >
                 <div class="progress-bar" id="enrollBar"></div>
               </div>
               <div
                 id="enrollMsg"
-                class="msg"
-                style="margin: 0.5rem 1.25rem"
+                class="msg m-0-5rem-1-25rem"
               ></div>
               <div class="er-card-footer">
                 <button class="btn-secondary" onclick="goToStep2()">
@@ -761,490 +1386,977 @@
         </div>
       </section>
 
-      <!-- ── FULL-SCREEN EDIT MODAL ──────────────────────────────────────────── -->
-      <div
-        class="modal-overlay"
-        id="editModal"
-        style="display: none"
-        onclick="closeEditModal(event)"
-      >
-        <div class="modal-box" onclick="event.stopPropagation()">
-          <div class="modal-header">
-            <h2 id="modalTitle">Edit Student</h2>
-            <button class="modal-close" onclick="closeEditModal()">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="modal-tabs">
-              <button
-                class="mtab active"
-                onclick="switchModalTab('profile', this)"
-              >
-                Profile
-              </button>
-              <button class="mtab" onclick="switchModalTab('attendance', this)">
-                Attendance
-              </button>
-              <button class="mtab" onclick="switchModalTab('actlog', this)">
-                Activity Log
-              </button>
-            </div>
+      <!-- Admin Recognize removed -->
 
-            <!-- Profile tab -->
-            <div class="mtab-content" id="mtab-profile">
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Student ID</label>
-                  <input
-                    type="text"
-                    id="mSid"
-                    disabled
-                    style="opacity: 0.5; cursor: not-allowed"
-                  />
-                </div>
-                <div class="form-group">
-                  <label>Full Name *</label>
-                  <input type="text" id="mName" placeholder="Full name" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Department</label>
-                  <input type="text" id="mDept" placeholder="e.g. BCA" />
-                </div>
-                <div class="form-group">
-                  <label>Semester</label>
-                  <input type="text" id="mSem" placeholder="e.g. 4th Sem" />
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Email</label>
-                  <input
-                    type="email"
-                    id="mEmail"
-                    placeholder="student@college.edu"
-                  />
-                </div>
-                <div class="form-group">
-                  <label>Phone</label>
-                  <input
-                    type="text"
-                    id="mPhone"
-                    placeholder="+977-98XXXXXXXX"
-                  />
-                </div>
-              </div>
-              <div class="form-group">
-                <label>Status</label>
-                <select id="mStatus">
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="graduated">Graduated</option>
-                  <option value="suspended">Suspended</option>
-                </select>
-              </div>
-              <div id="editMsg" class="msg"></div>
-              <div class="action-row" style="margin-top: 1rem">
-                <button class="btn-primary" onclick="saveStudentEdit()">
-                  Save Changes
-                </button>
-                <button
-                  class="btn-secondary btn-danger"
-                  onclick="confirmDeleteStudent()"
-                >
-                  Delete Student
-                </button>
-              </div>
-            </div>
-
-            <!-- Attendance tab -->
-            <div
-              class="mtab-content"
-              id="mtab-attendance"
-              style="display: none"
-            >
-              <div class="section-title">
-                Attendance Records
-                <span
-                  style="
-                    float: right;
-                    font-size: 11px;
-                    color: var(--text3);
-                    font-family: var(--mono);
-                  "
-                  id="attEditHint"
-                >
-                  Click a row to edit status</span
-                >
-              </div>
-              <div id="attEditList"></div>
-              <div
-                style="
-                  margin-top: 1.25rem;
-                  padding-top: 1rem;
-                  border-top: 1px solid var(--border);
-                "
-              >
-                <div class="section-title">Add / Override Attendance</div>
-                <div class="form-row" style="align-items: flex-end">
-                  <div class="form-group">
-                    <label>Date</label> <input type="date" id="attEditDate" />
-                  </div>
-                  <div class="form-group">
-                    <label>Status</label>
-                    <select id="attEditStatus">
-                      <option value="Present">Present</option>
-                      <option value="Absent">Absent</option>
-                    </select>
-                  </div>
-                  <div class="form-group" style="flex: 2">
-                    <label>Note (optional)</label>
-                    <input
-                      type="text"
-                      id="attEditNote"
-                      placeholder="e.g. Medical leave"
-                    />
-                  </div>
-                </div>
-                <button class="btn-secondary" onclick="saveAttendanceEdit()">
-                  Apply Override
-                </button>
-                <div id="attEditMsg" class="msg"></div>
-              </div>
-            </div>
-
-            <!-- Activity log tab -->
-            <div class="mtab-content" id="mtab-actlog" style="display: none">
-              <div class="section-title">Admin Activity Log</div>
-              <div id="actLogList"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- RECOGNIZE -->
-      <section class="page" id="page-recognize">
-        <header class="page-header">
-          <h1>Live Recognition</h1>
-          <div class="header-actions">
-            <button
-              class="btn-secondary"
-              id="camToggle"
-              onclick="toggleCamera()"
-            >
-              ▶ Start Camera
-            </button>
-            <button
-              class="btn-secondary"
-              onclick="document.getElementById('uploadRecog').click()"
-            >
-              Upload Image
-              <input
-                type="file"
-                id="uploadRecog"
-                accept="image/*"
-                style="display: none"
-                onchange="recognizeImage(this)"
-              />
-            </button>
-          </div>
-        </header>
-        <div class="recognize-layout">
-          <div class="camera-wrap" id="cameraWrap">
-            <img
-              id="liveStream"
-              class="live-stream"
-              style="display: none"
-              src=""
-              alt="live"
-            />
-            <canvas
-              id="recognizeCanvas"
-              style="display: none; max-width: 100%; border-radius: 8px"
-            ></canvas>
-            <div class="camera-placeholder" id="cameraPlaceholder">
-              <svg
-                width="52"
-                height="52"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1"
-                opacity="0.15"
-              >
-                <path d="M23 7 16 12 23 17z" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-              <p class="muted">Start camera or upload an image</p>
-            </div>
-          </div>
-          <div class="recog-sidebar">
-            <div class="recog-result" id="recogResult">
-              <div class="recog-icon" id="recogIcon">
-                <svg
-                  width="28"
-                  height="28"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.2"
-                >
-                  <path d="M9 9a3 3 0 1 1 6 0 3 3 0 0 1-6 0" />
-                  <path d="M3 9V6a3 3 0 0 1 3-3h3" />
-                  <path d="M21 9V6a3 3 0 0 1-3-3h-3" />
-                  <path d="M3 15v3a3 3 0 0 0 3 3h3" />
-                  <path d="M21 15v3a3 3 0 0 0-3 3h-3" />
-                </svg>
-              </div>
-              <div class="recog-name" id="recogName">Awaiting…</div>
-              <div class="recog-confidence" id="recogConf"></div>
-              <div class="recog-badge" id="recogBadge"></div>
-            </div>
-            <div class="section-title" style="margin-top: 1.5rem">
-              Live Event Log
-            </div>
-            <div id="liveLog" class="live-log"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ATTENDANCE -->
+      <!-- Attendance (admin) -->
       <section class="page" id="page-attendance">
         <header class="page-header">
           <h1>Attendance</h1>
-          <div class="header-actions">
-            <input type="date" id="attDate" onchange="loadAttendancePage()" />
-            <button class="btn-secondary" onclick="exportFacultyCSV()">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 0.75rem;
+              flex-wrap: wrap;
+            "
+          >
+            <input
+              type="date"
+              id="attDate"
+              class="input-sm"
+              onchange="loadAttendancePage()"
+            />
+            <select
+              id="attDeptFilter"
+              class="input-sm w-160px"
+              onchange="loadAttendancePage()"
+            >
+              <option value="">All Departments</option>
+            </select>
+            <button class="btn-secondary btn-sm" onclick="exportAttCSV()">
               Export CSV
             </button>
           </div>
         </header>
-
-        <!-- Faculty tab bar -->
-        <div class="faculty-tabs" id="facultyTabs">
-          <!-- Populated by JS: "All" tab + one tab per faculty -->
-        </div>
-
-        <!-- Overall summary row (shown only on "All" tab) -->
-        <div class="faculty-summary-row" id="facultySummaryRow"></div>
-
-        <!-- Active faculty header card -->
-        <div
-          class="faculty-header-card"
-          id="facultyHeaderCard"
-          style="display: none"
-        >
-          <div class="fhc-info">
-            <div class="fhc-name" id="fhcName"></div>
-            <div class="fhc-date" id="fhcDate"></div>
+        <div id="attFacultySummary"></div>
+        <div class="card mt-1rem">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              margin-bottom: 0.75rem;
+              flex-wrap: wrap;
+              gap: 0.5rem;
+            "
+          >
+            <div class="section-title">Student Records</div>
+            <input
+              class="search-input w-200px"
+              type="text"
+              id="attSearch"
+              placeholder="Search student…"
+              oninput="filterAttendance()"
+            />
           </div>
-          <div class="fhc-stats">
-            <div class="fhc-stat">
-              <div class="fhc-val green" id="fhcPresent">—</div>
-              <div class="fhc-lbl">Present</div>
-            </div>
-            <div class="fhc-stat">
-              <div class="fhc-val red" id="fhcAbsent">—</div>
-              <div class="fhc-lbl">Absent</div>
-            </div>
-            <div class="fhc-stat">
-              <div class="fhc-val amber" id="fhcTotal">—</div>
-              <div class="fhc-lbl">Total</div>
-            </div>
-            <div class="fhc-stat">
-              <div class="fhc-val" id="fhcRate">—</div>
-              <div class="fhc-lbl">Rate</div>
-            </div>
-          </div>
+          <div id="attTableWrap"></div>
         </div>
-
-        <!-- Search row -->
-        <div class="search-row" style="margin-top: 1rem">
-          <input
-            type="text"
-            class="search-input"
-            id="attSearch"
-            placeholder="Search student name or ID…"
-            oninput="filterActiveTable(this.value)"
-          />
-        </div>
-
-        <!-- Table container — re-rendered whenever faculty tab changes -->
-        <div id="attTableContainer"></div>
       </section>
 
-      <!-- REPORTS -->
+      <!-- Reports (admin) -->
       <section class="page" id="page-reports">
         <header class="page-header">
-          <h1>Reports &amp; Analytics</h1>
+          <h1>Reports & Analytics</h1>
           <div class="header-actions">
-            <input type="date" id="repFrom" />
-            <span style="color: var(--text3)">to</span>
-            <input type="date" id="repTo" />
-            <button class="btn-secondary" onclick="loadReports()">
-              Generate
-            </button>
-            <button class="btn-secondary" onclick="exportRange()">
+            <input type="date" id="repFrom" class="select-input" />
+            <span class="text-muted">to</span>
+            <input type="date" id="repTo" class="select-input" />
+            <select id="repDept" class="select-input">
+              <option value="">All Departments</option>
+            </select>
+            <button class="btn-secondary" onclick="exportReport()">
               Export CSV
             </button>
           </div>
         </header>
-        <div class="stats-row">
+
+        <!-- Metrics row: 4 cards -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 1.5rem;
+          "
+        >
           <div class="stat-card">
             <div class="stat-label">Avg. Attendance</div>
-            <div class="stat-value" id="repAvg">—</div>
+            <div class="stat-value" id="repAvgAtt">0%</div>
           </div>
           <div class="stat-card accent-green">
             <div class="stat-label">Highest</div>
-            <div class="stat-value" id="repHigh">—</div>
+            <div class="stat-value" id="repHighest">0%</div>
           </div>
           <div class="stat-card accent-red">
             <div class="stat-label">Below 75%</div>
-            <div class="stat-value" id="repLow">—</div>
+            <div class="stat-value" id="repBelowCount">0</div>
           </div>
           <div class="stat-card accent-amber">
             <div class="stat-label">Total Recognitions</div>
-            <div class="stat-value" id="repTotal">—</div>
+            <div class="stat-value" id="repTotalRecog">0</div>
           </div>
         </div>
-        <div class="two-col">
+
+        <!-- Charts row: Monthly + Department -->
+        <div
+          style="
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 1.5rem;
+          "
+        >
           <div class="card">
             <div class="section-title">Monthly Attendance Trend</div>
-            <canvas id="monthlyChart" height="200"></canvas>
+            <canvas id="monthlyChart" height="220"></canvas>
           </div>
           <div class="card">
             <div class="section-title">Attendance by Department</div>
-            <canvas id="deptChart" height="200"></canvas>
+            <canvas id="deptChart" height="220"></canvas>
           </div>
         </div>
-        <div class="section-title" style="margin-top: 1.5rem">
-          Per-Student Summary
+
+        <!-- Per-Student Summary table -->
+        <div class="card">
+          <div class="section-title">Per-Student Summary</div>
+          <div id="statsTableWrap"></div>
         </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Department</th>
-              <th>Present Days</th>
-              <th>Percentage</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="repTableBody"></tbody>
-        </table>
       </section>
 
-      <!-- SETTINGS -->
+      <!-- Manage (faculties, subjects, time slots) -->
+      <section class="page" id="page-manage">
+        <header class="page-header"><h1>Manage</h1></header>
+        <div class="sub-tabs">
+          <div
+            class="sub-tab active"
+            onclick="switchManageTab('faculties', this)"
+          >
+            Faculties
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('subjects', this)">
+            Subjects
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('timeslots', this)">
+            Time Slots
+          </div>
+        </div>
+
+        <!-- Faculties tab -->
+        <div class="sub-tab-panel active" id="mtab-faculties">
+          <div
+            style="
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 0.75rem;
+            "
+          >
+            <button class="btn-primary" onclick="openFacultyModal()">
+              + Add Faculty
+            </button>
+          </div>
+          <div class="card">
+            <div class="teacher-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="facultyTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subjects tab -->
+        <div class="sub-tab-panel" id="mtab-subjects">
+          <div
+            style="
+              display: flex;
+              gap: 0.75rem;
+              margin-bottom: 0.75rem;
+              flex-wrap: wrap;
+              align-items: center;
+            "
+          >
+            <select
+              id="subjFacultyFilter"
+              class="input-sm"
+              onchange="loadSubjects()"
+              style="width: 180px"
+            >
+              <option value="">All Faculties</option>
+            </select>
+            <button class="btn-primary" onclick="openSubjectModal()">
+              + Add Subject
+            </button>
+          </div>
+          <div class="card">
+            <div class="teacher-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Code</th>
+                    <th>Faculty</th>
+                    <th>Semester</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="subjectTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Time Slots tab -->
+        <div class="sub-tab-panel" id="mtab-timeslots">
+          <div
+            style="
+              display: flex;
+              justify-content: flex-end;
+              margin-bottom: 0.75rem;
+            "
+          >
+            <button class="btn-primary" onclick="openTimeSlotModal()">
+              + Add Time Slot
+            </button>
+          </div>
+          <div class="card">
+            <div class="teacher-table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Label</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="timeslotTableBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Settings (admin) -->
       <section class="page" id="page-settings">
         <header class="page-header"><h1>Settings</h1></header>
-        <div class="settings-layout">
-          <div class="card">
-            <div class="section-title">Recognition</div>
-            <div class="form-group">
-              <label>Confidence Threshold (%)</label>
-              <input
-                type="number"
-                id="setThreshold"
-                min="50"
-                max="99"
-                step="1"
-              />
-              <p class="muted" style="margin-top: 0.3rem">
-                Higher = fewer false positives. Recommended: 80
-              </p>
+        <div class="two-col">
+          <div>
+            <div class="card">
+              <div class="section-title">Recognition</div>
+              <div class="form-group" style="margin-top: 0.75rem">
+                <label
+                  >Confidence Threshold
+                  <span
+                    id="threshVal"
+                    style="font-family: var(--mono); color: var(--blue)"
+                  ></span
+                ></label>
+                <input
+                  type="range"
+                  id="threshSlider"
+                  min="0.5"
+                  max="0.99"
+                  step="0.01"
+                  oninput="
+                    document.getElementById('threshVal').textContent =
+                      Math.round(this.value * 100) + '%'
+                  "
+                  style="width: 100%; margin: 0.5rem 0"
+                />
+              </div>
+              <div class="form-group">
+                <label
+                  >Frame Skip
+                  <span
+                    id="skipVal"
+                    style="font-family: var(--mono); color: var(--blue)"
+                  ></span
+                ></label>
+                <input
+                  type="range"
+                  id="skipSlider"
+                  min="1"
+                  max="10"
+                  step="1"
+                  oninput="
+                    document.getElementById('skipVal').textContent = this.value
+                  "
+                  style="width: 100%; margin: 0.5rem 0"
+                />
+              </div>
+              <button class="btn-primary" onclick="saveSettings()">
+                Save Settings
+              </button>
             </div>
-            <div class="form-group">
-              <label>Frame Skip</label>
-              <input
-                type="number"
-                id="setFrameSkip"
-                min="1"
-                max="10"
-                step="1"
-              />
-              <p class="muted" style="margin-top: 0.3rem">
-                Process every Nth frame (higher = faster stream, lower accuracy)
-              </p>
+            <div class="card" style="margin-top: 1rem">
+              <div class="section-title">Change Password</div>
+              <div class="form-group" style="margin-top: 0.75rem">
+                <label>Current Password</label>
+                <input type="password" id="oldPw" placeholder="••••••" />
+              </div>
+              <div class="form-group">
+                <label>New Password</label>
+                <input type="password" id="newPw" placeholder="••••••" />
+              </div>
+              <button class="btn-primary" onclick="changeAdminPw()">
+                Update Password
+              </button>
             </div>
-            <button
-              class="btn-primary"
-              onclick="saveSettings()"
-              style="margin-top: 1rem"
-            >
-              Save Settings
-            </button>
-            <div id="settingsMsg" class="msg"></div>
           </div>
-          <div class="card">
-            <div class="section-title">System Info</div>
-            <div class="info-row">
-              <span>Database</span
-              ><span class="mono">PostgreSQL + pgvector</span>
+          <div>
+            <div class="card">
+              <div class="section-title">System Info</div>
+              <div
+                id="sysInfo"
+                style="
+                  margin-top: 0.75rem;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.5rem;
+                "
+              ></div>
             </div>
-            <div class="info-row">
-              <span>Embedding Model</span
-              ><span class="mono">ArcFace (buffalo_l) · 512-d</span>
-            </div>
-            <div class="info-row">
-              <span>Backend</span
-              ><span class="mono">Flask 3 · Python 3.12</span>
-            </div>
-            <div class="info-row">
-              <span>Email Notifications</span>
-              <span id="emailStatusBadge" class="email-status off"
-                >✗ Email disabled</span
-              >
-            </div>
-            <div class="info-row">
-              <span>SMTP Account</span>
-              <span class="mono" id="smtpUserDisplay">—</span>
-            </div>
-            <div class="action-row" style="margin-top: 0.75rem">
+            <div class="card" style="margin-top: 1rem">
+              <div class="section-title">Email Test</div>
+              <div class="form-group" style="margin-top: 0.75rem">
+                <label>Send test email to</label>
+                <input
+                  type="email"
+                  id="testEmailAddr"
+                  placeholder="you@example.com"
+                />
+              </div>
               <button class="btn-secondary" onclick="sendTestEmail()">
-                Send Test Email
+                Send Test
               </button>
-              <button class="btn-primary" onclick="sendBulkAttendanceEmail()">
-                Send Attendance to All
-              </button>
+              <div
+                id="emailTestMsg"
+                class="msg"
+                class="mt-0-5rem"
+              ></div>
             </div>
-
-            <div class="section-title" style="margin-top: 1.5rem">
-              Change Password
-            </div>
-            <div class="form-group">
-              <label>Current Password</label>
-              <input
-                type="password"
-                id="oldPw"
-                placeholder="current password"
-              />
-            </div>
-            <div class="form-group">
-              <label>New Password</label>
-              <input
-                type="password"
-                id="newPw"
-                placeholder="min 6 characters"
-              />
-            </div>
-            <button
-              class="btn-secondary"
-              onclick="changePw()"
-              style="margin-top: 0.5rem"
-            >
-              Update Password
-            </button>
-            <div id="pwMsg" class="msg"></div>
           </div>
         </div>
       </section>
-    </main>
 
-    <!-- Toast -->
-    <div class="toast" id="toast"></div>
+      <!-- ═══════════════════ TEACHER PAGES ══════════════════════════ -->
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+      <!-- Teacher Dashboard -->
+      <section class="page" id="page-t-dashboard">
+        <header class="page-header"><h1>Teacher Dashboard</h1></header>
+        <div
+          id="teacherClassBar"
+          class="class-info-bar hidden"
+        ></div>
+        <div class="metrics-grid" id="tDashMetrics"></div>
+        <div class="dash-section-header">
+          <span class="dash-section-title">Today's Class</span>
+          <button class="btn-secondary btn-sm" onclick="loadTeacherDashboard()">
+            Refresh
+          </button>
+        </div>
+        <div id="tDashTable"></div>
+      </section>
+
+      <!-- Teacher Take Attendance (auto face recognition) -->
+      <section class="page" id="page-t-recognize">
+        <header class="page-header">
+          <h1>Take Attendance</h1>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              flex-wrap: wrap;
+            "
+          >
+            <span
+              id="sessionMarkedCount"
+              style="
+                font-family: var(--mono);
+                font-size: 13px;
+                color: var(--green);
+                font-weight: 700;
+              "
+            ></span>
+            <span
+              style="font-size: 12px; color: var(--text3)"
+              id="sessionMarkedLabel"
+            ></span>
+          </div>
+        </header>
+        <div
+          id="teacherClassBar2"
+          class="class-info-bar hidden"
+        ></div>
+
+        <!-- Session status bar -->
+        <div
+          id="sessionStatusBar"
+          class="hidden session-status-bar"
+        ></div>
+
+        <div class="teacher-recog-area">
+          <!-- Camera column -->
+          <div>
+            <div class="card">
+              <div class="teacher-header-flex">
+                <div class="section-title">Camera Feed</div>
+                <div class="flex-wrap-gap-0-5rem">
+                  <button
+                    class="btn-primary"
+                    id="btnTRecogAuto"
+                    onclick="toggleTeacherAuto()"
+                  >
+                    ▶ Start Auto
+                  </button>
+                  <button
+                    class="btn-secondary hidden"
+                    id="btnTRecogStop"
+                    onclick="stopTeacherWebcam()"
+                  >
+                    ⏹ Stop Camera
+                  </button>
+                </div>
+              </div>
+
+              <div class="video-wrapper-full">
+                <video
+                  id="tRecogVideo"
+                  autoplay
+                  playsinline
+                  muted
+                  class="video-mirror"
+                ></video>
+                <canvas id="tRecogCanvas" class="hidden"></canvas>
+                <div
+                  id="tRecogOverlay"
+                  class="video-overlay-full"
+                >
+                  <svg
+                    width="40"
+                    height="40"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="rgba(255,255,255,0.4)"
+                    stroke-width="1.5"
+                  >
+                    <path d="M23 7l-7 5 7 5V7z" />
+                    <rect x="1" y="5" width="15" height="14" rx="2" />
+                  </svg>
+                  <div class="flex-col-centered">
+                    <button class="btn-primary" onclick="startTeacherWebcam()">
+                      Start Camera
+                    </button>
+                    <span class="text-white-50 text-12px">
+                      Then click "▶ Start Auto" to begin automatic marking
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Result feedback -->
+              <div
+                id="tRecogResult"
+                style="margin-bottom: 0.5rem; min-height: 28px"
+              ></div>
+
+              <!-- Manual single-frame button -->
+              <button
+                class="btn-secondary"
+                style="width: 100%; font-size: 12px"
+                onclick="doTeacherRecognize()"
+              >
+                📸 Manual Single Frame
+              </button>
+            </div>
+
+            <!-- How it works card -->
+            <div class="card mt-1rem">
+              <div class="section-title mb-0-5rem">
+                How It Works
+              </div>
+              <ol
+                style="
+                  padding-left: 1.2rem;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.3rem;
+                  font-size: 12px;
+                  color: var(--text2);
+                "
+              >
+                <li>
+                  Click
+                  <strong style="color: var(--text)">Start Camera</strong> to
+                  open webcam
+                </li>
+                <li>
+                  Click
+                  <strong style="color: var(--green)">▶ Start Auto</strong> to
+                  begin session
+                </li>
+                <li>
+                  Face recognition scans
+                  <strong style="color: var(--text)">every 2 seconds</strong>
+                </li>
+                <li>
+                  Attendance marks
+                  <strong style="color: var(--text)">automatically</strong> — no
+                  manual clicks
+                </li>
+                <li>Duplicate entries are prevented automatically</li>
+                <li>
+                  Click
+                  <strong style="color: var(--red)">⏹ Stop Camera</strong> to
+                  end session
+                </li>
+              </ol>
+            </div>
+          </div>
+
+          <!-- Session log column -->
+          <div>
+            <div
+              class="card"
+              style="
+                height: 100%;
+                max-height: 80vh;
+                display: flex;
+                flex-direction: column;
+              "
+            >
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  margin-bottom: 0.75rem;
+                "
+              >
+                <div class="section-title">Session Log</div>
+                <span class="pill pill-blue" id="sessionCountPill"
+                  >0 marked</span
+                >
+              </div>
+              <div
+                id="tSessionLog"
+                style="
+                  flex: 1;
+                  overflow-y: auto;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.4rem;
+                "
+              >
+                <div
+                  class="session-placeholder"
+                  style="
+                    color: var(--text3);
+                    font-size: 12px;
+                    text-align: center;
+                    padding: 2rem;
+                  "
+                >
+                  Session log will appear here once attendance starts
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Teacher Manual Attendance -->
+      <section class="page" id="page-t-manual">
+        <header class="page-header">
+          <h1>Manual Attendance</h1>
+          <div style="display: flex; align-items: center; gap: 0.75rem">
+            <input
+              type="date"
+              id="tManualDate"
+              class="input-sm"
+              onchange="loadManualAttendance()"
+            />
+            <button
+              class="btn-primary btn-sm"
+              onclick="saveAllManualAttendance()"
+            >
+              Save All
+            </button>
+          </div>
+        </header>
+        <div
+          id="teacherClassBar3"
+          class="class-info-bar"
+          style="display: none"
+        ></div>
+        <div class="card">
+          <div id="manualAttGrid"></div>
+        </div>
+      </section>
+
+      <!-- Teacher Attendance Logs -->
+      <section class="page" id="page-t-logs">
+        <header class="page-header">
+          <h1>Attendance Logs</h1>
+          <select
+            id="tLogDays"
+            class="input-sm"
+            onchange="loadTeacherLogs()"
+            style="width: 140px"
+          >
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </header>
+        <div
+          id="teacherClassBar4"
+          class="class-info-bar"
+          style="display: none"
+        ></div>
+        <div class="card">
+          <div class="teacher-table-wrap">
+            <table class="data-table" id="tLogsTable">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Student ID</th>
+                  <th>Name</th>
+                  <th>Time</th>
+                  <th>Status</th>
+                  <th>Note</th>
+                </tr>
+              </thead>
+              <tbody id="tLogsBody">
+                <tr>
+                  <td
+                    colspan="6"
+                    style="
+                      text-align: center;
+                      color: var(--text3);
+                      padding: 2rem;
+                    "
+                  >
+                    Loading…
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </div>
+    <!-- /main -->
+
+    <!-- ══════════════════════════════════════════════════
+         MODALS
+    ══════════════════════════════════════════════════════ -->
+
+    <!-- Teacher Create/Edit Modal -->
+    <div class="modal-overlay" id="teacherModal">
+      <div class="modal-box">
+        <div class="modal-title" id="teacherModalTitle">Add Teacher</div>
+        <input type="hidden" id="tmId" />
+        <div class="modal-form-grid">
+          <div class="form-group">
+            <label>Teacher ID *</label
+            ><input type="text" id="tmTeacherId" placeholder="e.g. TCH001" />
+          </div>
+          <div class="form-group">
+            <label>Full Name *</label
+            ><input type="text" id="tmFullName" placeholder="Full name" />
+          </div>
+          <div class="form-group">
+            <label>Password *</label
+            ><input type="password" id="tmPassword" placeholder="Min 6 chars" />
+          </div>
+          <div class="form-group">
+            <label>Email</label
+            ><input
+              type="email"
+              id="tmEmail"
+              placeholder="teacher@college.edu"
+            />
+          </div>
+          <div class="form-group">
+            <label>Phone</label
+            ><input type="text" id="tmPhone" placeholder="+977-…" />
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="tmStatus">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Faculty *</label>
+            <select id="tmFaculty" onchange="loadSubjectsForModal()">
+              <option value="">Select faculty</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Semester (1–8) *</label>
+            <input
+              type="number"
+              id="tmSemester"
+              min="1"
+              max="8"
+              placeholder="e.g. 3"
+            />
+          </div>
+          <div class="form-group">
+            <label>Subject *</label>
+            <select id="tmSubject">
+              <option value="">Select subject</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Time Slot *</label>
+            <select id="tmTimeSlot">
+              <option value="">Select time slot</option>
+            </select>
+          </div>
+        </div>
+        <div id="teacherModalErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('teacherModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveTeacher()">
+            Save Teacher
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Faculty Modal -->
+    <div class="modal-overlay" id="facultyModal">
+      <div class="modal-box" style="width: 380px">
+        <div class="modal-title" id="facultyModalTitle">Add Faculty</div>
+        <input type="hidden" id="fmId" />
+        <div class="form-group">
+          <label>Faculty Name *</label
+          ><input type="text" id="fmName" placeholder="e.g. Computer Science" />
+        </div>
+        <div class="form-group">
+          <label>Code</label
+          ><input type="text" id="fmCode" placeholder="e.g. CS" />
+        </div>
+        <div id="facultyModalErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('facultyModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveFaculty()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Subject Modal -->
+    <div class="modal-overlay" id="subjectModal">
+      <div class="modal-box" style="width: 400px">
+        <div class="modal-title" id="subjectModalTitle">Add Subject</div>
+        <input type="hidden" id="smId" />
+        <div class="form-group">
+          <label>Subject Name *</label
+          ><input type="text" id="smName" placeholder="e.g. Data Structures" />
+        </div>
+        <div class="form-group">
+          <label>Code</label
+          ><input type="text" id="smCode" placeholder="e.g. CS201" />
+        </div>
+        <div class="form-group">
+          <label>Faculty *</label>
+          <select id="smFaculty">
+            <option value="">Select faculty</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Semester (1–8) *</label>
+          <input
+            type="number"
+            id="smSemester"
+            min="1"
+            max="8"
+            placeholder="1-8"
+          />
+        </div>
+        <div id="subjectModalErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('subjectModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveSubject()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Time Slot Modal -->
+    <div class="modal-overlay" id="timeSlotModal">
+      <div class="modal-box" style="width: 380px">
+        <div class="modal-title">Add Time Slot</div>
+        <div class="form-group">
+          <label>Label *</label
+          ><input
+            type="text"
+            id="tsmLabel"
+            placeholder="e.g. Period 1 (08:00–09:00)"
+          />
+        </div>
+        <div class="modal-form-grid">
+          <div class="form-group">
+            <label>Start Time *</label><input type="time" id="tsmStart" />
+          </div>
+          <div class="form-group">
+            <label>End Time *</label><input type="time" id="tsmEnd" />
+          </div>
+        </div>
+        <div id="tsmErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('timeSlotModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveTimeSlot()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Student Edit Modal (admin) -->
+    <div class="modal-overlay" id="editModal">
+      <div class="modal-box">
+        <div class="modal-title">Edit Student</div>
+        <input type="hidden" id="editSid" />
+        <div class="modal-form-grid">
+          <div class="form-group">
+            <label>Full Name</label><input type="text" id="editName" />
+          </div>
+          <div class="form-group">
+            <label>Department</label
+            ><input type="text" id="editDept" list="editDeptList" />
+            <datalist id="editDeptList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>Semester</label><input type="text" id="editSem" />
+          </div>
+          <div class="form-group">
+            <label>Email</label><input type="email" id="editEmail" />
+          </div>
+          <div class="form-group">
+            <label>Phone</label><input type="text" id="editPhone" />
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="editStatus">
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="graduated">Graduated</option>
+              <option value="suspended">Suspended</option>
+            </select>
+          </div>
+        </div>
+        <div id="editModalErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('editModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveStudentEdit()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teacher References Modal (show attendance rows referencing a teacher) -->
+    <div class="modal-overlay" id="teacherRefsModal">
+      <div class="modal-box" style="width: 720px; max-width: 95%">
+        <div class="modal-title" id="teacherRefsTitle">
+          Attendance references
+        </div>
+        <div id="teacherRefsCount" style="font-size: 13px; color: var(--text3)">
+          —
+        </div>
+        <div style="padding: 12px 18px">
+          <div
+            style="
+              display: flex;
+              gap: 0.5rem;
+              align-items: center;
+              margin-bottom: 8px;
+            "
+          >
+            <label style="white-space: nowrap; font-weight: 600"
+              >Reassign to:</label
+            >
+            <select
+              id="teacherReassignSelect"
+              style="
+                flex: 1;
+                padding: 6px;
+                border-radius: 6px;
+                background: var(--bg3);
+                color: var(--text);
+                border: 1px solid rgba(255, 255, 255, 0.03);
+              "
+            ></select>
+            <button
+              class="btn-secondary"
+              onclick="reassignTeacherReferences()"
+              id="btnReassign"
+            >
+              Reassign
+            </button>
+          </div>
+          <div
+            id="teacherRefsBody"
+            style="
+              max-height: 340px;
+              overflow: auto;
+              font-size: 13px;
+              color: var(--text2);
+            "
+          ></div>
+          <div id="teacherRefsMsg" class="msg" style="margin-top: 8px"></div>
+          <div
+            style="
+              margin-top: 8px;
+              color: var(--text3);
+              font-size: 13px;
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+            "
+          >
+            <input type="checkbox" id="chkAutoDelete" />
+            <label
+              for="chkAutoDelete"
+              style="font-size: 13px; color: var(--text3)"
+              >Delete after action</label
+            >
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            class="btn-secondary"
+            onclick="closeModal('teacherRefsModal')"
+          >
+            Cancel
+          </button>
+          <button
+            class="btn-primary"
+            id="btnClearRefs"
+            onclick="clearTeacherReferences()"
+          >
+            Clear references
+          </button>
+          <button
+            class="btn-danger"
+            id="btnConfirmDelete"
+            onclick="deleteTeacherConfirmed()"
+            disabled
+          >
+            Delete teacher
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script src="static/js/app.js"></script>
   </body>
 </html>
