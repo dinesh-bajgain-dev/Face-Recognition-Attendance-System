@@ -16,401 +16,6 @@
       type="image/svg+xml"
       href="data:image/svg+xml,%3Csvg width='32' height='32' viewBox='0 0 32 32' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='32' height='32' rx='7' fill='%23e8e8ec'/%3E%3Crect x='7' y='7' width='18' height='18' rx='4' fill='none' stroke='%230d0d0f' stroke-width='2.5'/%3E%3C/svg%3E"
     />
-    <style>
-      /* ── Role Selector ─────────────────────────────────── */
-      .role-selector {
-        display: flex;
-        gap: 0.75rem;
-        margin-bottom: 1.25rem;
-      }
-      .role-btn {
-        flex: 1;
-        padding: 0.6rem 0.5rem;
-        border-radius: var(--r);
-        border: 1px solid var(--border);
-        background: var(--bg3);
-        color: var(--text2);
-        font-family: var(--sans);
-        font-size: 13px;
-        cursor: pointer;
-        transition: all 0.15s;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 4px;
-      }
-      .role-btn:hover {
-        border-color: var(--border-hi);
-        color: var(--text);
-      }
-      .role-btn.active {
-        border-color: var(--blue);
-        background: var(--blue-dim);
-        color: var(--blue);
-      }
-      .role-btn svg {
-        width: 18px;
-        height: 18px;
-      }
-      .role-btn span {
-        font-size: 11px;
-        font-family: var(--mono);
-        letter-spacing: 0.04em;
-      }
-      .login-field {
-        display: block;
-      }
-      .login-field.hidden {
-        display: none;
-      }
-
-      /* ── Teacher Panel ─────────────────────────────────── */
-      .class-info-bar {
-        display: flex;
-        gap: 1rem;
-        padding: 0.75rem 1rem;
-        background: var(--bg2);
-        border: 1px solid var(--border);
-        border-radius: var(--r);
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-      }
-      .class-info-item {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .class-info-label {
-        font-size: 11px;
-        color: var(--text3);
-        font-family: var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-      .class-info-value {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text);
-      }
-
-      .teacher-recog-area {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 1.5rem;
-      }
-      @media (max-width: 900px) {
-        .teacher-recog-area {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* ── Student Panel ─────────────────────────────────── */
-      #student-panel {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: var(--bg);
-        flex-direction: column;
-        overflow-y: auto;
-        z-index: 500;
-      }
-      #student-panel.active {
-        display: flex;
-      }
-      .student-header {
-        background: var(--bg2);
-        border-bottom: 1px solid var(--border);
-        padding: 1rem 2rem;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-      }
-      .student-header-logo {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .student-header-logo span {
-        font-family: var(--mono);
-        font-size: 16px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-      }
-      .student-body {
-        padding: 2rem;
-        max-width: 960px;
-        margin: 0 auto;
-        width: 100%;
-      }
-      .student-welcome {
-        margin-bottom: 1.5rem;
-      }
-      .student-welcome h2 {
-        font-size: 20px;
-        font-weight: 600;
-        margin-bottom: 4px;
-      }
-      .student-welcome p {
-        color: var(--text2);
-        font-size: 13px;
-      }
-      .student-stats-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-      }
-      @media (max-width: 600px) {
-        .student-stats-grid {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-      .student-stat-card {
-        background: var(--bg2);
-        border: 1px solid var(--border);
-        border-radius: var(--r);
-        padding: 1rem 1.25rem;
-      }
-      .student-stat-label {
-        font-size: 11px;
-        color: var(--text3);
-        font-family: var(--mono);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-bottom: 4px;
-      }
-      .student-stat-val {
-        font-size: 28px;
-        font-weight: 700;
-        font-family: var(--mono);
-      }
-      .student-stat-val.green {
-        color: var(--green);
-      }
-      .student-stat-val.amber {
-        color: var(--amber);
-      }
-      .student-att-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .student-att-table th,
-      .student-att-table td {
-        padding: 0.6rem 0.75rem;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: 13px;
-      }
-      .student-att-table th {
-        color: var(--text3);
-        font-family: var(--mono);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-
-      /* ── Teacher live recognition panel ──────────────── */
-      .recog-live-feed {
-        background: var(--bg2);
-        border: 1px solid var(--border);
-        border-radius: var(--r);
-        overflow: hidden;
-      }
-      .recog-live-feed video,
-      .recog-live-feed canvas {
-        width: 100%;
-        display: block;
-      }
-      .recog-controls {
-        padding: 1rem;
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
-
-      /* ── Teacher manual attendance table ───────────── */
-      .manual-att-grid {
-        display: grid;
-        gap: 0.5rem;
-      }
-      .manual-att-row {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        gap: 0.75rem;
-        align-items: center;
-        padding: 0.6rem 0.75rem;
-        background: var(--bg3);
-        border-radius: var(--r);
-        border: 1px solid var(--border);
-      }
-      .manual-att-name {
-        font-size: 13px;
-        font-weight: 500;
-      }
-      .manual-att-id {
-        font-size: 11px;
-        color: var(--text3);
-        font-family: var(--mono);
-      }
-      .toggle-btn {
-        padding: 0.35rem 0.9rem;
-        border-radius: var(--r);
-        border: 1px solid transparent;
-        font-size: 12px;
-        font-family: var(--mono);
-        cursor: pointer;
-        transition: all 0.15s;
-        white-space: nowrap;
-      }
-      .toggle-btn.present {
-        background: var(--green-dim);
-        border-color: var(--green);
-        color: var(--green);
-      }
-      .toggle-btn.absent {
-        background: var(--red-dim);
-        border-color: var(--red);
-        color: var(--red);
-      }
-
-      /* ── Admin teacher management ───────────────────── */
-      .teacher-table-wrap {
-        overflow-x: auto;
-      }
-      .data-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .data-table th,
-      .data-table td {
-        padding: 0.6rem 0.8rem;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: 12.5px;
-      }
-      .data-table th {
-        color: var(--text3);
-        font-family: var(--mono);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        background: var(--bg3);
-        position: sticky;
-        top: 0;
-      }
-      .data-table tr:hover td {
-        background: rgba(255, 255, 255, 0.02);
-      }
-      .action-btns {
-        display: flex;
-        gap: 0.4rem;
-      }
-
-      /* ── Modal ────────────────────────────────────────── */
-      .modal-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.7);
-        z-index: 2000;
-        align-items: center;
-        justify-content: center;
-      }
-      .modal-overlay.open {
-        display: flex;
-      }
-      .modal-box {
-        background: var(--bg2);
-        border: 1px solid var(--border);
-        border-radius: var(--r-lg);
-        padding: 2rem;
-        width: 520px;
-        max-width: 95vw;
-        max-height: 90vh;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-      }
-      .modal-title {
-        font-family: var(--mono);
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-      }
-      .modal-form-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 0.75rem;
-      }
-      @media (max-width: 500px) {
-        .modal-form-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      .modal-footer {
-        display: flex;
-        gap: 0.75rem;
-        justify-content: flex-end;
-        margin-top: 0.5rem;
-      }
-
-      /* tab sub-nav */
-      .sub-tabs {
-        display: flex;
-        gap: 0.25rem;
-        margin-bottom: 1.25rem;
-        border-bottom: 1px solid var(--border);
-      }
-      .sub-tab {
-        padding: 0.5rem 1rem;
-        font-size: 13px;
-        cursor: pointer;
-        color: var(--text2);
-        border-bottom: 2px solid transparent;
-        transition: all 0.15s;
-        font-family: var(--mono);
-      }
-      .sub-tab.active {
-        color: var(--blue);
-        border-bottom-color: var(--blue);
-      }
-      .sub-tab-panel {
-        display: none;
-      }
-      .sub-tab-panel.active {
-        display: block;
-      }
-
-      /* pill badges */
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        padding: 2px 8px;
-        border-radius: 99px;
-        font-size: 11px;
-        font-family: var(--mono);
-        font-weight: 600;
-      }
-      .pill-blue {
-        background: var(--blue-dim);
-        color: var(--blue);
-      }
-      .pill-green {
-        background: var(--green-dim);
-        color: var(--green);
-      }
-      .pill-red {
-        background: var(--red-dim);
-        color: var(--red);
-      }
-      .pill-amber {
-        background: var(--amber-dim);
-        color: var(--amber);
-      }
-    </style>
   </head>
   <body>
     <!-- ── Login overlay ─────────────────────────────────────────────────── -->
@@ -560,10 +165,7 @@
             id="studentHeaderName"
             class="text-13px text-secondary font-mono"
           ></span>
-          <button
-            class="btn-secondary text-12px\"
-            onclick="logout()"
-          >
+          <button class="btn-secondary text-12px" onclick="logout()">
             Sign out
           </button>
         </div>
@@ -620,7 +222,7 @@
             </div>
             <div class="overflow-x-auto max-h-55vh overflow-y-auto">
               <table class="student-att-table">
-                <thead class="sticky-top bg-primary"
+                <thead class="sticky-top bg-primary">
                   <tr>
                     <th>Date</th>
                     <th>Subject</th>
@@ -928,6 +530,16 @@
           </div>
         </header>
         <div class="metrics-grid" id="dashMetrics"></div>
+        <div class="analytics-card">
+          <div class="analytics-card-head">
+            <div class="section-title">30-Day Overview</div>
+            <div class="chart-legend">
+              <span><i class="legend-dot green"></i>Present</span>
+              <span><i class="legend-dot red"></i>Absent</span>
+            </div>
+          </div>
+          <canvas id="dashboardChart" height="260"></canvas>
+        </div>
         <div class="dash-section-header">
           <span class="dash-section-title">Today's Attendance</span>
           <button class="btn-secondary btn-sm" onclick="loadDashboard()">
@@ -941,13 +553,18 @@
       <section class="page" id="page-students">
         <header class="page-header">
           <h1>Students</h1>
-          <input
-            class="search-input"
-            id="studentSearch"
-            type="text"
-            placeholder="Search name or ID…"
-            oninput="searchStudents()"
-          />
+          <div class="header-actions">
+            <input
+              class="search-input"
+              id="studentSearch"
+              type="text"
+              placeholder="Search name or ID…"
+              oninput="searchStudents()"
+            />
+            <button class="btn-primary" onclick="navigate('enroll')">
+              + Enroll New
+            </button>
+          </div>
         </header>
         <div class="filter-bar" id="studentFacultyTabs">
           <button
@@ -1448,10 +1065,10 @@
         <header class="page-header">
           <h1>Reports & Analytics</h1>
           <div class="header-actions">
-            <input type="date" id="repFrom" class="select-input" />
+            <input type="date" id="repFrom" class="select-input" onchange="loadReports()" />
             <span class="text-muted">to</span>
-            <input type="date" id="repTo" class="select-input" />
-            <select id="repDept" class="select-input">
+            <input type="date" id="repTo" class="select-input" onchange="loadReports()" />
+            <select id="repDept" class="select-input" onchange="loadReports()">
               <option value="">All Departments</option>
             </select>
             <button class="btn-secondary" onclick="exportReport()">
@@ -1461,14 +1078,7 @@
         </header>
 
         <!-- Metrics row: 4 cards -->
-        <div
-          style="
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-bottom: 1.5rem;
-          "
-        >
+        <div class="stats-row">
           <div class="stat-card">
             <div class="stat-label">Avg. Attendance</div>
             <div class="stat-value" id="repAvgAtt">0%</div>
@@ -1488,14 +1098,7 @@
         </div>
 
         <!-- Charts row: Monthly + Department -->
-        <div
-          style="
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 1.5rem;
-          "
-        >
+        <div class="reports-chart-grid">
           <div class="card">
             <div class="section-title">Monthly Attendance Trend</div>
             <canvas id="monthlyChart" height="220"></canvas>
@@ -1533,13 +1136,7 @@
 
         <!-- Faculties tab -->
         <div class="sub-tab-panel active" id="mtab-faculties">
-          <div
-            style="
-              display: flex;
-              justify-content: flex-end;
-              margin-bottom: 0.75rem;
-            "
-          >
+          <div class="toolbar-row end">
             <button class="btn-primary" onclick="openFacultyModal()">
               + Add Faculty
             </button>
@@ -1562,22 +1159,20 @@
 
         <!-- Subjects tab -->
         <div class="sub-tab-panel" id="mtab-subjects">
-          <div
-            style="
-              display: flex;
-              gap: 0.75rem;
-              margin-bottom: 0.75rem;
-              flex-wrap: wrap;
-              align-items: center;
-            "
-          >
+          <div class="toolbar-row">
             <select
               id="subjFacultyFilter"
-              class="input-sm"
+              class="input-sm w-180px"
               onchange="loadSubjects()"
-              style="width: 180px"
             >
               <option value="">All Faculties</option>
+            </select>
+            <select
+              id="subjSemesterFilter"
+              class="input-sm w-160px"
+              onchange="loadSubjects()"
+            >
+              <option value="">All Semesters</option>
             </select>
             <button class="btn-primary" onclick="openSubjectModal()">
               + Add Subject
@@ -1603,13 +1198,7 @@
 
         <!-- Time Slots tab -->
         <div class="sub-tab-panel" id="mtab-timeslots">
-          <div
-            style="
-              display: flex;
-              justify-content: flex-end;
-              margin-bottom: 0.75rem;
-            "
-          >
+          <div class="toolbar-row end">
             <button class="btn-primary" onclick="openTimeSlotModal()">
               + Add Time Slot
             </button>
@@ -1725,11 +1314,7 @@
               <button class="btn-secondary" onclick="sendTestEmail()">
                 Send Test
               </button>
-              <div
-                id="emailTestMsg"
-                class="msg"
-                class="mt-0-5rem"
-              ></div>
+              <div id="emailTestMsg" class="msg mt-0-5rem"></div>
             </div>
           </div>
         </div>
@@ -2156,36 +1741,21 @@
       <div class="modal-box" style="width: 400px">
         <div class="modal-title" id="subjectModalTitle">Add Subject</div>
         <input type="hidden" id="smId" />
+        <div class="subject-context" id="subjectContext"></div>
         <div class="form-group">
           <label>Subject Name *</label
           ><input type="text" id="smName" placeholder="e.g. Data Structures" />
         </div>
         <div class="form-group">
-          <label>Code</label
-          ><input type="text" id="smCode" placeholder="e.g. CS201" />
-        </div>
-        <div class="form-group">
-          <label>Faculty *</label>
-          <select id="smFaculty">
-            <option value="">Select faculty</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Semester (1–8) *</label>
-          <input
-            type="number"
-            id="smSemester"
-            min="1"
-            max="8"
-            placeholder="1-8"
-          />
+          <label>Subject ID *</label
+          ><input type="text" id="smCode" placeholder="e.g. CSC206" />
         </div>
         <div id="subjectModalErr" class="msg err"></div>
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeModal('subjectModal')">
             Cancel
           </button>
-          <button class="btn-primary" onclick="saveSubject()">Save</button>
+          <button class="btn-primary" onclick="saveSubject()">Save Subject</button>
         </div>
       </div>
     </div>
