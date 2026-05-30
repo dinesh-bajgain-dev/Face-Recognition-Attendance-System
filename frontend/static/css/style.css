@@ -2967,6 +2967,172 @@ label .req {
   }
 }
 
+/* ── Analytics, subject hierarchy, and utility refinements ─────────────── */
+.analytics-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.analytics-card-head,
+.split-row,
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.toolbar-row {
+  justify-content: flex-start;
+  margin-bottom: 0.75rem;
+}
+.toolbar-row.end {
+  justify-content: flex-end;
+}
+.reports-chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 1.5rem;
+}
+.chart-legend,
+.inline-kpis {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+.legend-dot.green {
+  background: var(--green);
+}
+.legend-dot.red {
+  background: var(--red);
+}
+.text-green {
+  color: var(--green) !important;
+}
+.text-red {
+  color: var(--red) !important;
+}
+.text-blue {
+  color: var(--blue) !important;
+}
+.font-500 {
+  font-weight: 500;
+}
+.mono-cell,
+.mono-muted {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.mono-muted {
+  color: var(--text3);
+  font-size: 11px;
+}
+.empty-state {
+  color: var(--text3);
+  padding: 2rem;
+  text-align: center;
+}
+.full-width-card {
+  width: 100%;
+}
+.click-row {
+  cursor: pointer;
+}
+.students-table .student-table-person {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--text);
+  font-weight: 600;
+}
+.student-avatar.small {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 0;
+}
+.student-avatar.small img,
+.student-avatar.small .avatar-placeholder {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+.student-avatar.small img {
+  object-fit: cover;
+  display: block;
+}
+.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg4);
+  color: var(--text2);
+  font-family: var(--mono);
+  font-weight: 700;
+}
+.btn-xs {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.subject-flow {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0.75rem;
+}
+.flow-step {
+  flex: 1;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+}
+.flow-step.active {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.subject-detail-fields {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+.w-180px {
+  width: 180px;
+}
+.w-160px {
+  width: 160px;
+}
+
+@media (max-width: 900px) {
+  .reports-chart-grid,
+  .stats-row {
+    grid-template-columns: 1fr;
+  }
+  .page-header {
+    align-items: stretch;
+  }
+  .page-header .header-actions {
+    width: 100%;
+  }
+  .page-header .search-input {
+    min-width: 180px;
+  }
+}
+
 /* Sidebar user info block */
 #sidebarUserInfo > div {
   padding: 0 0.5rem 0.1rem;
@@ -3503,4 +3669,400 @@ label .req {
   font-size: 12px;
   text-align: center;
   padding: 2rem;
+}
+
+
+/* ── Migrated from index.html: role panels, modals, tabs ─────────────── */
+/* ── Role Selector ─────────────────────────────────── */
+.role-selector {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.role-btn {
+  flex: 1;
+  padding: 0.6rem 0.5rem;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.role-btn:hover {
+  border-color: var(--border-hi);
+  color: var(--text);
+}
+.role-btn.active {
+  border-color: var(--blue);
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.role-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.role-btn span {
+  font-size: 11px;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+}
+.login-field {
+  display: block;
+}
+.login-field.hidden {
+  display: none;
+}
+
+/* ── Teacher Panel ─────────────────────────────────── */
+.class-info-bar {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.class-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.class-info-label {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.class-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.teacher-recog-area {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 900px) {
+  .teacher-recog-area {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Student Panel ─────────────────────────────────── */
+#student-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  flex-direction: column;
+  overflow-y: auto;
+  z-index: 500;
+}
+#student-panel.active {
+  display: flex;
+}
+.student-header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.student-header-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.student-header-logo span {
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.student-body {
+  padding: 2rem;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+.student-welcome {
+  margin-bottom: 1.5rem;
+}
+.student-welcome h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.student-welcome p {
+  color: var(--text2);
+  font-size: 13px;
+}
+.student-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+@media (max-width: 600px) {
+  .student-stats-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.student-stat-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1rem 1.25rem;
+}
+.student-stat-label {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+.student-stat-val {
+  font-size: 28px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+.student-stat-val.green {
+  color: var(--green);
+}
+.student-stat-val.amber {
+  color: var(--amber);
+}
+.student-att-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.student-att-table th,
+.student-att-table td {
+  padding: 0.6rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.student-att-table th {
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Teacher live recognition panel ──────────────── */
+.recog-live-feed {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.recog-live-feed video,
+.recog-live-feed canvas {
+  width: 100%;
+  display: block;
+}
+.recog-controls {
+  padding: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ── Teacher manual attendance table ───────────── */
+.manual-att-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+.manual-att-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg3);
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+}
+.manual-att-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+.manual-att-id {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+.toggle-btn {
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--r);
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.toggle-btn.present {
+  background: var(--green-dim);
+  border-color: var(--green);
+  color: var(--green);
+}
+.toggle-btn.absent {
+  background: var(--red-dim);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ── Admin teacher management ───────────────────── */
+.teacher-table-wrap {
+  overflow-x: auto;
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.data-table th,
+.data-table td {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.data-table th {
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--bg3);
+  position: sticky;
+  top: 0;
+}
+.data-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.action-btns {
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* ── Modal ────────────────────────────────────────── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 2000;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open {
+  display: flex;
+}
+.modal-box {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 2rem;
+  width: 520px;
+  max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.modal-title {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.modal-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 500px) {
+  .modal-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.modal-footer {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+/* tab sub-nav */
+.sub-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.sub-tab {
+  padding: 0.5rem 1rem;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text2);
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  font-family: var(--mono);
+}
+.sub-tab.active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+.sub-tab-panel {
+  display: none;
+}
+.sub-tab-panel.active {
+  display: block;
+}
+
+/* pill badges */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.pill-blue {
+  background: var(--blue-dim);
+  color: var(--blue);
+}
+.pill-green {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.pill-red {
+  background: var(--red-dim);
+  color: var(--red);
+}
+.pill-amber {
+  background: var(--amber-dim);
+  color: var(--amber);
 }
