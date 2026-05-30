@@ -68,7 +68,8 @@ let sessionActive = false;
 let manualAttMap = {};
 
 /* ── Charts ───────────────────────────────────────────────────────────────── */
-let monthlyChart = null,
+let dashboardChart = null,
+  monthlyChart = null,
   deptChart = null;
 
 /* ── Health polling ───────────────────────────────────────────────────────── */
@@ -587,9 +588,10 @@ async function loadDashboard() {
   });
 
   try {
-    const [summ, students] = await Promise.all([
+    const [summ, students, hist] = await Promise.all([
       api(`/attendance/faculty-summary?date=${today}`),
       api("/students"),
+      api(`/attendance/history${dept ? "?department=" + encodeURIComponent(dept) : ""}`),
     ]);
 
     // Populate dept filter once
@@ -616,34 +618,34 @@ async function loadDashboard() {
       </div>
       <div class="metric-card">
         <div class="metric-label">Present Today</div>
-        <div class="metric-val" style="color:var(--green)">${overall.present}</div>
+        <div class="metric-val text-green">${overall.present}</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Absent Today</div>
-        <div class="metric-val" style="color:var(--red)">${overall.absent}</div>
+        <div class="metric-val text-red">${overall.absent}</div>
       </div>
       <div class="metric-card">
         <div class="metric-label">Attendance Rate</div>
-        <div class="metric-val" style="color:var(--blue)">${overall.rate ?? 0}%</div>
+        <div class="metric-val text-blue">${overall.rate ?? 0}%</div>
       </div>`;
+
+    drawDashboardChart((hist.history || []).slice().reverse());
 
     let html = "";
     for (const f of facs) {
       html += `
-        <div class="card" style="margin-bottom:1rem;">
-          <div style="display:flex;justify-content:space-between;align-items:center;
-            margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
+        <div class="card mb-1rem">
+          <div class="split-row mb-0-75rem">
             <span class="section-title">${f.name}</span>
-            <div style="display:flex;gap:0.5rem;align-items:center;
-              font-size:12px;font-family:var(--mono);">
-              <span style="color:var(--green);">${f.present} present</span>
-              <span style="color:var(--text3);">·</span>
-              <span style="color:var(--red);">${f.absent} absent</span>
-              <span style="color:var(--text3);">·</span>
-              <span style="color:var(--blue);">${f.rate}%</span>
+            <div class="inline-kpis">
+              <span class="text-green">${f.present} present</span>
+              <span class="text-muted">·</span>
+              <span class="text-red">${f.absent} absent</span>
+              <span class="text-muted">·</span>
+              <span class="text-blue">${f.rate}%</span>
             </div>
           </div>
-          <div style="overflow-x:auto;">
+          <div class="overflow-x-auto">
             <table class="data-table">
               <thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
               <tbody>
@@ -652,9 +654,8 @@ async function loadDashboard() {
                     (s) => `
                   <tr>
                     <td>${s.name}</td>
-                    <td style="font-family:var(--mono);font-size:11px;
-                      color:var(--text3);">${s.student_id}</td>
-                    <td style="font-family:var(--mono);font-size:12px;">${s.time}</td>
+                    <td class="mono-muted">${s.student_id}</td>
+                    <td class="mono-cell">${s.time}</td>
                     <td>${statusBadge(s.status)}</td>
                   </tr>`,
                   )
@@ -666,13 +667,28 @@ async function loadDashboard() {
     }
     $("dashAttTable").innerHTML =
       html ||
-      `<div class="card" style="text-align:center;color:var(--text3);padding:2rem;">
+      `<div class="card empty-state">
         No student data yet. Enroll students to see attendance here.
       </div>`;
   } catch (e) {
     $("dashMetrics").innerHTML =
-      `<div style="color:var(--red);">${e.message}</div>`;
+      `<div class="text-red">${e.message}</div>`;
   }
+}
+
+function drawDashboardChart(history) {
+  const canvas = $("dashboardChart");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  if (dashboardChart) dashboardChart.destroy();
+  dashboardChart = new SimpleChart(ctx, {
+    type: "bar",
+    labels: history.map((h) => (h.date || "").slice(5)),
+    datasets: [
+      { label: "Present", data: history.map((h) => h.present), color: "#22c55e" },
+      { label: "Absent", data: history.map((h) => h.absent), color: "#ef4444" },
+    ],
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -752,47 +768,46 @@ function searchStudents() {
 function renderStudents(list) {
   if (!list.length) {
     $("studentFacultyBar").innerHTML =
-      `<div class="card" style="text-align:center;color:var(--text3);padding:2rem;">No students found</div>`;
+      `<div class="card empty-state">No students found</div>`;
     return;
   }
-  const byDept = {};
-  list.forEach((s) => {
-    const d = s.department || "Unassigned";
-    (byDept[d] = byDept[d] || []).push(s);
-  });
-  let html = "";
-  for (const dept of Object.keys(byDept).sort()) {
-    html += `<div class="card" style="margin-bottom:1rem;">
-      <div class="section-title" style="margin-bottom:0.75rem;">${dept}</div>
-      <div class="student-grid">
-        ${byDept[dept]
-          .map(
-            (s) => `
-          <div class="student-card" onclick="navigate('profile');loadProfile('${s.student_id}')"
-            style="cursor:pointer;">
-            <div class="student-avatar">
-              <img src="${API}/students/${s.student_id}/photo"
-                onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
-                style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>
-              <div class="avatar-placeholder" style="display:none;width:100%;height:100%;
-                align-items:center;justify-content:center;font-size:18px;font-weight:700;
-                background:var(--bg4);border-radius:50%;color:var(--text2);">
-                ${s.full_name.charAt(0).toUpperCase()}
-              </div>
-            </div>
-            <div class="student-name">${s.full_name}</div>
-            <div class="student-id">${s.student_id}</div>
-            <div style="margin-top:4px;font-size:11px;color:var(--text3);">
-              Sem ${s.semester || "—"} · ${s.sample_count} samples
-            </div>
-            <div style="margin-top:6px;">${statusBadge(s.status)}</div>
-          </div>`,
-          )
-          .join("")}
+  $("studentFacultyBar").innerHTML = `
+    <div class="card full-width-card">
+      <div class="teacher-table-wrap">
+        <table class="data-table students-table">
+          <thead>
+            <tr>
+              <th>Student</th><th>ID</th><th>Faculty</th>
+              <th>Semester</th><th>Samples</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list
+              .map(
+                (s) => `
+              <tr onclick="navigate('profile');loadProfile('${s.student_id}')" class="click-row">
+                <td>
+                  <div class="student-table-person">
+                    <div class="student-avatar small">
+                      <img src="${API}/students/${s.student_id}/photo"
+                        onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')"/>
+                      <div class="avatar-placeholder hidden">${s.full_name.charAt(0).toUpperCase()}</div>
+                    </div>
+                    <span>${s.full_name}</span>
+                  </div>
+                </td>
+                <td class="mono-muted">${s.student_id}</td>
+                <td>${s.department || "Unassigned"}</td>
+                <td class="mono-cell">${s.semester || "—"}</td>
+                <td class="mono-cell">${s.sample_count}</td>
+                <td>${statusBadge(s.status)}</td>
+              </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>
       </div>
     </div>`;
-  }
-  $("studentFacultyBar").innerHTML = html;
 }
 
 async function loadProfile(sid) {
@@ -1481,39 +1496,45 @@ async function loadFaculties() {
 
 async function populateSubjectFacultyFilter() {
   const sel = $("subjFacultyFilter");
-  const smSel = $("smFaculty");
+  const semSel = $("subjSemesterFilter");
   if (sel)
     sel.innerHTML =
       `<option value="">All Faculties</option>` +
       faculties
         .map((f) => `<option value="${f.id}">${f.name}</option>`)
         .join("");
-  if (smSel)
-    smSel.innerHTML =
-      `<option value="">Select faculty</option>` +
-      faculties
-        .map((f) => `<option value="${f.id}">${f.name}</option>`)
-        .join("");
+  if (semSel && semSel.options.length <= 1) {
+    semSel.innerHTML =
+      `<option value="">All Semesters</option>` +
+      Array.from({ length: 8 }, (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`).join("");
+  }
 }
 
 async function loadSubjects() {
   const fid = $("subjFacultyFilter")?.value || "";
+  const sem = $("subjSemesterFilter")?.value || "";
   try {
-    const data = await api(`/subjects${fid ? "?faculty_id=" + fid : ""}`);
+    const qs = new URLSearchParams();
+    if (fid) qs.set("faculty_id", fid);
+    if (sem) qs.set("semester", sem);
+    const data = await api(`/subjects${qs.toString() ? "?" + qs.toString() : ""}`);
     allSubjects = data.subjects;
     $("subjectTableBody").innerHTML = allSubjects.length
       ? allSubjects
           .map(
             (s) => `
           <tr>
-            <td style="font-weight:500;">${s.name}</td>
-            <td style="font-family:var(--mono);font-size:12px;">${s.code || "—"}</td>
+            <td class="font-500">${s.name}</td>
+            <td class="mono-cell">${s.code || "—"}</td>
             <td>${s.faculty_name || "—"}</td>
-            <td style="font-family:var(--mono);">${s.semester}</td>
+            <td class="mono-cell">Semester ${s.semester}</td>
             <td>
-              <button class="btn-secondary"
-                style="font-size:11px;padding:3px 8px;color:var(--red);"
+              <div class="action-btns">
+              <button class="btn-secondary btn-xs"
+                onclick="openSubjectModalById(${s.id})">Edit</button>
+              <button class="btn-secondary btn-xs text-red"
                 onclick="deleteSubject(${s.id},'${s.name}')">Del</button>
+              </div>
             </td>
           </tr>`,
           )
@@ -1583,7 +1604,7 @@ async function saveFaculty() {
       await api("/faculties", { method: "POST", body: JSON.stringify(body) });
     toast(id ? "Faculty updated" : "Faculty created");
     closeModal("facultyModal");
-    loadFaculties();
+    await loadFaculties();
     populateSubjectFacultyFilter();
   } catch (e) {
     setErr("facultyModalErr", e.message);
@@ -1600,7 +1621,8 @@ async function deleteFaculty(id, name) {
   try {
     await api(`/faculties/${id}`, { method: "DELETE" });
     toast("Faculty deleted");
-    loadFaculties();
+    await loadFaculties();
+    populateSubjectFacultyFilter();
     loadSubjects();
   } catch (e) {
     toast(e.message, "err");
@@ -1608,32 +1630,64 @@ async function deleteFaculty(id, name) {
 }
 
 async function openSubjectModal() {
+  const subject = arguments[0] || null;
   await loadFaculties();
-  $("smId").value = "";
-  $("smName").value = "";
-  $("smCode").value = "";
-  $("smSemester").value = "";
-  $("smFaculty").innerHTML =
-    `<option value="">Select faculty</option>` +
-    faculties.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
+  const selectedFaculty = $("subjFacultyFilter")?.value || "";
+  const selectedSemester = $("subjSemesterFilter")?.value || "";
+  const facultyId = subject?.faculty_id || selectedFaculty;
+  const semester = subject?.semester || selectedSemester;
+
+  if (!subject && (!facultyId || !semester)) {
+    setErr("subjectModalErr", "");
+    toast("Select a faculty and semester first", "err");
+    return;
+  }
+
+  const facultyName =
+    faculties.find((f) => String(f.id) === String(facultyId))?.name || "—";
+  $("smId").value = subject?.id || "";
+  $("smName").value = subject?.name || "";
+  $("smCode").value = subject?.code || "";
+  $("subjectContext").innerHTML = `
+    <span>${facultyName}</span>
+    <span>Semester ${semester}</span>
+  `;
+  $("subjectContext").dataset.facultyId = facultyId;
+  $("subjectContext").dataset.semester = semester;
+  $("subjectModalTitle").textContent = subject ? "Edit Subject" : "Add Subject";
   setErr("subjectModalErr", "");
   openModal("subjectModal");
+  setTimeout(() => $("smName")?.focus(), 0);
+}
+
+function openSubjectModalById(id) {
+  const subject = allSubjects.find((s) => String(s.id) === String(id));
+  openSubjectModal(subject || null);
 }
 
 async function saveSubject() {
+  const context = $("subjectContext");
   const body = {
     name: $("smName").value.trim(),
     code: $("smCode").value.trim(),
-    faculty_id: $("smFaculty").value,
-    semester: $("smSemester").value,
+    faculty_id: context?.dataset.facultyId || "",
+    semester: context?.dataset.semester || "",
   };
-  if (!body.name || !body.faculty_id || !body.semester) {
-    setErr("subjectModalErr", "Name, faculty and semester required");
+  if (!body.name || !body.code) {
+    setErr("subjectModalErr", "Subject name and subject ID required");
+    return;
+  }
+  if (!body.faculty_id || !body.semester) {
+    setErr("subjectModalErr", "Select a faculty and semester first");
     return;
   }
   try {
-    await api("/subjects", { method: "POST", body: JSON.stringify(body) });
-    toast("Subject created");
+    const id = $("smId").value;
+    await api(id ? `/subjects/${id}` : "/subjects", {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(body),
+    });
+    toast(id ? "Subject updated" : "Subject created");
     closeModal("subjectModal");
     loadSubjects();
   } catch (e) {
@@ -1855,11 +1909,13 @@ async function loadReports() {
   const today = new Date().toISOString().slice(0, 10);
   if (!$("repFrom").value) $("repFrom").value = today.slice(0, 7) + "-01";
   if (!$("repTo").value) $("repTo").value = today;
+  const dept = $("repDept")?.value || "";
+  const deptQuery = dept ? `?department=${encodeURIComponent(dept)}` : "";
   try {
     const [stats, depts, hist] = await Promise.all([
-      api("/attendance/stats"),
+      api(`/attendance/stats${deptQuery}`),
       api("/departments"),
-      api("/attendance/history"),
+      api(`/attendance/history${deptQuery}`),
     ]);
     const rd = $("repDept");
     if (rd.options.length <= 1) {
@@ -1952,6 +2008,11 @@ function drawMonthlyChart(history) {
         data: history.map((h) => h.present),
         color: "#22c55e",
       },
+      {
+        label: "Absent",
+        data: history.map((h) => h.absent),
+        color: "#ef4444",
+      },
     ],
   });
 }
@@ -1986,6 +2047,7 @@ class SimpleChart {
     this.draw();
   }
   destroy() {
+    this.ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
   }
   draw() {
@@ -1998,6 +2060,7 @@ class SimpleChart {
     const dpr = window.devicePixelRatio || 1;
     ctx.canvas.width = W * dpr;
     ctx.canvas.height = H * dpr;
+    ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, W, H);
     if (!labels?.length) return;
@@ -2028,13 +2091,17 @@ class SimpleChart {
     if (type === "bar") {
       // Bar chart rendering
       const totalBars = labels.length;
-      const barWidth = Math.max(cW / (totalBars * 2.5), 15);
-      const totalSpacing = cW - barWidth * totalBars;
+      const groupCount = Math.max(datasets.length, 1);
+      const groupWidth = Math.max(cW / Math.max(totalBars, 1) * 0.62, 24);
+      const barGap = 4;
+      const barWidth = Math.max((groupWidth - barGap * (groupCount - 1)) / groupCount, 6);
+      const totalSpacing = cW - groupWidth * totalBars;
       const spacing = totalSpacing / (totalBars + 1);
 
-      datasets.forEach((ds) => {
+      datasets.forEach((ds, dsIndex) => {
         ds.data.forEach((v, i) => {
-          const barX = pad.left + spacing + i * (barWidth + spacing);
+          const groupX = pad.left + spacing + i * (groupWidth + spacing);
+          const barX = groupX + dsIndex * (barWidth + barGap);
           const barH = (cH * v) / roundedMax;
           const barY = pad.top + cH - barH;
 
@@ -2055,49 +2122,102 @@ class SimpleChart {
       ctx.textAlign = "center";
       labels.forEach((l, i) => {
         const barX =
-          pad.left + spacing + i * (barWidth + spacing) + barWidth / 2;
+          pad.left + spacing + i * (groupWidth + spacing) + groupWidth / 2;
         ctx.fillText(l.substring(0, 12), barX, H - 12);
       });
     } else {
-      // Line chart rendering with improved styling
+      // Smooth line chart — Catmull-Rom splines converted to bezier (no overshoot)
       const step = cW / Math.max(labels.length - 1, 1);
+
+      /**
+       * Catmull-Rom → cubic bezier conversion (same method Chart.js uses).
+       * Produces natural flowing S-curves without the overshoot of naive bezier.
+       * alpha controls tension: 0 = uniform, 0.5 = centripetal (recommended)
+       */
+      function catmullRomToBezier(pts) {
+        const alpha = 0.5;
+        const segs = [];
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = pts[Math.max(i - 1, 0)];
+          const p1 = pts[i];
+          const p2 = pts[i + 1];
+          const p3 = pts[Math.min(i + 2, pts.length - 1)];
+          // Control points derived from the four neighbouring points
+          const cp1x = p1.x + (p2.x - p0.x) / 6;
+          const cp1y = p1.y + (p2.y - p0.y) / 6;
+          const cp2x = p2.x - (p3.x - p1.x) / 6;
+          const cp2y = p2.y - (p3.y - p1.y) / 6;
+          segs.push({ cp1x, cp1y, cp2x, cp2y, ex: p2.x, ey: p2.y });
+        }
+        return segs;
+      }
+
+      // Clip all drawing to the chart plot area so curves never overflow
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(pad.left, pad.top, cW, cH);
+      ctx.clip();
+
       datasets.forEach((ds) => {
         const pts = ds.data.map((v, i) => ({
           x: pad.left + i * step,
           y: pad.top + cH - (cH * v) / roundedMax,
         }));
 
-        // Draw filled area under line
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pad.top + cH);
-        pts.forEach((p) => ctx.lineTo(p.x, p.y));
+        if (pts.length < 2) return;
+        const segs = catmullRomToBezier(pts);
+
+        // Build the smooth Catmull-Rom path
+        const buildSmoothPath = () => {
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          segs.forEach(({ cp1x, cp1y, cp2x, cp2y, ex, ey }) => {
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey);
+          });
+        };
+
+        // Gradient filled area under the curve
+        buildSmoothPath();
         ctx.lineTo(pts[pts.length - 1].x, pad.top + cH);
+        ctx.lineTo(pts[0].x, pad.top + cH);
         ctx.closePath();
-        ctx.fillStyle = ds.color + "28";
+        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+        grad.addColorStop(0, ds.color + "42");
+        grad.addColorStop(1, ds.color + "04");
+        ctx.fillStyle = grad;
         ctx.fill();
 
-        // Draw line
-        ctx.beginPath();
-        pts.forEach((p, i) =>
-          i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y),
-        );
+        // Smooth line stroke
+        buildSmoothPath();
         ctx.strokeStyle = ds.color;
         ctx.lineWidth = 2.5;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
         ctx.stroke();
+      });
 
-        // Draw points
-        pts.forEach((p) => {
+      // Restore clip — dots are drawn outside so they're never half-clipped
+      ctx.restore();
+
+      // Endpoint dots (first & last) for each dataset
+      datasets.forEach((ds) => {
+        const pts = ds.data.map((v, i) => ({
+          x: pad.left + i * step,
+          y: pad.top + cH - (cH * v) / roundedMax,
+        }));
+        if (pts.length < 2) return;
+        [pts[0], pts[pts.length - 1]].forEach((p) => {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
           ctx.fillStyle = ds.color;
           ctx.fill();
-          ctx.strokeStyle = "rgba(13,13,15,0.8)";
+          ctx.strokeStyle = "rgba(13,13,15,0.9)";
           ctx.lineWidth = 2;
           ctx.stroke();
         });
       });
 
-      // Draw X-axis labels
+      // X-axis labels
       const step2 = Math.ceil(labels.length / 6);
       ctx.fillStyle = "#888895";
       ctx.font = "10px monospace";
@@ -3460,7 +3580,7 @@ function _playTone(
     osc.start(ctx.currentTime + startDelay);
     osc.stop(ctx.currentTime + startDelay + duration + 0.05);
   } catch {}
-}
+} 
 
 // Ding: single 880 Hz tone — pose step complete
 function _soundDing() {
