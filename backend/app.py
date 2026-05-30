@@ -732,7 +732,7 @@ def _mark_attendance_and_broadcast(student_id, name, confidence, teacher_id=None
     email = None
     subject_name = None
     teacher_name = None
-    key = (student_id, today)
+    key = (student_id, today, subject_id)
     ts = time.time()
     # purge expired entries
     for k, v in list(_recent_marks.items()):
@@ -748,7 +748,7 @@ def _mark_attendance_and_broadcast(student_id, name, confidence, teacher_id=None
                 c.execute("""
                     INSERT INTO attendance (student_id, teacher_id, subject_id, date, time, status)
                     VALUES (%s,%s,%s,%s,%s,'Present')
-                    ON CONFLICT (student_id, date) DO NOTHING
+                    ON CONFLICT (student_id, date, subject_id) DO NOTHING
                 """, (student_id, teacher_id, subject_id, today, now))
                 marked = c.rowcount == 1
                 if marked:
@@ -1121,6 +1121,39 @@ def list_subjects():
         rows = qall(conn, sql, params)
     return jsonify({"subjects": rows})
 
+@app.route("/api/semesters")
+def list_semesters():
+    """Return available academic semesters for a faculty.
+
+    The current schema stores semester as an integer on subjects/teachers and
+    as text on students. Until a dedicated semesters table exists, this endpoint
+    exposes the supported academic range while annotating related subject counts.
+    """
+    faculty_id = request.args.get("faculty_id")
+    if not faculty_id:
+        return jsonify({"semesters": []})
+    with get_db() as conn:
+        rows = qall(conn, """
+            SELECT gs.semester,
+                   COUNT(s.id) AS subject_count
+            FROM generate_series(1, 8) AS gs(semester)
+            LEFT JOIN subjects s
+                   ON s.semester = gs.semester
+                  AND s.faculty_id = %s
+            GROUP BY gs.semester
+            ORDER BY gs.semester
+        """, (faculty_id,))
+    return jsonify({
+        "semesters": [
+            {
+                "value": int(r["semester"]),
+                "name": f"Semester {int(r['semester'])}",
+                "subject_count": int(r["subject_count"] or 0),
+            }
+            for r in rows
+        ]
+    })
+
 @app.route("/api/subjects", methods=["POST"])
 @require_admin
 def create_subject():
@@ -1135,6 +1168,9 @@ def create_subject():
     if not (1 <= semester <= 8):
         return jsonify({"error": "Semester must be between 1 and 8"}), 400
     with get_db() as conn:
+        faculty = qone(conn, "SELECT id FROM faculties WHERE id=%s", (faculty_id,))
+        if not faculty:
+            return jsonify({"error": "Faculty not found"}), 404
         with conn.cursor() as c:
             c.execute("""
                 INSERT INTO subjects (name, code, faculty_id, semester)
@@ -1150,16 +1186,23 @@ def create_subject():
 @require_admin
 def update_subject(sid):
     d = request.json or {}
-    name     = (d.get("name") or "").strip()
-    code     = (d.get("code") or "").strip() or None
-    semester = d.get("semester")
+    name       = (d.get("name") or "").strip()
+    code       = (d.get("code") or "").strip()
+    faculty_id = d.get("faculty_id")
+    semester   = d.get("semester")
+    if faculty_id:
+        with get_db() as conn:
+            faculty = qone(conn, "SELECT id FROM faculties WHERE id=%s", (faculty_id,))
+        if not faculty:
+            return jsonify({"error": "Faculty not found"}), 404
     if semester:
         semester = int(semester)
         if not (1 <= semester <= 8):
             return jsonify({"error": "Semester must be between 1 and 8"}), 400
     sets, params = [], []
-    if name:    sets.append("name=%s");    params.append(name)
-    if code:    sets.append("code=%s");    params.append(code)
+    if name:       sets.append("name=%s");       params.append(name)
+    if "code" in d: sets.append("code=%s");      params.append(code or None)
+    if faculty_id: sets.append("faculty_id=%s"); params.append(faculty_id)
     if semester: sets.append("semester=%s"); params.append(semester)
     if not sets: return jsonify({"error": "Nothing to update"}), 400
     params.append(sid)
@@ -1558,21 +1601,20 @@ def teacher_mark_attendance():
             return jsonify({"error": "Student not in your class"}), 403
 
         # Upsert attendance with debounce
-            key = (student_id, att_date)
-            ts = time.time()
-            # purge expired entries
-            for k, v in list(_recent_marks.items()):
-                if ts - v > _RECENT_MARK_TTL:
-                    _recent_marks.pop(k, None)
-            recently = key in _recent_marks
-            if not recently:
-                qexec(conn, """
+        key = (student_id, att_date, teacher["subject_id"])
+        ts = time.time()
+        for k, v in list(_recent_marks.items()):
+            if ts - v > _RECENT_MARK_TTL:
+                _recent_marks.pop(k, None)
+        recently = key in _recent_marks
+        if not recently:
+            qexec(conn, """
                 INSERT INTO attendance (student_id, teacher_id, subject_id, date, time, status, note)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (student_id, date) DO UPDATE
+                ON CONFLICT (student_id, date, subject_id) DO UPDATE
                     SET status=EXCLUDED.status, time=EXCLUDED.time, note=EXCLUDED.note, teacher_id=EXCLUDED.teacher_id
-                """, (student_id, teacher["id"], teacher["subject_id"], att_date, att_time, status, note))
-                _recent_marks[key] = ts
+            """, (student_id, teacher["id"], teacher["subject_id"], att_date, att_time, status, note))
+            _recent_marks[key] = ts
 
     return jsonify({"marked": True, "student_id": student_id, "status": status})
 
@@ -1604,7 +1646,7 @@ def teacher_recognize():
     if sim >= THRESHOLD and sid:
         today = date.today().isoformat()
         now   = datetime.now().strftime("%H:%M:%S")
-        key = (sid, today)
+        key = (sid, today, teacher["subject_id"])
         ts = time.time()
         for k, v in list(_recent_marks.items()):
             if ts - v > _RECENT_MARK_TTL:
@@ -1617,7 +1659,7 @@ def teacher_recognize():
                     c.execute("""
                         INSERT INTO attendance (student_id, teacher_id, subject_id, date, time, status)
                         VALUES (%s,%s,%s,%s,%s,'Present')
-                        ON CONFLICT (student_id, date) DO NOTHING
+                        ON CONFLICT (student_id, date, subject_id) DO NOTHING
                     """, (sid, teacher["id"], teacher["subject_id"], today, now))
                     marked = c.rowcount == 1
                     if marked:
