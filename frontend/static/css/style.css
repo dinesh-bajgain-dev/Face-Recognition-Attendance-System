@@ -1946,7 +1946,7 @@ label .req {
   color: var(--amber);
 }
 
-/* ── Voice toggle button ─────────────────────────────────────────────────── */
+/* ── Voice toggle button ────────────────────────────────────────────────── */
 .csb-voice-btn {
   display: inline-flex;
   align-items: center;
