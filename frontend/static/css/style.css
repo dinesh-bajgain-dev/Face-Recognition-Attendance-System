@@ -2046,7 +2046,7 @@ label .req {
   letter-spacing: 0.06em;
 }
 
-/* ── Step 1: Profile ──────────────────────────────────────────────── */
+/* ── Step 1: Profile ─────────────────────────────────────────────── */
 .enroll-two-panel {
   display: grid;
   grid-template-columns: 1fr 280px;
