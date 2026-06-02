@@ -3671,7 +3671,6 @@ label .req {
   padding: 2rem;
 }
 
-
 /* ── Migrated from index.html: role panels, modals, tabs ─────────────── */
 /* ── Role Selector ─────────────────────────────────── */
 .role-selector {
@@ -4068,15 +4067,16 @@ label .req {
 }
 .analytics-card {
   /* existing: background, border, padding */
-  overflow: hidden;          /* clip any accidental overflow */
+  overflow: hidden; /* clip any accidental overflow */
 }
 
 .analytics-card canvas#dashboardChart {
   /* ISSUE 1 FIX: hard cap — chart never taller than this regardless of rows */
-  max-height: 260px !important;
-  height: 260px !important;
+  max-height: 420px !important;
+  height: 420px !important;
   width: 100% !important;
   display: block;
+  image-rendering: crisp-edges;
 }
 
 /* Reports charts — same treatment so they don't shift layout */
