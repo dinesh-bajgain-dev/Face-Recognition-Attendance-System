@@ -20,27 +20,18 @@ log = logging.getLogger("frs")
 app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
-# In-memory recent marks: {(student_id, date): timestamp}
 _recent_marks = {}
-_RECENT_MARK_TTL = 60  # seconds to debounce repeated marks
+_RECENT_MARK_TTL = 60
 
 # ── Config ────────────────────────────────────────────────────────────────
 PG_DSN    = os.getenv("DATABASE_URL", "postgresql://frs_user:frs123@localhost:5432/frs")
 THRESHOLD = float(os.getenv("RECOGNITION_THRESHOLD", "0.80"))
 SKIP      = int(os.getenv("FRAME_SKIP", "2"))
 
-# ── Email — Brevo (formerly Sendinblue) ───────────────────────────────────
-# Sign up free at brevo.com → Settings → SMTP & API → API Keys
-# Set BREVO_API_KEY and BREVO_FROM in your .env file.
-# Free tier: 300 emails/day, no credit card required.
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_FROM    = os.getenv("BREVO_FROM", "")
 EMAIL_ENABLED = bool(BREVO_API_KEY and BREVO_FROM)
 
-# FIX: Build headers lazily at send-time — NOT at module level.
-# If built at module level, BREVO_API_KEY is still "" when the dict is
-# evaluated (before load_dotenv finishes), so every request would send
-# an empty API key and get a Brevo 401 error.
 def _brevo_headers():
     return {
         "accept":       "application/json",
@@ -49,7 +40,6 @@ def _brevo_headers():
     }
 
 # ── Connection pool ───────────────────────────────────────────────────────
-# Replaces per-request psycopg2.connect() — min=2 warm connections, max=20.
 _pool: "psycopg2.pool.ThreadedConnectionPool | None" = None
 
 def _get_pool():
@@ -62,7 +52,6 @@ def _get_pool():
         log.info("Connection pool ready.")
     return _pool
 
-# ── DB ────────────────────────────────────────────────────────────────────
 @contextmanager
 def get_db(register_pgvector=True):
     pool = _get_pool()
@@ -72,7 +61,7 @@ def get_db(register_pgvector=True):
             from pgvector.psycopg2 import register_vector
             register_vector(conn)
         except Exception:
-            pass  # pgvector optional
+            pass
     try:
         yield conn
         conn.commit()
@@ -96,35 +85,24 @@ def qexec(conn, sql, p=()):
         c.execute(sql, p); return c.rowcount
 
 def total_attendance_days(conn, dept=None, subject_id=None, teacher_id=None):
-    """Count distinct attendance dates with optional filters."""
     if teacher_id:
-        row = qone(conn, """
-            SELECT COUNT(DISTINCT a.date) AS total_days
-            FROM attendance a WHERE a.teacher_id = %s
-        """, (teacher_id,))
+        row = qone(conn, "SELECT COUNT(DISTINCT a.date) AS total_days FROM attendance a WHERE a.teacher_id = %s", (teacher_id,))
     elif subject_id:
-        row = qone(conn, """
-            SELECT COUNT(DISTINCT a.date) AS total_days
-            FROM attendance a WHERE a.subject_id = %s
-        """, (subject_id,))
+        row = qone(conn, "SELECT COUNT(DISTINCT a.date) AS total_days FROM attendance a WHERE a.subject_id = %s", (subject_id,))
     elif dept:
         row = qone(conn, """
-            SELECT COUNT(DISTINCT a.date) AS total_days
-            FROM attendance a
-            JOIN students s ON s.student_id = a.student_id
-            WHERE s.department = %s
+            SELECT COUNT(DISTINCT a.date) AS total_days FROM attendance a
+            JOIN students s ON s.student_id = a.student_id WHERE s.department = %s
         """, (dept,))
     else:
         row = qone(conn, "SELECT COUNT(DISTINCT date) AS total_days FROM attendance")
     return int(row["total_days"] or 0) if row else 0
 
 def _has_pgvector(conn):
-    """Check if the vector extension is already installed (by a superuser)."""
     row = qone(conn, "SELECT 1 FROM pg_type WHERE typname = 'vector'")
     return bool(row)
 
 def _ddl(conn, sql, label=""):
-    """Execute one DDL statement, log warnings but never crash the server."""
     try:
         with conn.cursor() as c:
             c.execute(sql)
@@ -133,42 +111,25 @@ def _ddl(conn, sql, label=""):
     except Exception as exc:
         log.warning("  DDL warn [%s]: %s", label, exc)
 
-PGVECTOR_AVAILABLE = False   # updated by init_db()
+PGVECTOR_AVAILABLE = False
 
 def init_db():
-    """
-    Initialise schema safely:
-    - Tries CREATE EXTENSION vector — skips gracefully if user lacks superuser.
-      Run `psql -U postgres -d frs -c "CREATE EXTENSION IF NOT EXISTS vector;"`
-      once as a superuser if you want native vector similarity search.
-    - Falls back to TEXT embedding column when pgvector is unavailable.
-    - Every DDL statement runs individually so one failure never aborts the rest.
-    """
     global PGVECTOR_AVAILABLE
     log.info("Initialising database schema …")
     conn = psycopg2.connect(PG_DSN, connect_timeout=10)
     conn.autocommit = True
     try:
-        # ── Try to create the vector extension (needs superuser once) ─────
         try:
             with conn.cursor() as c:
                 c.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             log.info("pgvector extension ready.")
         except Exception as exc:
-            log.warning(
-                "pgvector extension could not be created (%s). "
-                "Run: psql -U postgres -d frs -c "
-                "\"CREATE EXTENSION IF NOT EXISTS vector;\" "
-                "as a superuser once. Falling back to TEXT embeddings.",
-                exc,
-            )
+            log.warning("pgvector extension could not be created (%s). Falling back to TEXT embeddings.", exc)
 
-        # Detect whether vector type is now available
         PGVECTOR_AVAILABLE = _has_pgvector(conn)
         embedding_col = "vector(512)" if PGVECTOR_AVAILABLE else "TEXT"
         log.info("Embedding column type: %s", embedding_col)
 
-        # ── Users ─────────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS users (
                 id            SERIAL PRIMARY KEY,
@@ -178,7 +139,6 @@ def init_db():
             )
         """, "users")
 
-        # ── Students ──────────────────────────────────────────────────────
         _ddl(conn, f"""
             CREATE TABLE IF NOT EXISTS students (
                 id           SERIAL  PRIMARY KEY,
@@ -196,7 +156,6 @@ def init_db():
             )
         """, "students")
 
-        # Safe ADD COLUMN for existing tables that pre-date the new schema
         for stmt in [
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS semester     TEXT",
             "ALTER TABLE students ADD COLUMN IF NOT EXISTS status       TEXT NOT NULL DEFAULT 'active'",
@@ -206,7 +165,6 @@ def init_db():
         ]:
             _ddl(conn, stmt, stmt[:55])
 
-        # ── Faculties ─────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS faculties (
                 id         SERIAL PRIMARY KEY,
@@ -216,7 +174,6 @@ def init_db():
             )
         """, "faculties")
 
-        # ── Subjects ──────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS subjects (
                 id         SERIAL PRIMARY KEY,
@@ -229,7 +186,6 @@ def init_db():
             )
         """, "subjects")
 
-        # ── Time slots ────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS time_slots (
                 id         SERIAL PRIMARY KEY,
@@ -240,7 +196,6 @@ def init_db():
             )
         """, "time_slots")
 
-        # ── Teachers ──────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS teachers (
                 id            SERIAL PRIMARY KEY,
@@ -258,7 +213,37 @@ def init_db():
             )
         """, "teachers")
 
-        # ── Attendance ────────────────────────────────────────────────────
+        # ── ISSUE 4: Teacher multiple assignments ─────────────────────────
+        # A teacher can teach multiple subjects in different semesters/faculties
+        _ddl(conn, """
+            CREATE TABLE IF NOT EXISTS teacher_assignments (
+                id           SERIAL PRIMARY KEY,
+                teacher_id   INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+                faculty_id   INTEGER NOT NULL REFERENCES faculties(id) ON DELETE CASCADE,
+                semester     INTEGER NOT NULL CHECK (semester BETWEEN 1 AND 8),
+                subject_id   INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+                time_slot_id INTEGER REFERENCES time_slots(id),
+                is_primary   BOOLEAN NOT NULL DEFAULT false,
+                created_at   TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(teacher_id, faculty_id, semester, subject_id)
+            )
+        """, "teacher_assignments")
+
+        # ── ISSUE 5: Time slot scheduling uniqueness ──────────────────────
+        # Same faculty + semester + time slot cannot be assigned to two teachers
+        _ddl(conn, """
+            CREATE TABLE IF NOT EXISTS class_schedules (
+                id           SERIAL PRIMARY KEY,
+                faculty_id   INTEGER NOT NULL REFERENCES faculties(id) ON DELETE CASCADE,
+                semester     INTEGER NOT NULL CHECK (semester BETWEEN 1 AND 8),
+                time_slot_id INTEGER NOT NULL REFERENCES time_slots(id) ON DELETE CASCADE,
+                teacher_id   INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+                subject_id   INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
+                created_at   TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(faculty_id, semester, time_slot_id)
+            )
+        """, "class_schedules")
+
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS attendance (
                 id         SERIAL PRIMARY KEY,
@@ -280,7 +265,6 @@ def init_db():
         ]:
             _ddl(conn, stmt, stmt[:55])
 
-        # ── Recognition logs ──────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS recognition_logs (
                 id         SERIAL PRIMARY KEY,
@@ -300,7 +284,6 @@ def init_db():
         ]:
             _ddl(conn, stmt, stmt[:55])
 
-        # ── Activity log ──────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS activity_logs (
                 id          SERIAL PRIMARY KEY,
@@ -313,7 +296,6 @@ def init_db():
             )
         """, "activity_logs")
 
-        # ── Email log ─────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS email_log (
                 id          SERIAL PRIMARY KEY,
@@ -326,7 +308,6 @@ def init_db():
             )
         """, "email_log")
 
-        # ── Sessions ──────────────────────────────────────────────────────
         _ddl(conn, """
             CREATE TABLE IF NOT EXISTS sessions (
                 id         SERIAL PRIMARY KEY,
@@ -339,12 +320,10 @@ def init_db():
             )
         """, "sessions")
 
-        # Index on token so every _get_session() lookup is O(log n)
         _ddl(conn,
              "CREATE INDEX IF NOT EXISTS sessions_token_idx ON sessions (token)",
              "sessions_token_idx")
 
-        # ── Seed data ─────────────────────────────────────────────────────
         _ddl(conn, """
             INSERT INTO users (username, password_hash, role)
             VALUES ('admin',
@@ -368,7 +347,6 @@ def init_db():
             ON CONFLICT DO NOTHING
         """, "seed time_slots")
 
-        # ── HNSW index (only if pgvector is available) ────────────────────
         if PGVECTOR_AVAILABLE:
             _ddl(conn, """
                 CREATE INDEX IF NOT EXISTS students_embedding_hnsw
@@ -422,7 +400,6 @@ def extract_embeddings(frames_b64):
     return mean_emb, thumbnail
 
 def _cosine_similarity(a, b):
-    """Pure-numpy cosine similarity used when pgvector is unavailable."""
     a = np.asarray(a, dtype=np.float32)
     b = np.asarray(b, dtype=np.float32)
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
@@ -431,13 +408,7 @@ def _cosine_similarity(a, b):
     return float(np.dot(a, b) / (na * nb))
 
 def find_best_match(conn, query_emb, faculty_id=None, semester=None):
-    """
-    Find the best-matching student embedding.
-    Uses pgvector ANN search when available, falls back to Python cosine
-    similarity scan when the vector extension is not installed.
-    """
     if PGVECTOR_AVAILABLE:
-        # Fast path — ANN index search inside Postgres
         if faculty_id and semester:
             row = qone(conn, """
                 SELECT student_id, full_name,
@@ -461,9 +432,7 @@ def find_best_match(conn, query_emb, faculty_id=None, semester=None):
         if not row:
             return None, None, 0.0
         return row["student_id"], row["full_name"], float(row["similarity"])
-
     else:
-        # Fallback — load all TEXT embeddings and compute cosine in Python
         if faculty_id and semester:
             rows = qall(conn, """
                 SELECT student_id, full_name, embedding
@@ -494,7 +463,6 @@ def find_best_match(conn, query_emb, faculty_id=None, semester=None):
 
         return best_sid, best_name, best_sim
 
-# ── Frame quality scoring ─────────────────────────────────────────────────
 def score_frame_quality(frame_bgr, face_bbox=None):
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
@@ -538,9 +506,6 @@ def _email_worker():
             log.error("[email_worker] %s", exc)
 
 def _send_email_now(to_addr, subject, html_body, student_id, retry=0):
-    """Send via Brevo Transactional Email API (v3).
-    Headers are built fresh each call so the API key is always current.
-    """
     api_key  = os.getenv("BREVO_API_KEY", "")
     from_addr = os.getenv("BREVO_FROM", "")
     if not (api_key and from_addr):
@@ -556,11 +521,10 @@ def _send_email_now(to_addr, subject, html_body, student_id, retry=0):
                   AND sent_at::date=%s AND success=true
             """, (student_id, subject, today))
         if already:
-            return  # already sent today, skip duplicate
+            return
     except Exception:
         pass
 
-    # Brevo v3 payload format
     payload = json.dumps({
         "sender":      {"name": "वेदनेत्रम् Attendance", "email": from_addr},
         "to":          [{"email": to_addr}],
@@ -573,7 +537,7 @@ def _send_email_now(to_addr, subject, html_body, student_id, retry=0):
             "https://api.brevo.com/v3/smtp/email",
             data    = payload,
             method  = "POST",
-            headers = _brevo_headers(),   # read key fresh every call
+            headers = _brevo_headers(),
         )
         with urllib.request.urlopen(req, timeout=15):
             pass
@@ -598,7 +562,6 @@ def _send_email_now(to_addr, subject, html_body, student_id, retry=0):
         if retry < 2:
             time.sleep(8 * (retry + 1))
             _send_email_now(to_addr, subject, html_body, student_id, retry + 1)
-            _send_email_now(to_addr, subject, html_body, student_id, retry+1)
 
 def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to, subject_name=None, teacher_name=None):
     if not EMAIL_ENABLED or not email_to:
@@ -617,50 +580,17 @@ def queue_attendance_email(student_id, name, dept, att_date, att_time, email_to,
     except: pass
 
     subject_line = f"Attendance Confirmed — {att_date}"
-    extra_rows = ""
-    if subject_name:
-        extra_rows += f"""<tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;">Subject</td>
-            <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{subject_name}</td></tr>"""
-    if teacher_name:
-        extra_rows += f"""<tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;">Teacher</td>
-            <td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{teacher_name}</td></tr>"""
-
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"/></head>
-<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:32px 0;">
-<tr><td align="center">
-<table width="560" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);">
-<tr><td style="background:#1B2A4A;padding:28px 36px;">
-<p style="margin:0;font-size:22px;font-weight:700;color:#fff;">वेदनेत्रम्</p>
-<p style="margin:4px 0 0;font-size:13px;color:#93C5FD;">Automated Attendance Notification</p>
-</td></tr>
-<tr><td style="background:#166534;padding:14px 36px;">
-<p style="margin:0;font-size:15px;font-weight:600;color:#DCFCE7;">✓ &nbsp;Attendance Marked Successfully</p>
-</td></tr>
-<tr><td style="padding:32px 36px;">
-<p style="margin:0 0 20px;font-size:15px;color:#374151;">Dear <strong>{name}</strong>,</p>
-<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-<tr style="background:#F9FAFB;"><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;width:40%;">Student ID</td>
-<td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{student_id}</td></tr>
-<tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;">Department</td>
-<td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{dept or '—'}</td></tr>
-{extra_rows}
-<tr style="background:#F9FAFB;"><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;">Date</td>
-<td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{att_date}</td></tr>
-<tr><td style="padding:12px 16px;font-size:13px;color:#6B7280;border-bottom:1px solid #E5E7EB;">Time</td>
-<td style="padding:12px 16px;font-size:13px;font-weight:600;color:#111827;border-bottom:1px solid #E5E7EB;">{att_time}</td></tr>
-<tr style="background:#F9FAFB;"><td style="padding:12px 16px;font-size:13px;color:#6B7280;">Attendance Rate</td>
-<td style="padding:12px 16px;font-size:13px;font-weight:700;color:#166534;">{pct}</td></tr>
-</table></td></tr>
-<tr><td style="background:#F9FAFB;padding:20px 36px;border-top:1px solid #E5E7EB;">
-<p style="margin:0;font-size:12px;color:#9CA3AF;">© 2026 Face Recognition Attendance System · Automated Notification</p>
-</td></tr></table></td></tr></table></body></html>"""
+    html = f"""<!DOCTYPE html><html><body style="font-family:Arial;">
+<h2>Attendance Confirmed</h2>
+<p>Dear {name},</p>
+<p>Your attendance has been marked for {att_date} at {att_time}.</p>
+<p>Subject: {subject_name or '—'} | Teacher: {teacher_name or '—'}</p>
+<p>Overall Rate: {pct}</p>
+</body></html>"""
     try:
         _email_queue.put_nowait({
-            "to_addr":    email_to,
-            "subject":    subject_line,
-            "html_body":  html,
-            "student_id": student_id,
+            "to_addr": email_to, "subject": subject_line,
+            "html_body": html, "student_id": student_id,
         })
     except queue.Full:
         pass
@@ -734,12 +664,10 @@ def _mark_attendance_and_broadcast(student_id, name, confidence, teacher_id=None
     teacher_name = None
     key = (student_id, today, subject_id)
     ts = time.time()
-    # purge expired entries
     for k, v in list(_recent_marks.items()):
         if ts - v > _RECENT_MARK_TTL:
             _recent_marks.pop(k, None)
 
-    # if recently marked, skip DB insert but still log recognition
     recently = key in _recent_marks
     with get_db() as conn:
         with conn.cursor() as c:
@@ -753,15 +681,12 @@ def _mark_attendance_and_broadcast(student_id, name, confidence, teacher_id=None
                 marked = c.rowcount == 1
                 if marked:
                     _recent_marks[key] = ts
-            # always record recognition log
             c.execute("""
                 INSERT INTO recognition_logs (student_id, full_name, confidence, recognized, teacher_id, subject_id)
                 VALUES (%s,%s,%s,true,%s,%s)
             """, (student_id, name, round(confidence*100,1), teacher_id, subject_id))
         if marked:
-            row = qone(conn,
-                "SELECT department, email FROM students WHERE student_id=%s",
-                (student_id,))
+            row = qone(conn, "SELECT department, email FROM students WHERE student_id=%s", (student_id,))
             if row:
                 dept  = row.get("department")
                 email = row.get("email")
@@ -803,13 +728,11 @@ def _log_activity(admin_user, action, target_type, target_id=None, detail=None):
 def _hash(pw): return hashlib.sha256(pw.encode()).hexdigest()
 
 def _get_admin_username():
-    """Safely get admin username from g.user, fallback to 'unknown'."""
     if g.user and isinstance(g.user, dict) and "username" in g.user:
         return g.user["username"]
     return "unknown"
 
 def _create_session(user_type, user_id=None, student_id=None):
-    """Create a secure session token and store it in DB."""
     token = secrets.token_hex(32)
     with get_db() as conn:
         qexec(conn, """
@@ -819,7 +742,6 @@ def _create_session(user_type, user_id=None, student_id=None):
     return token
 
 def _get_session(token):
-    """Validate session token and return session info."""
     if not token:
         return None
     with get_db() as conn:
@@ -830,7 +752,6 @@ def _get_session(token):
     return sess
 
 def require_auth(roles=None):
-    """Decorator: require valid session, optionally restrict to roles."""
     from functools import wraps
     def decorator(fn):
         @wraps(fn)
@@ -838,8 +759,8 @@ def require_auth(roles=None):
             token = request.headers.get("Authorization","").replace("Bearer ","")
             sess  = _get_session(token)
             if not sess:
-                return jsonify({"error":"Unauthorized"}), 401
-            # Role check
+                # ── ISSUE 6 FIX: Return structured error so frontend can detect expired session ──
+                return jsonify({"error":"Unauthorized", "code":"SESSION_EXPIRED"}), 401
             allowed = roles or ["admin", "teacher", "student"]
             if sess["user_type"] not in allowed:
                 return jsonify({"error":"Forbidden"}), 403
@@ -847,7 +768,6 @@ def require_auth(roles=None):
             g.role     = sess["user_type"]
             g.user_id  = sess.get("user_id")
             g.student_id = sess.get("student_id")
-            # Load full user object into g.user
             if sess["user_type"] == "admin" and sess.get("user_id"):
                 with get_db() as conn:
                     g.user = qone(conn, "SELECT id, username, role FROM users WHERE id=%s", (sess["user_id"],))
@@ -871,7 +791,6 @@ def require_auth(roles=None):
         return wrapper
     return decorator
 
-# Backward-compat simple auth (admin only, using old token = password_hash)
 def require_admin(fn):
     from functools import wraps
     @wraps(fn)
@@ -890,7 +809,8 @@ def require_admin(fn):
             user = qone(conn,
                 "SELECT id,username,role FROM users WHERE password_hash=%s AND role='admin'",(token,))
         if not user:
-            return jsonify({"error":"Unauthorized"}), 401
+            # ── ISSUE 6 FIX: Structured error for expired/invalid session ──
+            return jsonify({"error":"Unauthorized", "code":"SESSION_EXPIRED"}), 401
         g.user = user
         g.role = "admin"
         g.session = None
@@ -910,25 +830,19 @@ def health():
             "db":        "ok",
             "email":     "enabled" if EMAIL_ENABLED else "disabled",
             "timestamp": datetime.now().isoformat(),
-            "version":   "3.0",
+            "version":   "3.1",
         })
     except Exception as e:
         return jsonify({"status": "error", "db": "error", "detail": str(e)}), 503
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  ROUTES — AUTHENTICATION (unified login endpoint, 3 user types)
+#  ROUTES — AUTHENTICATION
 # ═══════════════════════════════════════════════════════════════════════════
 
 @app.route("/api/auth/login", methods=["POST"])
 def login():
-    """
-    Unified login. Returns token + role.
-    Roles: admin, teacher, student
-    Student login: email only (no password). Admin: username + password.
-    Teacher login: registered email + password.
-    """
     d = request.json or {}
-    role_hint = d.get("role", "admin")  # 'admin', 'teacher', 'student'
+    role_hint = d.get("role", "admin")
 
     if role_hint == "student":
         email = (d.get("email") or "").strip().lower()
@@ -972,19 +886,31 @@ def login():
                 LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
                 WHERE t.id=%s
             """, (teacher["id"],))
+            # Load all assignments
+            assignments = qall(conn, """
+                SELECT ta.*, f.name AS faculty_name, sub.name AS subject_name,
+                       ts.label AS time_slot_label
+                FROM teacher_assignments ta
+                LEFT JOIN faculties f ON f.id = ta.faculty_id
+                LEFT JOIN subjects sub ON sub.id = ta.subject_id
+                LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+                WHERE ta.teacher_id = %s
+                ORDER BY ta.faculty_id, ta.semester, ta.subject_id
+            """, (teacher["id"],))
         return jsonify({
-            "token":       token,
-            "role":        "teacher",
-            "teacher_id":  teacher["teacher_id"],
-            "full_name":   teacher["full_name"],
-            "faculty":     full.get("faculty_name"),
-            "semester":    teacher["semester"],
-            "subject":     full.get("subject_name"),
-            "time_slot":   full.get("time_slot_label"),
-            "faculty_id":  teacher["faculty_id"],
-            "subject_id":  teacher["subject_id"],
-            "time_slot_id":teacher["time_slot_id"],
-            "db_id":       teacher["id"],
+            "token":        token,
+            "role":         "teacher",
+            "teacher_id":   teacher["teacher_id"],
+            "full_name":    teacher["full_name"],
+            "faculty":      full.get("faculty_name") if full else None,
+            "semester":     teacher["semester"],
+            "subject":      full.get("subject_name") if full else None,
+            "time_slot":    full.get("time_slot_label") if full else None,
+            "faculty_id":   teacher["faculty_id"],
+            "subject_id":   teacher["subject_id"],
+            "time_slot_id": teacher["time_slot_id"],
+            "db_id":        teacher["id"],
+            "assignments":  assignments,
         })
 
     else:  # admin
@@ -997,13 +923,28 @@ def login():
         if not user:
             return jsonify({"error": "Invalid credentials"}), 401
         token = _create_session("admin", user_id=user["id"])
-        # Also return legacy token for backward compat
         return jsonify({
             "token":        token,
             "legacy_token": user["password_hash"],
             "role":         user["role"],
             "username":     user["username"]
         })
+
+# ── ISSUE 6 FIX: Token validation endpoint ─────────────────────────────
+@app.route("/api/auth/validate")
+def validate_token():
+    """
+    Check if the current token is still valid without requiring auth decorator.
+    Frontend calls this on page load to detect stale localStorage tokens.
+    Returns 200 {valid:true} or 200 {valid:false} — never 401.
+    """
+    token = request.headers.get("Authorization","").replace("Bearer ","")
+    if not token:
+        return jsonify({"valid": False, "reason": "no_token"})
+    sess = _get_session(token)
+    if not sess:
+        return jsonify({"valid": False, "reason": "session_expired"})
+    return jsonify({"valid": True, "user_type": sess["user_type"]})
 
 @app.route("/api/auth/me")
 def me():
@@ -1012,10 +953,9 @@ def me():
     if sess:
         return jsonify({"user_type": sess["user_type"], "user_id": sess.get("user_id"),
                         "student_id": sess.get("student_id")})
-    # Legacy fallback
     with get_db() as conn:
         user = qone(conn, "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
-    if not user: return jsonify({"error":"Unauthorized"}), 401
+    if not user: return jsonify({"error":"Unauthorized", "code":"SESSION_EXPIRED"}), 401
     return jsonify(user)
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -1048,7 +988,7 @@ def change_password():
     return jsonify({"updated": True})
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  ROUTES — FACULTIES (admin)
+#  ROUTES — FACULTIES
 # ═══════════════════════════════════════════════════════════════════════════
 @app.route("/api/faculties")
 def list_faculties():
@@ -1123,12 +1063,6 @@ def list_subjects():
 
 @app.route("/api/semesters")
 def list_semesters():
-    """Return available academic semesters for a faculty.
-
-    The current schema stores semester as an integer on subjects/teachers and
-    as text on students. Until a dedicated semesters table exists, this endpoint
-    exposes the supported academic range while annotating related subject counts.
-    """
     faculty_id = request.args.get("faculty_id")
     if not faculty_id:
         return jsonify({"semesters": []})
@@ -1228,15 +1162,23 @@ def delete_subject(sid):
 # ═══════════════════════════════════════════════════════════════════════════
 @app.route("/api/time-slots")
 def list_time_slots():
-    # FIX: cast TIME columns to TEXT — psycopg2 returns datetime.time which
-    # is not JSON-serialisable, causing HTTP 500 on every time-slots request.
     with get_db() as conn:
         rows = qall(conn, """
-            SELECT id, label,
-                   start_time::text AS start_time,
-                   end_time::text   AS end_time,
-                   created_at::text AS created_at
-            FROM time_slots ORDER BY start_time
+            SELECT ts.id, ts.label,
+                   ts.start_time::text AS start_time,
+                   ts.end_time::text   AS end_time,
+                   ts.created_at::text AS created_at,
+                   -- Scheduling info (ISSUE 2: time slots now have real meaning)
+                   cs.faculty_id, cs.semester,
+                   f.name AS assigned_faculty,
+                   t.full_name AS assigned_teacher,
+                   sub.name AS assigned_subject
+            FROM time_slots ts
+            LEFT JOIN class_schedules cs ON cs.time_slot_id = ts.id
+            LEFT JOIN faculties f ON f.id = cs.faculty_id
+            LEFT JOIN teachers t ON t.id = cs.teacher_id
+            LEFT JOIN subjects sub ON sub.id = cs.subject_id
+            ORDER BY ts.start_time
         """)
     return jsonify({"time_slots": rows})
 
@@ -1267,8 +1209,97 @@ def delete_time_slot(tsid):
     _log_activity(g.user["username"], "delete_time_slot", "time_slot", str(tsid))
     return jsonify({"deleted": True})
 
+# ── ISSUE 2: Class schedule endpoints (time slots now own a schedule slot) ──
+@app.route("/api/schedule")
+def get_schedule():
+    """Return weekly class schedule for a faculty + semester."""
+    faculty_id = request.args.get("faculty_id")
+    semester   = request.args.get("semester")
+    if not faculty_id or not semester:
+        return jsonify({"error": "faculty_id and semester required"}), 400
+    with get_db() as conn:
+        rows = qall(conn, """
+            SELECT cs.id, cs.time_slot_id,
+                   ts.label AS time_slot_label,
+                   ts.start_time::text, ts.end_time::text,
+                   t.full_name AS teacher_name, t.teacher_id,
+                   sub.name AS subject_name, sub.code AS subject_code
+            FROM class_schedules cs
+            JOIN time_slots ts ON ts.id = cs.time_slot_id
+            LEFT JOIN teachers t ON t.id = cs.teacher_id
+            LEFT JOIN subjects sub ON sub.id = cs.subject_id
+            WHERE cs.faculty_id = %s AND cs.semester = %s
+            ORDER BY ts.start_time
+        """, (faculty_id, semester))
+    return jsonify({"schedule": rows})
+
+@app.route("/api/schedule", methods=["POST"])
+@require_admin
+def assign_schedule():
+    """
+    ISSUE 5: Assign a teacher to a time slot for a given faculty+semester.
+    Enforces UNIQUE(faculty_id, semester, time_slot_id).
+    """
+    d = request.json or {}
+    faculty_id   = d.get("faculty_id")
+    semester     = d.get("semester")
+    time_slot_id = d.get("time_slot_id")
+    teacher_id   = d.get("teacher_id")
+    subject_id   = d.get("subject_id")
+
+    if not all([faculty_id, semester, time_slot_id]):
+        return jsonify({"error": "faculty_id, semester, time_slot_id required"}), 400
+
+    semester = int(semester)
+    if not (1 <= semester <= 8):
+        return jsonify({"error": "Semester must be between 1 and 8"}), 400
+
+    with get_db() as conn:
+        # Validate faculty exists
+        fac = qone(conn, "SELECT id, name FROM faculties WHERE id=%s", (faculty_id,))
+        if not fac:
+            return jsonify({"error": "Faculty not found"}), 404
+
+        # Check for conflict (ISSUE 5)
+        existing = qone(conn, """
+            SELECT cs.id, t.full_name AS teacher_name
+            FROM class_schedules cs
+            LEFT JOIN teachers t ON t.id = cs.teacher_id
+            WHERE cs.faculty_id=%s AND cs.semester=%s AND cs.time_slot_id=%s
+        """, (faculty_id, semester, time_slot_id))
+
+        if existing:
+            ts = qone(conn, "SELECT label FROM time_slots WHERE id=%s", (time_slot_id,))
+            return jsonify({
+                "error": f"Schedule conflict: {fac['name']} Semester {semester} at "
+                         f"'{ts['label'] if ts else time_slot_id}' is already assigned to "
+                         f"{existing['teacher_name'] or 'another teacher'}.",
+                "code":  "SCHEDULE_CONFLICT",
+                "conflict_id": existing["id"]
+            }), 409
+
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO class_schedules (faculty_id, semester, time_slot_id, teacher_id, subject_id)
+                VALUES (%s,%s,%s,%s,%s)
+                RETURNING id
+            """, (faculty_id, semester, time_slot_id, teacher_id, subject_id))
+            new_id = c.fetchone()[0]
+
+    _log_activity(g.user["username"], "assign_schedule", "schedule", str(new_id))
+    return jsonify({"id": new_id, "assigned": True}), 201
+
+@app.route("/api/schedule/<int:sid>", methods=["DELETE"])
+@require_admin
+def remove_schedule(sid):
+    with get_db() as conn:
+        rows = qexec(conn, "DELETE FROM class_schedules WHERE id=%s", (sid,))
+    if rows == 0:
+        return jsonify({"error": "Schedule not found"}), 404
+    return jsonify({"deleted": True})
+
 # ═══════════════════════════════════════════════════════════════════════════
-#  ROUTES — TEACHERS (admin manages)
+#  ROUTES — TEACHERS
 # ═══════════════════════════════════════════════════════════════════════════
 @app.route("/api/teachers")
 @require_admin
@@ -1288,6 +1319,20 @@ def list_teachers():
             LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
             ORDER BY t.full_name
         """)
+        # Attach assignments to each teacher
+        for row in rows:
+            row["assignments"] = qall(conn, """
+                SELECT ta.id, ta.faculty_id, ta.semester, ta.subject_id, ta.time_slot_id,
+                       ta.is_primary,
+                       f.name AS faculty_name, sub.name AS subject_name,
+                       ts.label AS time_slot_label
+                FROM teacher_assignments ta
+                LEFT JOIN faculties f ON f.id = ta.faculty_id
+                LEFT JOIN subjects sub ON sub.id = ta.subject_id
+                LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+                WHERE ta.teacher_id = %s
+                ORDER BY ta.is_primary DESC, ta.faculty_id, ta.semester
+            """, (row["id"],))
     return jsonify({"teachers": rows})
 
 @app.route("/api/teachers/<int:tid>")
@@ -1306,7 +1351,19 @@ def get_teacher(tid):
             LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
             WHERE t.id=%s
         """, (tid,))
-    if not row: return jsonify({"error": "Not found"}), 404
+        if not row: return jsonify({"error": "Not found"}), 404
+        row["assignments"] = qall(conn, """
+            SELECT ta.id, ta.faculty_id, ta.semester, ta.subject_id, ta.time_slot_id,
+                   ta.is_primary,
+                   f.name AS faculty_name, sub.name AS subject_name,
+                   ts.label AS time_slot_label
+            FROM teacher_assignments ta
+            LEFT JOIN faculties f ON f.id = ta.faculty_id
+            LEFT JOIN subjects sub ON sub.id = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s
+            ORDER BY ta.is_primary DESC, ta.faculty_id, ta.semester
+        """, (tid,))
     return jsonify(row)
 
 @app.route("/api/teachers", methods=["POST"])
@@ -1318,10 +1375,10 @@ def create_teacher():
     password     = (d.get("password") or "").strip()
     email        = (d.get("email") or "").strip() or None
     phone        = (d.get("phone") or "").strip() or None
-    faculty_id   = d.get("faculty_id")
-    semester     = d.get("semester")
-    subject_id   = d.get("subject_id")
-    time_slot_id = d.get("time_slot_id")
+    faculty_id   = d.get("faculty_id") or None
+    semester     = d.get("semester") or None
+    subject_id   = d.get("subject_id") or None
+    time_slot_id = d.get("time_slot_id") or None
 
     if not teacher_id or not full_name or not password:
         return jsonify({"error": "teacher_id, full_name, password required"}), 400
@@ -1333,6 +1390,18 @@ def create_teacher():
         semester = int(semester)
         if not (1 <= semester <= 8):
             return jsonify({"error": "Semester must be between 1 and 8"}), 400
+
+    # ── ISSUE 3 FIX: Validate subject belongs to the declared faculty+semester ──
+    if subject_id and faculty_id and semester:
+        with get_db() as conn:
+            subj = qone(conn,
+                "SELECT id FROM subjects WHERE id=%s AND faculty_id=%s AND semester=%s",
+                (subject_id, faculty_id, semester))
+        if not subj:
+            return jsonify({
+                "error": "Selected subject does not belong to the selected faculty and semester. "
+                         "Please select a subject from the correct semester."
+            }), 400
 
     with get_db() as conn:
         existing = qone(conn, "SELECT id FROM teachers WHERE teacher_id=%s", (teacher_id,))
@@ -1348,6 +1417,19 @@ def create_teacher():
             """, (teacher_id, full_name, _hash(password), email, phone,
                   faculty_id, semester, subject_id, time_slot_id))
             new_id = c.fetchone()[0]
+
+        # ── ISSUE 4: Create primary assignment record ──────────────────────
+        if faculty_id and semester and subject_id:
+            try:
+                qexec(conn, """
+                    INSERT INTO teacher_assignments
+                        (teacher_id, faculty_id, semester, subject_id, time_slot_id, is_primary)
+                    VALUES (%s,%s,%s,%s,%s,true)
+                    ON CONFLICT (teacher_id, faculty_id, semester, subject_id) DO NOTHING
+                """, (new_id, faculty_id, semester, subject_id, time_slot_id))
+            except Exception as e:
+                log.warning("Could not create primary assignment: %s", e)
+
     _log_activity(g.user["username"], "create_teacher", "teacher", str(new_id), full_name)
     return jsonify({"id": new_id, "teacher_id": teacher_id}), 201
 
@@ -1358,7 +1440,6 @@ def update_teacher(tid):
     ALLOWED = {"full_name","email","phone","faculty_id","semester","subject_id","time_slot_id","status"}
     fields  = {k: d[k] for k in ALLOWED if k in d}
 
-    # Handle password change
     if d.get("password"):
         pw = d["password"].strip()
         if len(pw) < 6:
@@ -1376,6 +1457,20 @@ def update_teacher(tid):
         if not (1 <= fields["semester"] <= 8):
             return jsonify({"error": "Semester must be between 1 and 8"}), 400
 
+    # ── ISSUE 3 FIX: Validate subject/faculty/semester consistency on update ──
+    subject_id = fields.get("subject_id") or d.get("subject_id")
+    faculty_id = fields.get("faculty_id") or d.get("faculty_id")
+    semester   = fields.get("semester") or d.get("semester")
+    if subject_id and faculty_id and semester:
+        with get_db() as conn:
+            subj = qone(conn,
+                "SELECT id FROM subjects WHERE id=%s AND faculty_id=%s AND semester=%s",
+                (subject_id, faculty_id, int(semester)))
+        if not subj:
+            return jsonify({
+                "error": "Selected subject does not belong to the selected faculty and semester."
+            }), 400
+
     sql = "UPDATE teachers SET " + ", ".join(f"{k}=%s" for k in fields) + " WHERE id=%s"
     with get_db() as conn:
         rows = qexec(conn, sql, list(fields.values()) + [tid])
@@ -1390,23 +1485,18 @@ def update_teacher(tid):
 def delete_teacher(tid):
     try:
         with get_db() as conn:
-            # Check for attendance references
             att_ref = qone(conn, "SELECT COUNT(*) as cnt FROM attendance WHERE teacher_id=%s", (tid,))
             att_count = att_ref.get("cnt", 0) if att_ref else 0
-            
-            # Check for recognition_logs references
             rec_ref = qone(conn, "SELECT COUNT(*) as cnt FROM recognition_logs WHERE teacher_id=%s", (tid,))
             rec_count = rec_ref.get("cnt", 0) if rec_ref else 0
-            
+
             if att_count > 0 or rec_count > 0:
-                total = att_count + rec_count
                 return jsonify({
-                    "error": f"Cannot delete teacher: {att_count} attendance and {rec_count} recognition records reference this teacher. Clear or reassign them first.",
+                    "error": f"Cannot delete teacher: {att_count} attendance and {rec_count} recognition records reference this teacher.",
                     "attendance_count": att_count,
                     "recognition_count": rec_count,
-                    "total_references": total
                 }), 409
-            
+
             rows = qexec(conn, "DELETE FROM teachers WHERE id=%s", (tid,))
         if rows == 0:
             return jsonify({"error": "Teacher not found"}), 404
@@ -1416,108 +1506,193 @@ def delete_teacher(tid):
         log.error("delete_teacher error: %s", e)
         return jsonify({"error": f"Server error: {str(e)}"}), 500
 
-# ─ Teacher Reference Management ──────────────────────────────────────────
+# ── ISSUE 4: Teacher multiple assignment endpoints ────────────────────────
+@app.route("/api/teachers/<int:tid>/assignments")
+@require_admin
+def list_teacher_assignments(tid):
+    with get_db() as conn:
+        rows = qall(conn, """
+            SELECT ta.id, ta.faculty_id, ta.semester, ta.subject_id, ta.time_slot_id,
+                   ta.is_primary, ta.created_at::text,
+                   f.name AS faculty_name, sub.name AS subject_name, sub.code AS subject_code,
+                   ts.label AS time_slot_label, ts.start_time::text, ts.end_time::text
+            FROM teacher_assignments ta
+            LEFT JOIN faculties f ON f.id = ta.faculty_id
+            LEFT JOIN subjects sub ON sub.id = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s
+            ORDER BY ta.is_primary DESC, ta.faculty_id, ta.semester
+        """, (tid,))
+    return jsonify({"assignments": rows})
+
+@app.route("/api/teachers/<int:tid>/assignments", methods=["POST"])
+@require_admin
+def add_teacher_assignment(tid):
+    d = request.json or {}
+    faculty_id   = d.get("faculty_id")
+    semester     = d.get("semester")
+    subject_id   = d.get("subject_id")
+    time_slot_id = d.get("time_slot_id") or None
+    is_primary   = bool(d.get("is_primary", False))
+
+    if not all([faculty_id, semester, subject_id]):
+        return jsonify({"error": "faculty_id, semester, subject_id required"}), 400
+
+    semester = int(semester)
+    if not (1 <= semester <= 8):
+        return jsonify({"error": "Semester must be between 1 and 8"}), 400
+
+    with get_db() as conn:
+        # Verify teacher exists
+        teacher = qone(conn, "SELECT id FROM teachers WHERE id=%s", (tid,))
+        if not teacher:
+            return jsonify({"error": "Teacher not found"}), 404
+
+        # ISSUE 3 validation: subject must belong to faculty+semester
+        subj = qone(conn,
+            "SELECT id FROM subjects WHERE id=%s AND faculty_id=%s AND semester=%s",
+            (subject_id, faculty_id, semester))
+        if not subj:
+            return jsonify({
+                "error": "Subject does not belong to the selected faculty and semester."
+            }), 400
+
+        # Check for schedule conflict (ISSUE 5) if time_slot_id given
+        if time_slot_id:
+            conflict = qone(conn, """
+                SELECT cs.id, t.full_name AS teacher_name
+                FROM class_schedules cs
+                LEFT JOIN teachers t ON t.id = cs.teacher_id
+                WHERE cs.faculty_id=%s AND cs.semester=%s AND cs.time_slot_id=%s
+                  AND cs.teacher_id != %s
+            """, (faculty_id, semester, time_slot_id, tid))
+            if conflict:
+                ts = qone(conn, "SELECT label FROM time_slots WHERE id=%s", (time_slot_id,))
+                fac = qone(conn, "SELECT name FROM faculties WHERE id=%s", (faculty_id,))
+                return jsonify({
+                    "error": f"Schedule conflict: {fac['name'] if fac else faculty_id} "
+                             f"Semester {semester} at '{ts['label'] if ts else time_slot_id}' "
+                             f"is already assigned to {conflict['teacher_name'] or 'another teacher'}.",
+                    "code": "SCHEDULE_CONFLICT"
+                }), 409
+
+        try:
+            with conn.cursor() as c:
+                c.execute("""
+                    INSERT INTO teacher_assignments
+                        (teacher_id, faculty_id, semester, subject_id, time_slot_id, is_primary)
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                    RETURNING id
+                """, (tid, faculty_id, semester, subject_id, time_slot_id, is_primary))
+                new_id = c.fetchone()[0]
+
+            # Also create/update class schedule entry
+            if time_slot_id:
+                qexec(conn, """
+                    INSERT INTO class_schedules (faculty_id, semester, time_slot_id, teacher_id, subject_id)
+                    VALUES (%s,%s,%s,%s,%s)
+                    ON CONFLICT (faculty_id, semester, time_slot_id) DO NOTHING
+                """, (faculty_id, semester, time_slot_id, tid, subject_id))
+
+        except Exception as e:
+            if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                return jsonify({"error": "This assignment already exists for this teacher."}), 409
+            raise
+
+    _log_activity(g.user["username"], "add_teacher_assignment", "teacher_assignment", str(new_id))
+    return jsonify({"id": new_id, "assigned": True}), 201
+
+@app.route("/api/teachers/<int:tid>/assignments/<int:aid>", methods=["DELETE"])
+@require_admin
+def remove_teacher_assignment(tid, aid):
+    with get_db() as conn:
+        # Check if primary — warn if removing primary
+        assignment = qone(conn,
+            "SELECT is_primary FROM teacher_assignments WHERE id=%s AND teacher_id=%s",
+            (aid, tid))
+        if not assignment:
+            return jsonify({"error": "Assignment not found"}), 404
+
+        qexec(conn, "DELETE FROM teacher_assignments WHERE id=%s AND teacher_id=%s", (aid, tid))
+    _log_activity(g.user["username"], "remove_teacher_assignment", "teacher_assignment", str(aid))
+    return jsonify({"deleted": True, "was_primary": assignment.get("is_primary", False)})
+
+# ── Teacher reference management (unchanged from original) ────────────────
 @app.route("/api/teachers/<int:tid>/references")
 @require_admin
 def teacher_references(tid):
-    """List attendance records that reference a teacher (limit 500)."""
     with get_db() as conn:
         rows = qall(conn, """
             SELECT a.id, a.student_id, s.full_name, a.date, a.time, a.status, a.note
             FROM attendance a
             JOIN students s ON s.student_id = a.student_id
-            WHERE a.teacher_id=%s
-            ORDER BY a.date DESC, a.time DESC
-            LIMIT 500
+            WHERE a.teacher_id=%s ORDER BY a.date DESC, a.time DESC LIMIT 500
         """, (tid,))
     return jsonify({"rows": rows, "count": len(rows)})
 
 @app.route("/api/teachers/<int:tid>/clear-attendance", methods=["POST"])
 @require_admin
 def clear_teacher_attendance(tid):
-    """Clear all attendance references for a teacher (set teacher_id to NULL)."""
     with get_db() as conn:
         with conn.cursor() as c:
-            c.execute(
-                "UPDATE attendance SET teacher_id=NULL WHERE teacher_id=%s",
-                (tid,)
-            )
+            c.execute("UPDATE attendance SET teacher_id=NULL WHERE teacher_id=%s", (tid,))
             cleared = c.rowcount
     return jsonify({"cleared": cleared})
 
 @app.route("/api/teachers/<int:tid>/reassign-attendance", methods=["POST"])
 @require_admin
 def reassign_teacher_attendance(tid):
-    """Reassign all attendance references from one teacher to another."""
     d = request.json or {}
     target_tid = d.get("to")
     if not target_tid:
         return jsonify({"error": "Target teacher ID required"}), 400
     with get_db() as conn:
-        # Verify target teacher exists
         target = qone(conn, "SELECT id FROM teachers WHERE id=%s", (target_tid,))
         if not target:
             return jsonify({"error": "Target teacher not found"}), 404
         with conn.cursor() as c:
-            c.execute(
-                "UPDATE attendance SET teacher_id=%s WHERE teacher_id=%s",
-                (target_tid, tid)
-            )
+            c.execute("UPDATE attendance SET teacher_id=%s WHERE teacher_id=%s", (target_tid, tid))
             reassigned = c.rowcount
     return jsonify({"reassigned": reassigned})
 
 @app.route("/api/teachers/<int:tid>/recognition-logs")
 @require_admin
 def teacher_recognition_logs(tid):
-    """List recognition_logs records that reference a teacher (limit 500)."""
     with get_db() as conn:
         rows = qall(conn, """
             SELECT id, student_id, full_name, confidence, recognized, logged_at
-            FROM recognition_logs
-            WHERE teacher_id=%s
-            ORDER BY logged_at DESC
-            LIMIT 500
+            FROM recognition_logs WHERE teacher_id=%s ORDER BY logged_at DESC LIMIT 500
         """, (tid,))
     return jsonify({"rows": rows, "count": len(rows)})
 
 @app.route("/api/teachers/<int:tid>/clear-recognition-logs", methods=["POST"])
 @require_admin
 def clear_teacher_recognition_logs(tid):
-    """Clear all recognition_logs references for a teacher (set teacher_id to NULL)."""
     with get_db() as conn:
         with conn.cursor() as c:
-            c.execute(
-                "UPDATE recognition_logs SET teacher_id=NULL WHERE teacher_id=%s",
-                (tid,)
-            )
+            c.execute("UPDATE recognition_logs SET teacher_id=NULL WHERE teacher_id=%s", (tid,))
             cleared = c.rowcount
     return jsonify({"cleared": cleared})
 
 @app.route("/api/teachers/<int:tid>/reassign-recognition-logs", methods=["POST"])
 @require_admin
 def reassign_teacher_recognition_logs(tid):
-    """Reassign all recognition_logs references from one teacher to another."""
     d = request.json or {}
     target_tid = d.get("to")
     if not target_tid:
         return jsonify({"error": "Target teacher ID required"}), 400
     with get_db() as conn:
-        # Verify target teacher exists
         target = qone(conn, "SELECT id FROM teachers WHERE id=%s", (target_tid,))
         if not target:
             return jsonify({"error": "Target teacher not found"}), 404
         with conn.cursor() as c:
-            c.execute(
-                "UPDATE recognition_logs SET teacher_id=%s WHERE teacher_id=%s",
-                (target_tid, tid)
-            )
+            c.execute("UPDATE recognition_logs SET teacher_id=%s WHERE teacher_id=%s", (target_tid, tid))
             reassigned = c.rowcount
     return jsonify({"reassigned": reassigned})
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  ROUTES — TEACHER PANEL (teacher-specific endpoints)
+#  ROUTES — TEACHER PANEL
 # ═══════════════════════════════════════════════════════════════════════════
-
 @app.route("/api/teacher/profile")
 @require_auth(roles=["teacher"])
 def teacher_profile():
@@ -1526,7 +1701,6 @@ def teacher_profile():
 @app.route("/api/teacher/students")
 @require_auth(roles=["teacher"])
 def teacher_students():
-    """Students belonging to this teacher's faculty + semester."""
     teacher = g.user
     with get_db() as conn:
         students = qall(conn, """
@@ -1534,8 +1708,7 @@ def teacher_students():
                    semester, status, sample_count, enrolled_at::text
             FROM students
             WHERE department = (SELECT name FROM faculties WHERE id=%s)
-              AND semester = %s
-              AND status = 'active'
+              AND semester = %s AND status = 'active'
             ORDER BY full_name
         """, (teacher["faculty_id"], str(teacher["semester"])))
     return jsonify({"students": students, "count": len(students)})
@@ -1543,9 +1716,7 @@ def teacher_students():
 @app.route("/api/teacher/attendance")
 @require_auth(roles=["teacher"])
 def teacher_attendance():
-    """Attendance for teacher's subject on a given date."""
     target     = request.args.get("date", date.today().isoformat())
-    teacher_id = g.user_id
     teacher    = g.user
     with get_db() as conn:
         records = qall(conn, """
@@ -1558,8 +1729,7 @@ def teacher_attendance():
                    AND a.date = %s
                    AND a.subject_id = %s
             WHERE s.department = (SELECT name FROM faculties WHERE id=%s)
-              AND s.semester = %s
-              AND s.status = 'active'
+              AND s.semester = %s AND s.status = 'active'
             ORDER BY s.full_name
         """, (target, teacher["subject_id"], teacher["faculty_id"], str(teacher["semester"])))
     return jsonify({
@@ -1575,7 +1745,6 @@ def teacher_attendance():
 @app.route("/api/teacher/attendance/mark", methods=["POST"])
 @require_auth(roles=["teacher"])
 def teacher_mark_attendance():
-    """Manual attendance mark by teacher."""
     d          = request.json or {}
     student_id = d.get("student_id")
     att_date   = d.get("date", date.today().isoformat())
@@ -1590,7 +1759,6 @@ def teacher_mark_attendance():
         return jsonify({"error": "status must be Present or Absent"}), 400
 
     with get_db() as conn:
-        # Verify student belongs to this teacher's class
         stu = qone(conn, """
             SELECT student_id FROM students
             WHERE student_id=%s
@@ -1600,7 +1768,6 @@ def teacher_mark_attendance():
         if not stu:
             return jsonify({"error": "Student not in your class"}), 403
 
-        # Upsert attendance with debounce
         key = (student_id, att_date, teacher["subject_id"])
         ts = time.time()
         for k, v in list(_recent_marks.items()):
@@ -1621,7 +1788,6 @@ def teacher_mark_attendance():
 @app.route("/api/teacher/recognize", methods=["POST"])
 @require_auth(roles=["teacher"])
 def teacher_recognize():
-    """Face recognition scoped to teacher's class."""
     data    = request.json or {}
     img_b64 = data.get("image")
     if not img_b64: return jsonify({"error": "No image"}), 400
@@ -1691,11 +1857,9 @@ def teacher_recognize():
 @app.route("/api/teacher/attendance/logs")
 @require_auth(roles=["teacher"])
 def teacher_attendance_logs():
-    """Recent attendance history for teacher's subject."""
     teacher = g.user
     days    = int(request.args.get("days", 30))
     with get_db() as conn:
-        # FIX: INTERVAL '%s days' is invalid — use integer multiplication
         rows = qall(conn, """
             SELECT a.student_id, s.full_name, a.date::text, a.time::text, a.status, a.note
             FROM attendance a
@@ -1726,7 +1890,6 @@ def teacher_change_password():
 # ═══════════════════════════════════════════════════════════════════════════
 #  ROUTES — STUDENT PANEL
 # ═══════════════════════════════════════════════════════════════════════════
-
 @app.route("/api/student/profile")
 @require_auth(roles=["student"])
 def student_profile():
@@ -1742,7 +1905,6 @@ def student_profile():
 @app.route("/api/student/attendance")
 @require_auth(roles=["student"])
 def student_attendance():
-    """Student's own attendance records only."""
     student_id = g.student_id
     with get_db() as conn:
         total_days = total_attendance_days(conn)
@@ -1763,8 +1925,7 @@ def student_attendance():
             LEFT JOIN teachers t ON t.id = a.teacher_id
             LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
             WHERE a.student_id=%s
-            ORDER BY a.date DESC, a.time DESC
-            LIMIT 90
+            ORDER BY a.date DESC, a.time DESC LIMIT 90
         """, (student_id,))
 
         monthly = qall(conn, """
@@ -1838,8 +1999,7 @@ def get_student(sid):
 
         logs = qall(conn, """
             SELECT logged_at::text, confidence, recognized
-            FROM recognition_logs
-            WHERE student_id=%s ORDER BY logged_at DESC LIMIT 20
+            FROM recognition_logs WHERE student_id=%s ORDER BY logged_at DESC LIMIT 20
         """, (sid,))
 
         att_records = qall(conn, """
@@ -1848,8 +2008,7 @@ def get_student(sid):
             FROM attendance a
             LEFT JOIN subjects sub ON sub.id = a.subject_id
             LEFT JOIN teachers t ON t.id = a.teacher_id
-            WHERE a.student_id=%s
-            ORDER BY a.date DESC LIMIT 60
+            WHERE a.student_id=%s ORDER BY a.date DESC LIMIT 60
         """, (sid,))
 
     return jsonify({
@@ -1943,8 +2102,7 @@ def get_activity_logs():
         if target:
             rows = qall(conn, """
                 SELECT admin_user,action,target_type,target_id,detail,logged_at::text
-                FROM activity_logs WHERE target_id=%s
-                ORDER BY logged_at DESC LIMIT %s
+                FROM activity_logs WHERE target_id=%s ORDER BY logged_at DESC LIMIT %s
             """, (target, limit))
         else:
             rows = qall(conn, """
@@ -1989,16 +2147,11 @@ def validate_frame():
             mouth_pts = kps[3], kps[4]
             mouth_y   = (mouth_pts[0][1] + mouth_pts[1][1]) / 2
             mouth_dy  = (mouth_y - eye_y) / (face_h + 1e-5)
-            if nose_offset > 0.12:
-                pose_hint = "left"
-            elif nose_offset < -0.12:
-                pose_hint = "right"
-            elif nose_dy < 0.18 and mouth_dy < 0.38:
-                pose_hint = "up"
-            elif nose_dy > 0.25:
-                pose_hint = "down"
-            else:
-                pose_hint = "front"
+            if nose_offset > 0.12:   pose_hint = "left"
+            elif nose_offset < -0.12: pose_hint = "right"
+            elif nose_dy < 0.18 and mouth_dy < 0.38: pose_hint = "up"
+            elif nose_dy > 0.25: pose_hint = "down"
+            else: pose_hint = "front"
     except: pass
 
     return jsonify({
@@ -2050,7 +2203,6 @@ def enroll():
     if mean_emb is None:
         return jsonify({"error":"No faces detected in any image"}), 422
 
-    # Store embedding as vector or JSON text depending on pgvector availability
     if PGVECTOR_AVAILABLE:
         emb_value = mean_emb.tolist()
         emb_sql   = "%s::vector"
@@ -2082,9 +2234,6 @@ def enroll():
         "samples":    len(frames_b64),
         "is_update":  bool(existing_sid == student_id if test_emb is not None else False)
     })
-
-# Recognize endpoint removed (admin panel).
-# Use `/api/teacher/recognize` for teacher-scoped recognition instead.
 
 # ── Camera ────────────────────────────────────────────────────────────────
 @app.route("/api/camera/start", methods=["POST"])
@@ -2135,8 +2284,7 @@ def get_attendance():
         SELECT s.student_id, s.full_name, s.department,
                a.date::text, a.time::text, a.status, a.note
         FROM   students s
-        LEFT   JOIN attendance a
-               ON  a.student_id = s.student_id AND a.date = %s
+        LEFT   JOIN attendance a ON a.student_id = s.student_id AND a.date = %s
     """
     params = [target]
     if dept: sql += " WHERE s.department=%s"; params.append(dept)
@@ -2155,7 +2303,6 @@ def get_attendance():
 def faculty_summary():
     target = request.args.get("date", date.today().isoformat())
     with get_db() as conn:
-        # per-student status: pick latest attendance row per student for target date
         rows = qall(conn, """
             SELECT s.student_id, s.full_name,
                    COALESCE(s.department,'Unassigned') AS department,
@@ -2163,8 +2310,7 @@ def faculty_summary():
                    COALESCE(a.status,'Absent') AS status
             FROM students s
             LEFT JOIN LATERAL (
-                SELECT status, time
-                FROM attendance a2
+                SELECT status, time FROM attendance a2
                 WHERE a2.student_id = s.student_id AND a2.date = %s
                 ORDER BY a2.time DESC LIMIT 1
             ) a ON true
@@ -2296,10 +2442,8 @@ def test_email():
     to = d.get("email","").strip()
     if not to:
         return jsonify({"error": "email required"}), 400
-    # Read current env values (not module-level cache) so .env edits take effect
     if not (os.getenv("BREVO_API_KEY") and os.getenv("BREVO_FROM")):
-        return jsonify({"error":
-            "Email not configured. Set BREVO_API_KEY and BREVO_FROM in .env"}), 503
+        return jsonify({"error": "Email not configured. Set BREVO_API_KEY and BREVO_FROM in .env"}), 503
     queue_attendance_email(
         "TEST", "Test Student", "Test Department",
         date.today().isoformat(), datetime.now().strftime("%H:%M:%S"), to
@@ -2340,9 +2484,8 @@ def update_settings():
 
 # ── Boot ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    log.info("=== वेदनेत्रम् Smart Attendance v3.0 starting ===")
+    log.info("=== वेदनेत्रम् Smart Attendance v3.1 starting ===")
     init_db()
-    # Warm up the pool so first requests are instant
     try:
         with get_db() as conn:
             qone(conn, "SELECT 1")
