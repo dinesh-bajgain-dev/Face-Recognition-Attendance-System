@@ -2178,7 +2178,7 @@ async function sendTestEmail() {
    ═══════════════════════════════════════════════════════════════════════════ */
 function showEnrollStep(n) {
   [1, 2, 3].forEach((i) => {
-    $(`epanel-${i}`).style.display = i === n ? "" : "none";
+    $(`epanel-${i}`).style.display = i === n ? "block" : "none";
     $(`estep-${i}`).classList.toggle("active", i === n);
     $(`estep-${i}`).classList.toggle("done", i < n);
   });
