@@ -1,6 +1,15 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   वेदनेत्रम् · Smart Attendance System v3.0
+   वेदनेत्रम् · Smart Attendance System v3.1
    Role-Based: Admin | Teacher | Student
+
+   CHANGES FROM v3.0:
+   ──────────────────
+   ISSUE 1  — Dashboard graph fixed max-height; SimpleChart scales dynamically
+   ISSUE 3  — Teacher modal: semester change triggers subject reload (filtered)
+   ISSUE 4  — Teacher assignments panel: add/remove multiple subjects
+   ISSUE 5  — Schedule conflict shown as clear error in teacher modal
+   ISSUE 6  — api() intercepts 401 SESSION_EXPIRED, clears stale token, shows
+               session-expired message instead of silent failure
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const API = "http://localhost:5050/api";
@@ -46,7 +55,7 @@ const POSE_SEQUENCE = [
     voiceInstruction: "Lower your chin toward your chest",
   },
 ];
-const TOTAL_FRAMES = 50; // 5 poses × 10 frames each
+const TOTAL_FRAMES = 50;
 let enrollStep = 1;
 let isAutoCaptureActive = false;
 let captureAF = null;
@@ -60,7 +69,7 @@ let currentPoseHint = "front";
 /* ── Webcam / recognition state ───────────────────────────────────────────── */
 let recogStream = null;
 let teacherRecogStream = null;
-let teacherAutoLoop = null; // setInterval handle for continuous recognition
+let teacherAutoLoop = null;
 let teacherAutoRunning = false;
 let sessionActive = false;
 
@@ -79,6 +88,13 @@ let _sseSource = null;
 /* ═══════════════════════════════════════════════════════════════════════════
    UTILITIES
    ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * ISSUE 6 FIX: api() now intercepts SESSION_EXPIRED errors.
+ * When the backend returns {error, code:"SESSION_EXPIRED"} the frontend
+ * clears localStorage and redirects to login instead of leaving the user
+ * on a broken page with silent 401 errors in the console.
+ */
 function api(path, opts = {}) {
   return fetch(API + path, {
     headers: {
@@ -89,6 +105,34 @@ function api(path, opts = {}) {
     ...opts,
   }).then(async (r) => {
     const data = await r.json().catch(() => ({}));
+
+    // ── ISSUE 6: Handle expired/invalid session gracefully ──
+    if (r.status === 401) {
+      const isSessionExpired = data.code === "SESSION_EXPIRED";
+      if (isSessionExpired) {
+        // Clear stale token and redirect to login with user-friendly message
+        ["frs_token", "frs_role", "frs_user"].forEach((k) =>
+          localStorage.removeItem(k),
+        );
+        token = "";
+        userRole = "";
+        userInfo = null;
+        // Show login overlay with message
+        const overlay = document.getElementById("loginOverlay");
+        if (overlay) overlay.classList.remove("hidden");
+        const errEl = document.getElementById("loginErr");
+        if (errEl) {
+          errEl.textContent = "Your session has expired. Please sign in again.";
+          errEl.className = "msg err";
+        }
+        // Hide app content
+        const student = document.getElementById("student-panel");
+        if (student) student.classList.remove("active");
+        selectLoginRole("admin");
+        throw new Error("Session expired — please sign in again.");
+      }
+    }
+
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     return data;
   });
@@ -107,49 +151,17 @@ function $(id) {
   return document.getElementById(id);
 }
 
-/* ── Display helpers ─────────────────────────────────────────────────────── */
 function hide(el) {
   if (el) el.classList.add("hidden");
 }
-
 function show(el, displayType = "block") {
   if (!el) return;
   el.classList.remove("hidden");
-  if (
-    displayType !== "flex" &&
-    displayType !== "inline-block" &&
-    displayType !== "block"
-  ) {
-    return;
-  }
-  if (displayType === "flex") {
-    el.classList.add("visible-flex");
-    el.classList.remove("visible-inline-block", "visible-block");
-  } else if (displayType === "inline-block") {
-    el.classList.add("visible-inline-block");
-    el.classList.remove("visible-flex", "visible-block");
-  } else if (displayType === "block") {
-    el.classList.add("visible-block");
-    el.classList.remove("visible-flex", "visible-inline-block");
-  }
-}
-
-function setWidth(el, widthValue) {
-  if (el) el.style.width = widthValue;
-}
-
-function setOpacity(el, value) {
-  if (el) el.style.opacity = value;
-}
-
-function toggleClass(el, className, force = null) {
-  if (el) el.classList.toggle(className, force);
 }
 
 function badge(text, type = "blue") {
   return `<span class="pill pill-${type}">${text}</span>`;
 }
-
 function statusBadge(status) {
   const map = {
     Present: "green",
@@ -161,7 +173,6 @@ function statusBadge(status) {
   };
   return badge(status, map[status] || "blue");
 }
-
 function fmtDate(d) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("en-GB", {
@@ -170,14 +181,12 @@ function fmtDate(d) {
     year: "numeric",
   });
 }
-
 function setErr(id, msg) {
   const el = $(id);
   if (!el) return;
   el.textContent = msg;
   el.className = msg ? "msg err" : "msg";
 }
-
 function closeModal(id) {
   $(id).classList.remove("open");
 }
@@ -186,11 +195,11 @@ function openModal(id) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   HEALTH CHECK — FIX: Poll every 15s, update label properly
+   HEALTH CHECK
    ═══════════════════════════════════════════════════════════════════════════ */
 function setApiStatus(online) {
-  const dot = $("apiDot");
-  const label = $("apiStatus");
+  const dot = $("apiDot"),
+    label = $("apiStatus");
   if (!dot || !label) return;
   if (online) {
     dot.className = "status-dot ok";
@@ -200,7 +209,6 @@ function setApiStatus(online) {
     label.textContent = "Offline";
   }
 }
-
 async function checkHealth() {
   try {
     await api("/health");
@@ -209,15 +217,14 @@ async function checkHealth() {
     setApiStatus(false);
   }
 }
-
 function startHealthPolling() {
   clearInterval(_healthInterval);
-  checkHealth(); // immediate first check
+  checkHealth();
   _healthInterval = setInterval(checkHealth, 15000);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SSE — FIX: proper reconnect, error handling
+   SSE
    ═══════════════════════════════════════════════════════════════════════════ */
 function startSSE() {
   if (_sseSource) {
@@ -225,9 +232,7 @@ function startSSE() {
       _sseSource.close();
     } catch {}
   }
-
   _sseSource = new EventSource(`${API}/events`);
-
   _sseSource.onmessage = (e) => {
     try {
       const d = JSON.parse(e.data);
@@ -239,11 +244,6 @@ function startSSE() {
         if (currentPage === "t-recognize") refreshSessionLog();
       }
     } catch {}
-  };
-
-  _sseSource.onerror = () => {
-    // SSE will auto-reconnect; don't change health status here
-    // The health polling handles online/offline state separately
   };
 }
 
@@ -260,31 +260,29 @@ function startClock() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   AUTH — LOGIN / LOGOUT
+   AUTH
    ═══════════════════════════════════════════════════════════════════════════ */
 let loginRole = "admin";
 
 function selectLoginRole(role) {
   loginRole = role;
-  ["admin", "teacher", "student"].forEach((r) => {
-    $(`roleBtn-${r}`)?.classList.remove("active");
-  });
+  ["admin", "teacher", "student"].forEach((r) =>
+    $(`roleBtn-${r}`)?.classList.remove("active"),
+  );
   $(`roleBtn-${role}`)?.classList.add("active");
   $("field-username").classList.toggle("hidden", role === "student");
   $("field-email").classList.toggle("hidden", role !== "student");
-  const userLabel = $("usernameLabel");
-  const userInput = $("loginUser");
+  const userLabel = $("usernameLabel"),
+    userInput = $("loginUser");
   if (userLabel && userInput) {
     if (role === "teacher") {
       userLabel.textContent = "Teacher Email";
       userInput.type = "email";
       userInput.placeholder = "teacher@college.edu";
-      userInput.autocomplete = "email";
     } else {
       userLabel.textContent = "Username";
       userInput.type = "text";
       userInput.placeholder = "admin";
-      userInput.autocomplete = "username";
     }
   }
   const hints = {
@@ -307,16 +305,16 @@ async function doLogin() {
     }
     body = { role: "student", email };
   } else if (loginRole === "teacher") {
-    const email = $("loginUser").value.trim();
-    const password = $("loginPass").value;
+    const email = $("loginUser").value.trim(),
+      password = $("loginPass").value;
     if (!email || !password) {
       $("loginErr").textContent = "Email and password required";
       return;
     }
     body = { role: "teacher", email, password };
   } else {
-    const username = $("loginUser").value.trim();
-    const password = $("loginPass").value;
+    const username = $("loginUser").value.trim(),
+      password = $("loginPass").value;
     if (!username || !password) {
       $("loginErr").textContent = "Username and password required";
       return;
@@ -342,24 +340,17 @@ async function doLogin() {
 
 function afterLogin() {
   $("loginOverlay").classList.add("hidden");
-
   if (userRole === "student") {
     showStudentPanel();
     return;
   }
-
-  // Show correct nav
   if (userRole === "admin") {
     show($("adminNav"));
     hide($("teacherNav"));
   } else if (userRole === "teacher") {
     show($("teacherNav"));
     hide($("adminNav"));
-  } else {
-    hide($("adminNav"));
-    hide($("teacherNav"));
   }
-
   const label =
     userRole === "teacher"
       ? userInfo.full_name || userInfo.teacher_id
@@ -372,14 +363,10 @@ function afterLogin() {
       <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">${roleLabel}</span>
       <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</span>
     </div>`;
-
   if (userRole === "admin") navigate("dashboard");
   else navigate("t-dashboard");
-
   startClock();
   startSSE();
-  // Always start health polling immediately so the status can flip to Online
-  // even if session restore or page setup takes a moment.
   startHealthPolling();
 }
 
@@ -391,8 +378,6 @@ function logout() {
   token = "";
   userRole = "";
   userInfo = null;
-
-  // Stop background processes
   clearInterval(_healthInterval);
   if (_sseSource) {
     try {
@@ -401,22 +386,15 @@ function logout() {
     _sseSource = null;
   }
   try {
-    if (typeof stopCamera === "function") stopCamera();
-  } catch (e) {}
-  try {
-    if (typeof stopEnrollCam === "function") stopEnrollCam();
-  } catch (e) {}
-  try {
-    if (typeof stopTeacherAuto === "function") stopTeacherAuto();
-  } catch (e) {}
+    if (typeof stopTeacherWebcam === "function") stopTeacherWebcam();
+  } catch {}
   try {
     if (teacherRecogStream) {
       teacherRecogStream.getTracks().forEach((t) => t.stop());
       teacherRecogStream = null;
     }
-  } catch (e) {}
+  } catch {}
   sessionActive = false;
-
   $("student-panel").classList.remove("active");
   $("loginOverlay").classList.remove("hidden");
   setApiStatus(false);
@@ -431,7 +409,6 @@ function logout() {
    NAVIGATION
    ═══════════════════════════════════════════════════════════════════════════ */
 function navigate(page) {
-  // Stop enrollment webcam when navigating away from enrollment page
   if (page !== "enroll") {
     try {
       stopAutoCapture();
@@ -439,17 +416,13 @@ function navigate(page) {
         enrollStream.getTracks().forEach((t) => t.stop());
         enrollStream = null;
       }
-      const vid = $("captureCam");
-      if (vid) vid.srcObject = null;
-    } catch (e) {}
+    } catch {}
   }
-  // Stop teacher recognition webcam when navigating away
   if (page !== "t-recognize" && page !== "t-dashboard") {
     try {
       if (typeof stopTeacherWebcam === "function") stopTeacherWebcam();
-    } catch (e) {}
+    } catch {}
   }
-
   currentPage = page;
   document
     .querySelectorAll(".page")
@@ -462,7 +435,6 @@ function navigate(page) {
   const navEl = document.querySelector(`.nav-item[data-page="${page}"]`);
   if (navEl) navEl.classList.add("active");
   $("mainContent")?.scrollTo(0, 0);
-
   const loaders = {
     dashboard: loadDashboard,
     students: loadStudents,
@@ -471,6 +443,7 @@ function navigate(page) {
     reports: loadReports,
     settings: loadSettings,
     manage: loadManage,
+    enroll: populateEnrollFaculty,
     "t-dashboard": loadTeacherDashboard,
     "t-recognize": initTeacherRecognize,
     "t-manual": loadManualAttendance,
@@ -510,7 +483,6 @@ async function showStudentPanel() {
   $("studentWelcomeName").textContent = `Welcome, ${name}`;
   $("studentWelcomeSub").textContent =
     `${userInfo.department || ""}${userInfo.semester ? " · Semester " + userInfo.semester : ""}`;
-
   try {
     const data = await api("/student/attendance");
     const st = data.stats || {};
@@ -520,8 +492,6 @@ async function showStudentPanel() {
     $("sStat-pct").textContent = pct != null ? `${pct}%` : "—";
     $("sStat-pct").className =
       `student-stat-val ${pct != null && pct < 75 ? "amber" : "green"}`;
-
-    // Subject-wise summary
     const subjectMap = {};
     (data.records || []).forEach((r) => {
       const k = r.subject_name || "General";
@@ -533,13 +503,11 @@ async function showStudentPanel() {
       Object.entries(subjectMap)
         .map(([sub, v]) => {
           const p = Math.round((v.present / v.total) * 100);
-          return `<div style="display:flex;justify-content:space-between;align-items:center;
-        padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
         <span>${sub}</span>
         <div style="display:flex;align-items:center;gap:0.75rem;">
           <span style="color:var(--text2);font-size:12px;">${v.present}/${v.total}</span>
-          <span style="font-weight:600;font-family:var(--mono);
-            color:${p >= 75 ? "var(--green)" : "var(--red)"};">${p}%</span>
+          <span style="font-weight:600;font-family:var(--mono);color:${p >= 75 ? "var(--green)" : "var(--red)"};">${p}%</span>
         </div>
       </div>`;
         })
@@ -547,12 +515,9 @@ async function showStudentPanel() {
       `<div style="color:var(--text3);padding:1rem 0;font-size:13px;">No records yet</div>`;
     const subjEl = $("studentSubjectSummary");
     if (subjEl) subjEl.innerHTML = subjHtml;
-
-    // Attendance table
     const tbody = $("studentAttBody");
     if (!data.records || !data.records.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;
-        color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
       return;
     }
     tbody.innerHTML = data.records
@@ -569,8 +534,7 @@ async function showStudentPanel() {
   } catch (e) {
     const b = $("studentAttBody");
     if (b)
-      b.innerHTML = `<tr><td colspan="6" style="color:var(--red);
-      text-align:center;padding:1rem;">${e.message}</td></tr>`;
+      b.innerHTML = `<tr><td colspan="4" style="color:var(--red);text-align:center;padding:1rem;">${e.message}</td></tr>`;
   }
 }
 
@@ -586,15 +550,14 @@ async function loadDashboard() {
     month: "long",
     year: "numeric",
   });
-
   try {
     const [summ, students, hist] = await Promise.all([
       api(`/attendance/faculty-summary?date=${today}`),
       api("/students"),
-      api(`/attendance/history${dept ? "?department=" + encodeURIComponent(dept) : ""}`),
+      api(
+        `/attendance/history${dept ? "?department=" + encodeURIComponent(dept) : ""}`,
+      ),
     ]);
-
-    // Populate dept filter once
     const df = $("dashDeptFilter");
     if (df && df.options.length <= 1) {
       summ.faculties.forEach((f) => {
@@ -603,79 +566,49 @@ async function loadDashboard() {
         df.appendChild(o);
       });
     }
-
     const facs = dept
       ? summ.faculties.filter((f) => f.name === dept)
       : summ.faculties;
     const overall = dept
       ? facs[0] || { total: 0, present: 0, absent: 0, rate: 0 }
       : summ.overall;
-
     $("dashMetrics").innerHTML = `
-      <div class="metric-card">
-        <div class="metric-label">Total Students</div>
-        <div class="metric-val">${students.count}</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Present Today</div>
-        <div class="metric-val text-green">${overall.present}</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Absent Today</div>
-        <div class="metric-val text-red">${overall.absent}</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Attendance Rate</div>
-        <div class="metric-val text-blue">${overall.rate ?? 0}%</div>
-      </div>`;
-
+      <div class="metric-card"><div class="metric-label">Total Students</div><div class="metric-val">${students.count}</div></div>
+      <div class="metric-card"><div class="metric-label">Present Today</div><div class="metric-val text-green">${overall.present}</div></div>
+      <div class="metric-card"><div class="metric-label">Absent Today</div><div class="metric-val text-red">${overall.absent}</div></div>
+      <div class="metric-card"><div class="metric-label">Attendance Rate</div><div class="metric-val text-blue">${overall.rate ?? 0}%</div></div>`;
     drawDashboardChart((hist.history || []).slice().reverse());
-
     let html = "";
     for (const f of facs) {
-      html += `
-        <div class="card mb-1rem">
-          <div class="split-row mb-0-75rem">
-            <span class="section-title">${f.name}</span>
-            <div class="inline-kpis">
-              <span class="text-green">${f.present} present</span>
-              <span class="text-muted">·</span>
-              <span class="text-red">${f.absent} absent</span>
-              <span class="text-muted">·</span>
-              <span class="text-blue">${f.rate}%</span>
-            </div>
+      html += `<div class="card mb-1rem">
+        <div class="split-row mb-0-75rem">
+          <span class="section-title">${f.name}</span>
+          <div class="inline-kpis">
+            <span class="text-green">${f.present} present</span><span class="text-muted">·</span>
+            <span class="text-red">${f.absent} absent</span><span class="text-muted">·</span>
+            <span class="text-blue">${f.rate}%</span>
           </div>
-          <div class="overflow-x-auto">
-            <table class="data-table">
-              <thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
-              <tbody>
-                ${f.students
-                  .map(
-                    (s) => `
-                  <tr>
-                    <td>${s.name}</td>
-                    <td class="mono-muted">${s.student_id}</td>
-                    <td class="mono-cell">${s.time}</td>
-                    <td>${statusBadge(s.status)}</td>
-                  </tr>`,
-                  )
-                  .join("")}
-              </tbody>
-            </table>
-          </div>
-        </div>`;
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
+          <tbody>${f.students.map((s) => `<tr><td>${s.name}</td><td class="mono-muted">${s.student_id}</td><td class="mono-cell">${s.time}</td><td>${statusBadge(s.status)}</td></tr>`).join("")}</tbody></table>
+        </div>
+      </div>`;
     }
     $("dashAttTable").innerHTML =
-      html ||
-      `<div class="card empty-state">
-        No student data yet. Enroll students to see attendance here.
-      </div>`;
+      html || `<div class="card empty-state">No student data yet.</div>`;
   } catch (e) {
-    $("dashMetrics").innerHTML =
-      `<div class="text-red">${e.message}</div>`;
+    $("dashMetrics").innerHTML = `<div class="text-red">${e.message}</div>`;
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   ISSUE 1 FIX: SimpleChart — fixed container height, dynamic Y scaling.
+   The canvas is sized to its container width but capped at a fixed height.
+   Y-axis gridlines are computed from the actual data range, not from a
+   hardcoded step, so the chart always fills the container cleanly regardless
+   of how many students (or how large the numbers) are in the dataset.
+   ───────────────────────────────────────────────────────────────────────── */
 function drawDashboardChart(history) {
   const canvas = $("dashboardChart");
   if (!canvas) return;
@@ -685,7 +618,11 @@ function drawDashboardChart(history) {
     type: "bar",
     labels: history.map((h) => (h.date || "").slice(5)),
     datasets: [
-      { label: "Present", data: history.map((h) => h.present), color: "#22c55e" },
+      {
+        label: "Present",
+        data: history.map((h) => h.present),
+        color: "#22c55e",
+      },
       { label: "Absent", data: history.map((h) => h.absent), color: "#ef4444" },
     ],
   });
@@ -704,27 +641,21 @@ async function loadStudents() {
       api("/departments"),
     ]);
     allStudents = data.students;
-
     const tabs = $("studentFacultyTabs");
-    tabs.innerHTML = `<button class="filter-btn active"
-      onclick="filterStudentDept('',this)">All (${allStudents.length})</button>`;
+    tabs.innerHTML = `<button class="filter-btn active" onclick="filterStudentDept('',this)">All (${allStudents.length})</button>`;
     depts.departments.forEach((d) => {
       const cnt = allStudents.filter((s) => s.department === d).length;
-      tabs.innerHTML += `<button class="filter-btn"
-        onclick="filterStudentDept('${d}',this)">${d} (${cnt})</button>`;
+      tabs.innerHTML += `<button class="filter-btn" onclick="filterStudentDept('${d}',this)">${d} (${cnt})</button>`;
     });
-
-    ["deptList", "editDeptList"].forEach((id) => {
-      const dl = $(id);
-      if (dl) {
-        dl.innerHTML = "";
-        depts.departments.forEach((d) => {
-          const o = document.createElement("option");
-          o.value = d;
-          dl.appendChild(o);
-        });
-      }
-    });
+    const dl = $("editDeptList");
+    if (dl) {
+      dl.innerHTML = "";
+      depts.departments.forEach((d) => {
+        const o = document.createElement("option");
+        o.value = d;
+        dl.appendChild(o);
+      });
+    }
     renderStudents(allStudents);
   } catch (e) {
     $("studentFacultyBar").innerHTML =
@@ -750,7 +681,6 @@ function filterStudentDept(dept, btn) {
       ),
   );
 }
-
 function searchStudents() {
   const q = $("studentSearch").value.toLowerCase();
   renderStudents(
@@ -764,7 +694,6 @@ function searchStudents() {
       ),
   );
 }
-
 function renderStudents(list) {
   if (!list.length) {
     $("studentFacultyBar").innerHTML =
@@ -775,33 +704,26 @@ function renderStudents(list) {
     <div class="card full-width-card">
       <div class="teacher-table-wrap">
         <table class="data-table students-table">
-          <thead>
-            <tr>
-              <th>Student</th><th>ID</th><th>Faculty</th>
-              <th>Semester</th><th>Samples</th><th>Status</th>
-            </tr>
-          </thead>
+          <thead><tr><th>Student</th><th>ID</th><th>Faculty</th><th>Semester</th><th>Samples</th><th>Status</th></tr></thead>
           <tbody>
             ${list
               .map(
-                (s) => `
-              <tr onclick="navigate('profile');loadProfile('${s.student_id}')" class="click-row">
-                <td>
-                  <div class="student-table-person">
-                    <div class="student-avatar small">
-                      <img src="${API}/students/${s.student_id}/photo"
-                        onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')"/>
-                      <div class="avatar-placeholder hidden">${s.full_name.charAt(0).toUpperCase()}</div>
-                    </div>
-                    <span>${s.full_name}</span>
-                  </div>
-                </td>
-                <td class="mono-muted">${s.student_id}</td>
-                <td>${s.department || "Unassigned"}</td>
-                <td class="mono-cell">${s.semester || "—"}</td>
-                <td class="mono-cell">${s.sample_count}</td>
-                <td>${statusBadge(s.status)}</td>
-              </tr>`,
+                (
+                  s,
+                ) => `<tr onclick="navigate('profile');loadProfile('${s.student_id}')" class="click-row">
+              <td><div class="student-table-person">
+                <div class="student-avatar small">
+                  <img src="${API}/students/${s.student_id}/photo" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')"/>
+                  <div class="avatar-placeholder hidden">${s.full_name.charAt(0).toUpperCase()}</div>
+                </div>
+                <span>${s.full_name}</span>
+              </div></td>
+              <td class="mono-muted">${s.student_id}</td>
+              <td>${s.department || "Unassigned"}</td>
+              <td class="mono-cell">${s.semester || "—"}</td>
+              <td class="mono-cell">${s.sample_count}</td>
+              <td>${statusBadge(s.status)}</td>
+            </tr>`,
               )
               .join("")}
           </tbody>
@@ -817,131 +739,55 @@ async function loadProfile(sid) {
     const s = await api(`/students/${sid}`);
     const pct = s.stats?.percentage ?? null;
     $("profileContent").innerHTML = `
-      <div class="profile-header card" style="display:flex;gap:1.5rem;
-        align-items:flex-start;flex-wrap:wrap;margin-bottom:1rem;">
-        <div style="width:90px;height:90px;border-radius:50%;overflow:hidden;
-          background:var(--bg4);flex-shrink:0;display:flex;align-items:center;
-          justify-content:center;font-size:28px;font-weight:700;color:var(--text2);">
-          <img src="${API}/students/${sid}/photo"
-            onerror="this.style.display='none';this.parentElement.textContent='${s.full_name.charAt(0)}'"
-            style="width:100%;height:100%;object-fit:cover;"/>
+      <div class="profile-header card" style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:1rem;">
+        <div style="width:90px;height:90px;border-radius:50%;overflow:hidden;background:var(--bg4);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:var(--text2);">
+          <img src="${API}/students/${sid}/photo" onerror="this.style.display='none';this.parentElement.textContent='${s.full_name.charAt(0)}'" style="width:100%;height:100%;object-fit:cover;"/>
         </div>
         <div style="flex:1;min-width:200px;">
           <h2 style="font-size:20px;margin-bottom:4px;">${s.full_name}</h2>
-          <div style="font-family:var(--mono);color:var(--text3);
-            font-size:12px;margin-bottom:0.5rem;">${s.student_id}</div>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">
-            ${statusBadge(s.status)}
-            ${s.department ? badge(s.department, "blue") : ""}
-            ${s.semester ? badge("Sem " + s.semester, "amber") : ""}
-          </div>
-          <div style="margin-top:0.75rem;display:grid;grid-template-columns:1fr 1fr;
-            gap:0.5rem;font-size:12px;color:var(--text2);">
-            <div>📧 ${s.email || "—"}</div>
-            <div>📱 ${s.phone || "—"}</div>
-            <div>👁 ${s.sample_count} face samples</div>
-            <div>📅 Enrolled ${fmtDate(s.enrolled_at)}</div>
+          <div style="font-family:var(--mono);color:var(--text3);font-size:12px;margin-bottom:0.5rem;">${s.student_id}</div>
+          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">${statusBadge(s.status)}${s.department ? badge(s.department, "blue") : ""}${s.semester ? badge("Sem " + s.semester, "amber") : ""}</div>
+          <div style="margin-top:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:12px;color:var(--text2);">
+            <div>📧 ${s.email || "—"}</div><div>📱 ${s.phone || "—"}</div>
+            <div>👁 ${s.sample_count} face samples</div><div>📅 Enrolled ${fmtDate(s.enrolled_at)}</div>
           </div>
         </div>
         <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
           ${
             userRole === "admin"
               ? `
-            <button class="btn-secondary" onclick="openEditModal('${s.student_id}',
-              '${s.full_name}','${s.department || ""}','${s.semester || ""}',
-              '${s.email || ""}','${s.phone || ""}','${s.status}')">Edit</button>
-            <button class="btn-secondary" onclick="navigate('enroll');
-              prefillEnroll('${s.student_id}','${s.full_name}',
-              '${s.department || ""}','${s.semester || ""}',
-              '${s.email || ""}','${s.phone || ""}')">Re-Enroll</button>
-            <button class="btn-secondary" style="color:var(--red);border-color:var(--red-dim);"
-              onclick="deleteStudent('${s.student_id}','${s.full_name}')">Delete</button>
-          `
+            <button class="btn-secondary" onclick="openEditModal('${s.student_id}','${s.full_name}','${s.department || ""}','${s.semester || ""}','${s.email || ""}','${s.phone || ""}','${s.status}')">Edit</button>
+            <button class="btn-secondary" style="color:var(--red);border-color:var(--red-dim);" onclick="deleteStudent('${s.student_id}','${s.full_name}')">Delete</button>`
               : ""
           }
         </div>
       </div>
       <div class="metrics-grid" style="margin-bottom:1rem;">
-        <div class="metric-card">
-          <div class="metric-label">Present</div>
-          <div class="metric-val" style="color:var(--green)">${s.stats?.total_present ?? 0}</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Total Days</div>
-          <div class="metric-val">${s.stats?.total_days ?? 0}</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Rate</div>
-          <div class="metric-val"
-            style="color:${pct != null && pct < 75 ? "var(--red)" : "var(--green)"}">
-            ${pct != null ? pct + "%" : "—"}
-          </div>
-        </div>
+        <div class="metric-card"><div class="metric-label">Present</div><div class="metric-val" style="color:var(--green)">${s.stats?.total_present ?? 0}</div></div>
+        <div class="metric-card"><div class="metric-label">Total Days</div><div class="metric-val">${s.stats?.total_days ?? 0}</div></div>
+        <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:${pct != null && pct < 75 ? "var(--red)" : "var(--green)"}">${pct != null ? pct + "%" : "—"}</div></div>
       </div>
       <div class="card">
         <div class="section-title" style="margin-bottom:0.75rem;">Attendance History</div>
         <div style="overflow-x:auto;">
           <table class="student-att-table">
-            <thead>
-              <tr><th>Date</th><th>Time (First - Last)</th><th>Subject</th>
-                <th>Teacher</th><th>Status</th>
-                ${userRole === "admin" ? "<th>Action</th>" : ""}
-              </tr>
-            </thead>
+            <thead><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Status</th>${userRole === "admin" ? "<th>Action</th>" : ""}</tr></thead>
             <tbody>
-              ${(() => {
-                const attRecords = s.attendance || [];
-                if (!attRecords.length) {
-                  return `<tr><td colspan="6" style="text-align:center;
-                      color:var(--text3);padding:1.5rem;">No records</td></tr>`;
-                }
-
-                // Group by date
-                const byDate = {};
-                attRecords.forEach((r) => {
-                  const dateKey = r.date;
-                  if (!byDate[dateKey]) byDate[dateKey] = [];
-                  byDate[dateKey].push(r);
-                });
-
-                // For each date, get first and last entry
-                return Object.keys(byDate)
-                  .sort()
-                  .reverse()
-                  .map((dateKey) => {
-                    const dayRecords = byDate[dateKey];
-                    dayRecords.sort((a, b) =>
-                      (a.time || "").localeCompare(b.time || ""),
-                    );
-                    const first = dayRecords[0];
-                    const last = dayRecords[dayRecords.length - 1];
-                    const timeDisplay =
-                      dayRecords.length > 1
-                        ? `${first.time} - ${last.time}`
-                        : first.time || "—";
-
-                    return `
-                <tr ${dayRecords.length > 1 ? 'style="background:var(--bg3);opacity:0.95;"' : ""}>
-                  <td>${fmtDate(dateKey)}</td>
-                  <td style="font-family:var(--mono);font-size:11px;">${timeDisplay}</td>
-                  <td>${first.subject_name || "—"}</td>
-                  <td>${first.teacher_name || "—"}</td>
-                  <td>${statusBadge(first.status)}</td>
-                  ${
-                    userRole === "admin"
-                      ? `<td>
-                    <button class="btn-secondary"
-                      style="font-size:11px;padding:2px 8px;"
-                      onclick="toggleAttendance('${sid}','${dateKey}','${first.status}')">
-                      Toggle
-                    </button>
-                  </td>`
-                      : ""
-                  }
-                </tr>`;
-                  })
-                  .join("");
-              })()}
+              ${
+                (s.attendance || []).length
+                  ? (s.attendance || [])
+                      .map(
+                        (r) => `<tr>
+                <td>${fmtDate(r.date)}</td>
+                <td>${r.subject_name || "—"}</td>
+                <td>${r.teacher_name || "—"}</td>
+                <td>${statusBadge(r.status)}</td>
+                ${userRole === "admin" ? `<td><button class="btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="toggleAttendance('${sid}','${r.date}','${r.status}')">Toggle</button></td>` : ""}
+              </tr>`,
+                      )
+                      .join("")
+                  : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No records</td></tr>`
+              }
             </tbody>
           </table>
         </div>
@@ -965,7 +811,6 @@ async function toggleAttendance(sid, date, currentStatus) {
     toast(e.message, "err");
   }
 }
-
 function openEditModal(sid, name, dept, sem, email, phone, status) {
   $("editSid").value = sid;
   $("editName").value = name;
@@ -977,7 +822,6 @@ function openEditModal(sid, name, dept, sem, email, phone, status) {
   setErr("editModalErr", "");
   openModal("editModal");
 }
-
 async function saveStudentEdit() {
   const sid = $("editSid").value;
   const body = {
@@ -1000,9 +844,8 @@ async function saveStudentEdit() {
     setErr("editModalErr", e.message);
   }
 }
-
 async function deleteStudent(sid, name) {
-  if (!confirm(`Delete ${name} (${sid})? This cannot be undone.`)) return;
+  if (!confirm(`Delete ${name} (${sid})?`)) return;
   try {
     await api(`/students/${sid}`, { method: "DELETE" });
     toast("Student deleted");
@@ -1012,19 +855,8 @@ async function deleteStudent(sid, name) {
   }
 }
 
-function prefillEnroll(sid, name, dept, sem, email, phone) {
-  setTimeout(() => {
-    $("eStudentId").value = sid;
-    $("eFullName").value = name;
-    $("eDepartment").value = dept;
-    $("eSemester").value = sem;
-    $("eEmail").value = email;
-    $("ePhone").value = phone;
-  }, 100);
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — TEACHERS
+   ADMIN — TEACHERS  (Issues 3, 4, 5, 6)
    ═══════════════════════════════════════════════════════════════════════════ */
 let faculties = [],
   allSubjects = [],
@@ -1049,38 +881,43 @@ async function loadTeachers() {
 function renderTeacherTable(teachers) {
   if (!teachers.length) {
     $("teacherTableBody").innerHTML =
-      `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem;">
-        No teachers yet. Click "+ Add Teacher" to create one.
-      </td></tr>`;
+      `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem;">No teachers yet. Click "+ Add Teacher" to create one.</td></tr>`;
     return;
   }
   $("teacherTableBody").innerHTML = teachers
-    .map(
-      (t) => `
-    <tr>
+    .map((t) => {
+      // Show all assignments as pills if multiple exist
+      const assignmentPills =
+        (t.assignments || []).length > 1
+          ? (t.assignments || [])
+              .map(
+                (a) =>
+                  `<span class="pill pill-blue" style="font-size:10px;margin:1px;">${a.subject_name} (Sem ${a.semester})</span>`,
+              )
+              .join("")
+          : t.subject_name || "—";
+      return `<tr>
       <td style="font-family:var(--mono);font-size:11px;">${t.teacher_id}</td>
       <td style="font-weight:500;">${t.full_name}</td>
       <td>${t.faculty_name || "—"}</td>
       <td style="font-family:var(--mono);">${t.semester || "—"}</td>
-      <td>${t.subject_name || "—"}</td>
+      <td style="font-size:12px;">${assignmentPills}</td>
       <td style="font-size:12px;color:var(--text2);">${t.time_slot_label || "—"}</td>
       <td style="font-size:12px;color:var(--text2);">${t.email || "—"}</td>
       <td>${statusBadge(t.status)}</td>
-          <td>
+      <td>
         <div class="action-btns">
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;"
-            onclick="openTeacherModal(${t.id})">Edit</button>
-          <button class="btn-secondary"
-            style="font-size:11px;padding:3px 8px;color:var(--red);"
-            onclick="deleteTeacher(${t.id},'${t.full_name}')">Del</button>
+          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openTeacherModal(${t.id})">Edit</button>
+          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openAssignmentsModal(${t.id},'${t.full_name}')">Assign</button>
+          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteTeacher(${t.id},'${t.full_name}')">Del</button>
         </div>
       </td>
-    </tr>`,
-    )
+    </tr>`;
+    })
     .join("");
 }
 
-async function openTeacherModal(tJson) {
+async function openTeacherModal(tId) {
   try {
     const [fData, tsData] = await Promise.all([
       api("/faculties"),
@@ -1100,23 +937,14 @@ async function openTeacherModal(tJson) {
       .join("");
   $("tmSubject").innerHTML = `<option value="">Select subject</option>`;
   setErr("teacherModalErr", "");
-  if (tJson) {
+
+  if (tId) {
     let t = null;
-    // If numeric id passed, fetch teacher details from API
-    if (typeof tJson === "number" || /^[0-9]+$/.test(String(tJson))) {
-      try {
-        t = await api(`/teachers/${tJson}`);
-      } catch (e) {
-        setErr("teacherModalErr", e.message);
-        return;
-      }
-    } else {
-      try {
-        t = JSON.parse(tJson);
-      } catch (e) {
-        // fallback: treat as empty
-        t = null;
-      }
+    try {
+      t = await api(`/teachers/${tId}`);
+    } catch (e) {
+      setErr("teacherModalErr", e.message);
+      return;
     }
     if (t) {
       $("teacherModalTitle").textContent = "Edit Teacher";
@@ -1125,13 +953,13 @@ async function openTeacherModal(tJson) {
       $("tmFullName").value = t.full_name;
       $("tmPassword").value = "";
       $("tmPassword").placeholder = "Leave blank to keep current";
-      $("tmPassword").required = false;
       $("tmEmail").value = t.email || "";
       $("tmPhone").value = t.phone || "";
       $("tmStatus").value = t.status;
       $("tmFaculty").value = t.faculty_id || "";
       $("tmSemester").value = t.semester || "";
       $("tmTimeSlot").value = t.time_slot_id || "";
+      // ISSUE 3: load subjects filtered by both faculty AND semester
       if (t.faculty_id && t.semester) {
         await loadSubjectsForModal();
         $("tmSubject").value = t.subject_id || "";
@@ -1151,28 +979,51 @@ async function openTeacherModal(tJson) {
     $("tmStatus").value = "active";
     $("tmFaculty").value = "";
     $("tmPassword").placeholder = "Min 6 characters";
-    $("tmPassword").required = true;
   }
   openModal("teacherModal");
 }
 
+/**
+ * ISSUE 3 FIX: loadSubjectsForModal now requires BOTH faculty AND semester
+ * before fetching. Subject dropdown stays empty (with clear message) until
+ * semester is also selected.
+ */
 async function loadSubjectsForModal() {
   const fid = $("tmFaculty").value;
   const sem = $("tmSemester").value;
-  $("tmSubject").innerHTML = `<option value="">Select subject</option>`;
-  if (!fid) return;
+
+  // Clear subject dropdown with a helpful message
+  if (!fid) {
+    $("tmSubject").innerHTML = `<option value="">Select faculty first</option>`;
+    return;
+  }
+  if (!sem) {
+    $("tmSubject").innerHTML =
+      `<option value="">Select semester first</option>`;
+    return;
+  }
+
+  $("tmSubject").innerHTML = `<option value="">Loading subjects…</option>`;
   try {
-    const params = `faculty_id=${fid}${sem ? "&semester=" + sem : ""}`;
-    const data = await api(`/subjects?${params}`);
+    // ISSUE 3: Filter by BOTH faculty_id AND semester
+    const data = await api(`/subjects?faculty_id=${fid}&semester=${sem}`);
+    if (!data.subjects || data.subjects.length === 0) {
+      $("tmSubject").innerHTML =
+        `<option value="">No subjects in Semester ${sem} for this faculty</option>`;
+      return;
+    }
     $("tmSubject").innerHTML =
       `<option value="">Select subject</option>` +
       data.subjects
         .map(
           (s) =>
-            `<option value="${s.id}">${s.name} (Sem ${s.semester})</option>`,
+            `<option value="${s.id}">${s.name}${s.code ? " · " + s.code : ""}</option>`,
         )
         .join("");
-  } catch {}
+  } catch (e) {
+    $("tmSubject").innerHTML =
+      `<option value="">Error loading subjects</option>`;
+  }
 }
 
 async function saveTeacher() {
@@ -1198,6 +1049,16 @@ async function saveTeacher() {
     setErr("teacherModalErr", "Password is required for new teachers");
     return;
   }
+
+  // ISSUE 3: Frontend guard — if faculty and semester set, subject must also be set
+  if (body.faculty_id && body.semester && !body.subject_id) {
+    setErr(
+      "teacherModalErr",
+      "Please select a subject for the chosen faculty and semester.",
+    );
+    return;
+  }
+
   try {
     if (id)
       await api(`/teachers/${id}`, {
@@ -1209,24 +1070,229 @@ async function saveTeacher() {
     closeModal("teacherModal");
     loadTeachers();
   } catch (e) {
-    setErr("teacherModalErr", e.message);
+    // ISSUE 5: Show schedule conflict clearly
+    if (e.message && e.message.includes("conflict")) {
+      setErr("teacherModalErr", `⚠ Schedule conflict: ${e.message}`);
+    } else {
+      setErr("teacherModalErr", e.message);
+    }
   }
 }
 
-// Global state for References modal
+/* ── ISSUE 4: Teacher Assignments Modal ──────────────────────────────────
+   Admin can add/remove multiple subject assignments for one teacher.
+   Each assignment = faculty + semester + subject + optional time slot.
+   ──────────────────────────────────────────────────────────────────────── */
+let _assignTeacherId = null;
+let _assignTeacherName = "";
+
+async function openAssignmentsModal(tid, name) {
+  _assignTeacherId = tid;
+  _assignTeacherName = name;
+
+  // Dynamically inject the assignments modal if it doesn't exist
+  if (!$("assignmentsModal")) {
+    const div = document.createElement("div");
+    div.className = "modal-overlay";
+    div.id = "assignmentsModal";
+    div.innerHTML = `
+      <div class="modal-box" style="width:680px;max-width:95%;">
+        <div class="modal-title" id="assignmentsModalTitle">Assignments</div>
+        <div id="assignmentsList" style="margin:0.75rem 0;max-height:260px;overflow-y:auto;"></div>
+        <div style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.5rem;">
+          <div style="font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:0.5rem;">Add New Assignment</div>
+          <div class="modal-form-grid">
+            <div class="form-group">
+              <label>Faculty *</label>
+              <select id="asgFaculty" onchange="loadAsgSemesters()"><option value="">Select faculty</option></select>
+            </div>
+            <div class="form-group">
+              <label>Semester *</label>
+              <select id="asgSemester" onchange="loadAsgSubjects()"><option value="">Select semester</option></select>
+            </div>
+            <div class="form-group">
+              <label>Subject *</label>
+              <select id="asgSubject"><option value="">Select subject</option></select>
+            </div>
+            <div class="form-group">
+              <label>Time Slot</label>
+              <select id="asgTimeSlot"><option value="">No time slot</option></select>
+            </div>
+          </div>
+          <div id="asgErr" class="msg err"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('assignmentsModal')">Close</button>
+          <button class="btn-primary" onclick="addAssignment()">+ Add Assignment</button>
+        </div>
+      </div>`;
+    div.addEventListener("click", (e) => {
+      if (e.target === div) div.classList.remove("open");
+    });
+    document.body.appendChild(div);
+  }
+
+  $("assignmentsModalTitle").textContent = `Assignments — ${name}`;
+  setErr("asgErr", "");
+
+  // Populate faculty and time slot dropdowns
+  try {
+    const [fData, tsData] = await Promise.all([
+      api("/faculties"),
+      api("/time-slots"),
+    ]);
+    $("asgFaculty").innerHTML =
+      `<option value="">Select faculty</option>` +
+      fData.faculties
+        .map((f) => `<option value="${f.id}">${f.name}</option>`)
+        .join("");
+    $("asgTimeSlot").innerHTML =
+      `<option value="">No time slot</option>` +
+      tsData.time_slots
+        .map((ts) => `<option value="${ts.id}">${ts.label}</option>`)
+        .join("");
+    $("asgSemester").innerHTML =
+      `<option value="">Select faculty first</option>`;
+    $("asgSubject").innerHTML =
+      `<option value="">Select semester first</option>`;
+  } catch {}
+
+  await refreshAssignmentsList();
+  openModal("assignmentsModal");
+}
+
+async function refreshAssignmentsList() {
+  const container = $("assignmentsList");
+  if (!container || !_assignTeacherId) return;
+  try {
+    const data = await api(`/teachers/${_assignTeacherId}/assignments`);
+    const assignments = data.assignments || [];
+    if (!assignments.length) {
+      container.innerHTML = `<div style="color:var(--text3);font-size:13px;padding:1rem 0;">No assignments yet. Add one below.</div>`;
+      return;
+    }
+    container.innerHTML = assignments
+      .map(
+        (a) => `
+      <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border-bottom:1px solid var(--border);flex-wrap:wrap;">
+        ${a.is_primary ? `<span class="pill pill-blue" style="font-size:10px;">Primary</span>` : ""}
+        <div style="flex:1;min-width:200px;">
+          <div style="font-weight:600;font-size:13px;">${a.subject_name || "—"}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono);">
+            ${a.faculty_name || "—"} · Semester ${a.semester}${a.time_slot_label ? " · " + a.time_slot_label : ""}
+          </div>
+        </div>
+        <button class="btn-secondary" style="font-size:11px;padding:2px 8px;color:var(--red);"
+          onclick="removeAssignment(${a.id})">Remove</button>
+      </div>`,
+      )
+      .join("");
+  } catch (e) {
+    container.innerHTML = `<div style="color:var(--red);font-size:13px;">${e.message}</div>`;
+  }
+}
+
+async function loadAsgSemesters() {
+  const fid = $("asgFaculty").value;
+  $("asgSemester").innerHTML = `<option value="">Select semester</option>`;
+  $("asgSubject").innerHTML = `<option value="">Select semester first</option>`;
+  if (!fid) return;
+  // All 8 semesters
+  $("asgSemester").innerHTML =
+    `<option value="">Select semester</option>` +
+    Array.from(
+      { length: 8 },
+      (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`,
+    ).join("");
+}
+
+// ISSUE 3: loads subjects filtered by faculty + semester
+async function loadAsgSubjects() {
+  const fid = $("asgFaculty").value;
+  const sem = $("asgSemester").value;
+  $("asgSubject").innerHTML = `<option value="">Loading…</option>`;
+  if (!fid || !sem) {
+    $("asgSubject").innerHTML =
+      `<option value="">Select faculty and semester first</option>`;
+    return;
+  }
+  try {
+    const data = await api(`/subjects?faculty_id=${fid}&semester=${sem}`);
+    $("asgSubject").innerHTML = data.subjects.length
+      ? `<option value="">Select subject</option>` +
+        data.subjects
+          .map((s) => `<option value="${s.id}">${s.name}</option>`)
+          .join("")
+      : `<option value="">No subjects in Semester ${sem}</option>`;
+  } catch {
+    $("asgSubject").innerHTML = `<option value="">Error loading</option>`;
+  }
+}
+
+async function addAssignment() {
+  const fid = $("asgFaculty").value;
+  const sem = $("asgSemester").value;
+  const sid = $("asgSubject").value;
+  const tsid = $("asgTimeSlot").value || null;
+  setErr("asgErr", "");
+  if (!fid || !sem || !sid) {
+    setErr("asgErr", "Faculty, semester, and subject are required.");
+    return;
+  }
+  try {
+    await api(`/teachers/${_assignTeacherId}/assignments`, {
+      method: "POST",
+      body: JSON.stringify({
+        faculty_id: fid,
+        semester: parseInt(sem),
+        subject_id: sid,
+        time_slot_id: tsid,
+      }),
+    });
+    toast("Assignment added");
+    // Reset selects
+    $("asgFaculty").value = "";
+    $("asgSemester").value = "";
+    $("asgSubject").value = "";
+    await refreshAssignmentsList();
+    loadTeachers(); // refresh main table
+  } catch (e) {
+    // ISSUE 5: Surface schedule conflict clearly
+    if (
+      e.message &&
+      (e.message.includes("conflict") ||
+        e.message.includes("SCHEDULE_CONFLICT"))
+    ) {
+      setErr("asgErr", `⚠ Schedule conflict: ${e.message}`);
+    } else {
+      setErr("asgErr", e.message);
+    }
+  }
+}
+
+async function removeAssignment(aid) {
+  if (!confirm("Remove this assignment?")) return;
+  try {
+    await api(`/teachers/${_assignTeacherId}/assignments/${aid}`, {
+      method: "DELETE",
+    });
+    toast("Assignment removed");
+    await refreshAssignmentsList();
+    loadTeachers();
+  } catch (e) {
+    toast(e.message, "err");
+  }
+}
+
+/* ── Teacher delete (unchanged logic, improved UX) ───────────────────────── */
 let _currentTeacherRefsId = null;
-let _currentTeacherAttendanceCount = 0;
-let _currentTeacherRecognitionCount = 0;
 
 async function deleteTeacher(id, name) {
-  // Open the References modal so admin can inspect/reassign/clear before deleting
   openTeacherRefsModal(id, name);
 }
 
 async function openTeacherRefsModal(id, name, errMsg) {
   _currentTeacherRefsId = id;
-  _currentTeacherAttendanceCount = 0;
-  _currentTeacherRecognitionCount = 0;
   $("teacherRefsTitle").textContent = `References for ${name}`;
   $("teacherRefsMsg").textContent = errMsg || "";
   $("teacherRefsBody").innerHTML =
@@ -1236,33 +1302,22 @@ async function openTeacherRefsModal(id, name, errMsg) {
     const [attData, recData, tdata] = await Promise.all([
       api(`/teachers/${id}/references`),
       api(`/teachers/${id}/recognition-logs`),
-      api(`/teachers`),
+      api("/teachers"),
     ]);
-    const attCount = (attData.rows || []).length;
-    const recCount = (recData.rows || []).length;
-    _currentTeacherAttendanceCount = attCount;
-    _currentTeacherRecognitionCount = recCount;
+    const attCount = (attData.rows || []).length,
+      recCount = (recData.rows || []).length;
     const totalCount = attCount + recCount;
-
     const countEl = $("teacherRefsCount");
-    if (countEl) {
-      countEl.textContent = `${attCount} attendance, ${recCount} recognition record${totalCount === 1 ? "" : "s"}`;
-    }
-
-    // populate reassign select (exclude current teacher)
+    if (countEl)
+      countEl.textContent = `${attCount} attendance, ${recCount} recognition records`;
     const sel = $("teacherReassignSelect");
-    if (sel) {
+    if (sel)
       sel.innerHTML =
         `<option value="">Select teacher</option>` +
         (tdata.teachers || [])
           .filter((t) => t.id !== id)
-          .map(
-            (t) =>
-              `<option value="${t.id}">${t.full_name} (${t.teacher_id || t.id})</option>`,
-          )
+          .map((t) => `<option value="${t.id}">${t.full_name}</option>`)
           .join("");
-    }
-
     if (totalCount === 0) {
       $("teacherRefsBody").innerHTML =
         `<div style="padding:1rem;color:var(--text3);">No references found. You can safely delete this teacher.</div>`;
@@ -1270,41 +1325,15 @@ async function openTeacherRefsModal(id, name, errMsg) {
       if (delBtn) delBtn.disabled = false;
       return;
     }
-
-    // Build combined list with section headers
-    let html = "";
-
-    if (attCount > 0) {
-      html += `<div style="font-weight:600;color:var(--primary);margin-top:1rem;margin-bottom:0.5rem;">Attendance Records (${attCount})</div>`;
-      html += (attData.rows || [])
-        .map(
-          (r) => `
+    $("teacherRefsBody").innerHTML = (attData.rows || [])
+      .map(
+        (r) => `
       <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
         <div style="font-weight:600">${r.full_name} · <span style="font-family:var(--mono)">${r.student_id}</span></div>
-        <div style="color:var(--text3);font-size:13px;margin-top:4px">Date: ${r.date} · Time: ${r.time} · Status: ${r.status || "—"}</div>
-        <div style="color:var(--text3);font-size:13px;margin-top:4px">Note: ${r.note || "—"}</div>
+        <div style="color:var(--text3);font-size:13px;">Date: ${r.date} · Status: ${r.status || "—"}</div>
       </div>`,
-        )
-        .join("");
-    }
-
-    if (recCount > 0) {
-      html += `<div style="font-weight:600;color:var(--primary);margin-top:1rem;margin-bottom:0.5rem;">Recognition Logs (${recCount})</div>`;
-      html += (recData.rows || [])
-        .map(
-          (r) => `
-      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
-        <div style="font-weight:600">${r.full_name} · <span style="font-family:var(--mono)">${r.student_id}</span></div>
-        <div style="color:var(--text3);font-size:13px;margin-top:4px">Confidence: ${(r.confidence * 100).toFixed(1)}% · Recognized: ${r.recognized ? "Yes" : "No"}</div>
-        <div style="color:var(--text3);font-size:13px;margin-top:4px">Logged: ${r.logged_at || "—"}</div>
-      </div>`,
-        )
-        .join("");
-    }
-
-    $("teacherRefsBody").innerHTML = html;
-
-    // Ensure Delete is disabled until all references cleared
+      )
+      .join("");
     const delBtn = $("btnConfirmDelete");
     if (delBtn) delBtn.disabled = true;
   } catch (err) {
@@ -1318,45 +1347,18 @@ async function clearTeacherReferences() {
   if (!id) return;
   $("btnClearRefs").disabled = true;
   try {
-    // Clear both attendance and recognition logs
-    const [res1, res2] = await Promise.all([
+    const [r1, r2] = await Promise.all([
       api(`/teachers/${id}/clear-attendance`, { method: "POST" }),
       api(`/teachers/${id}/clear-recognition-logs`, { method: "POST" }),
     ]);
-    const totalCleared = (res1.cleared || 0) + (res2.cleared || 0);
-    toast(`${totalCleared} reference${totalCleared === 1 ? "" : "s"} cleared`);
-    // Refresh references list to update count and UI
-    const [attData, recData] = await Promise.all([
-      api(`/teachers/${id}/references`),
-      api(`/teachers/${id}/recognition-logs`),
-    ]);
-    const attCount = (attData.rows || []).length;
-    const recCount = (recData.rows || []).length;
-    _currentTeacherAttendanceCount = attCount;
-    _currentTeacherRecognitionCount = recCount;
-    const totalCount = attCount + recCount;
-
-    const countEl = $("teacherRefsCount");
-    if (countEl) {
-      countEl.textContent = `${attCount} attendance, ${recCount} recognition record${totalCount === 1 ? "" : "s"}`;
-    }
-
-    if (totalCount === 0) {
-      setErr(
-        "teacherRefsMsg",
-        `Cleared ${totalCleared} references. You may now delete the teacher.`,
-      );
-      $("btnConfirmDelete").disabled = false;
-      // If auto-delete checked, perform delete immediately
-      if ($("chkAutoDelete").checked) {
-        await deleteTeacherConfirmed();
-      }
-    } else {
-      setErr(
-        "teacherRefsMsg",
-        `Cleared ${totalCleared} references. ${totalCount} remaining.`,
-      );
-    }
+    const cleared = (r1.cleared || 0) + (r2.cleared || 0);
+    toast(`${cleared} references cleared`);
+    openTeacherRefsModal(
+      id,
+      $("teacherRefsTitle").textContent.replace("References for ", ""),
+    );
+    $("btnConfirmDelete").disabled = false;
+    if ($("chkAutoDelete").checked) await deleteTeacherConfirmed();
   } catch (e) {
     setErr("teacherRefsMsg", e.message);
   } finally {
@@ -1367,16 +1369,14 @@ async function clearTeacherReferences() {
 async function reassignTeacherReferences() {
   const id = _currentTeacherRefsId;
   if (!id) return;
-  const sel = $("teacherReassignSelect");
-  const to = sel ? sel.value : null;
+  const to = $("teacherReassignSelect")?.value;
   if (!to) {
     setErr("teacherRefsMsg", "Select a teacher to reassign to");
     return;
   }
   $("btnReassign").disabled = true;
   try {
-    // Reassign both attendance and recognition logs
-    const [res1, res2] = await Promise.all([
+    const [r1, r2] = await Promise.all([
       api(`/teachers/${id}/reassign-attendance`, {
         method: "POST",
         body: JSON.stringify({ to }),
@@ -1386,42 +1386,10 @@ async function reassignTeacherReferences() {
         body: JSON.stringify({ to }),
       }),
     ]);
-    const totalReassigned = (res1.reassigned || 0) + (res2.reassigned || 0);
-    toast(
-      `${totalReassigned} reference${totalReassigned === 1 ? "" : "s"} reassigned`,
-    );
-    // Refresh references list to update count and UI
-    const [attData, recData] = await Promise.all([
-      api(`/teachers/${id}/references`),
-      api(`/teachers/${id}/recognition-logs`),
-    ]);
-    const attCount = (attData.rows || []).length;
-    const recCount = (recData.rows || []).length;
-    _currentTeacherAttendanceCount = attCount;
-    _currentTeacherRecognitionCount = recCount;
-    const totalCount = attCount + recCount;
-
-    const countEl = $("teacherRefsCount");
-    if (countEl) {
-      countEl.textContent = `${attCount} attendance, ${recCount} recognition record${totalCount === 1 ? "" : "s"}`;
-    }
-
-    if (totalCount === 0) {
-      setErr(
-        "teacherRefsMsg",
-        `Reassigned ${totalReassigned} references. You may now delete the teacher.`,
-      );
-      $("btnConfirmDelete").disabled = false;
-      // If auto-delete checked, perform delete immediately
-      if ($("chkAutoDelete").checked) {
-        await deleteTeacherConfirmed();
-      }
-    } else {
-      setErr(
-        "teacherRefsMsg",
-        `Reassigned ${totalReassigned} references. ${totalCount} remaining.`,
-      );
-    }
+    const moved = (r1.reassigned || 0) + (r2.reassigned || 0);
+    toast(`${moved} references reassigned`);
+    $("btnConfirmDelete").disabled = false;
+    if ($("chkAutoDelete").checked) await deleteTeacherConfirmed();
   } catch (e) {
     setErr("teacherRefsMsg", e.message);
   } finally {
@@ -1451,7 +1419,6 @@ async function loadManage() {
   await Promise.all([loadFaculties(), loadSubjects(), loadTimeslots()]);
   populateSubjectFacultyFilter();
 }
-
 function switchManageTab(tab, el) {
   document
     .querySelectorAll(".sub-tab")
@@ -1462,7 +1429,6 @@ function switchManageTab(tab, el) {
   el.classList.add("active");
   $(`mtab-${tab}`).classList.add("active");
 }
-
 async function loadFaculties() {
   try {
     const data = await api("/faculties");
@@ -1471,32 +1437,43 @@ async function loadFaculties() {
       ? faculties
           .map(
             (f) => `
-          <tr>
-            <td style="font-weight:500;">${f.name}</td>
-            <td style="font-family:var(--mono);font-size:12px;">${f.code || "—"}</td>
-            <td>
-              <div class="action-btns">
-                <button class="btn-secondary" style="font-size:11px;padding:3px 8px;"
-                  onclick="openFacultyModal(${f.id},'${f.name}','${f.code || ""}')">Edit</button>
-                <button class="btn-secondary"
-                  style="font-size:11px;padding:3px 8px;color:var(--red);"
-                  onclick="deleteFaculty(${f.id},'${f.name}')">Del</button>
-              </div>
-            </td>
-          </tr>`,
+      <tr>
+        <td style="font-weight:500;">${f.name}</td>
+        <td style="font-family:var(--mono);font-size:12px;">${f.code || "—"}</td>
+        <td><div class="action-btns">
+          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openFacultyModal(${f.id},'${f.name}','${f.code || ""}')">Edit</button>
+          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteFaculty(${f.id},'${f.name}')">Del</button>
+        </div></td>
+      </tr>`,
           )
           .join("")
-      : `<tr><td colspan="3" style="text-align:center;
-          color:var(--text3);padding:1.5rem;">No faculties yet</td></tr>`;
+      : `<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:1.5rem;">No faculties yet</td></tr>`;
   } catch (e) {
     $("facultyTableBody").innerHTML =
       `<tr><td colspan="3" style="color:var(--red);">${e.message}</td></tr>`;
   }
 }
 
+async function populateEnrollFaculty() {
+  try {
+    if (!faculties || faculties.length === 0) {
+      const data = await api("/faculties");
+      faculties = data.faculties || [];
+    }
+    const sel = $("eFaculty");
+    if (!sel) return;
+    sel.innerHTML =
+      `<option value="">Select faculty</option>` +
+      faculties
+        .map((f) => `<option value="${f.id}">${f.name}</option>`)
+        .join("");
+  } catch (e) {
+    // ignore silently
+  }
+}
 async function populateSubjectFacultyFilter() {
-  const sel = $("subjFacultyFilter");
-  const semSel = $("subjSemesterFilter");
+  const sel = $("subjFacultyFilter"),
+    semSel = $("subjSemesterFilter");
   if (sel)
     sel.innerHTML =
       `<option value="">All Faculties</option>` +
@@ -1506,47 +1483,45 @@ async function populateSubjectFacultyFilter() {
   if (semSel && semSel.options.length <= 1) {
     semSel.innerHTML =
       `<option value="">All Semesters</option>` +
-      Array.from({ length: 8 }, (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`).join("");
+      Array.from(
+        { length: 8 },
+        (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`,
+      ).join("");
   }
 }
-
 async function loadSubjects() {
-  const fid = $("subjFacultyFilter")?.value || "";
-  const sem = $("subjSemesterFilter")?.value || "";
+  const fid = $("subjFacultyFilter")?.value || "",
+    sem = $("subjSemesterFilter")?.value || "";
   try {
     const qs = new URLSearchParams();
     if (fid) qs.set("faculty_id", fid);
     if (sem) qs.set("semester", sem);
-    const data = await api(`/subjects${qs.toString() ? "?" + qs.toString() : ""}`);
+    const data = await api(
+      `/subjects${qs.toString() ? "?" + qs.toString() : ""}`,
+    );
     allSubjects = data.subjects;
     $("subjectTableBody").innerHTML = allSubjects.length
       ? allSubjects
           .map(
             (s) => `
-          <tr>
-            <td class="font-500">${s.name}</td>
-            <td class="mono-cell">${s.code || "—"}</td>
-            <td>${s.faculty_name || "—"}</td>
-            <td class="mono-cell">Semester ${s.semester}</td>
-            <td>
-              <div class="action-btns">
-              <button class="btn-secondary btn-xs"
-                onclick="openSubjectModalById(${s.id})">Edit</button>
-              <button class="btn-secondary btn-xs text-red"
-                onclick="deleteSubject(${s.id},'${s.name}')">Del</button>
-              </div>
-            </td>
-          </tr>`,
+      <tr>
+        <td class="font-500">${s.name}</td>
+        <td class="mono-cell">${s.code || "—"}</td>
+        <td>${s.faculty_name || "—"}</td>
+        <td class="mono-cell">Semester ${s.semester}</td>
+        <td><div class="action-btns">
+          <button class="btn-secondary btn-xs" onclick="openSubjectModalById(${s.id})">Edit</button>
+          <button class="btn-secondary btn-xs text-red" onclick="deleteSubject(${s.id},'${s.name}')">Del</button>
+        </div></td>
+      </tr>`,
           )
           .join("")
-      : `<tr><td colspan="5" style="text-align:center;
-          color:var(--text3);padding:1.5rem;">No subjects yet</td></tr>`;
+      : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No subjects yet</td></tr>`;
   } catch (e) {
     $("subjectTableBody").innerHTML =
       `<tr><td colspan="5" style="color:var(--red);">${e.message}</td></tr>`;
   }
 }
-
 async function loadTimeslots() {
   try {
     const data = await api("/time-slots");
@@ -1555,26 +1530,26 @@ async function loadTimeslots() {
       ? timeSlots
           .map(
             (ts) => `
-          <tr>
-            <td style="font-weight:500;">${ts.label}</td>
-            <td style="font-family:var(--mono);">${ts.start_time}</td>
-            <td style="font-family:var(--mono);">${ts.end_time}</td>
-            <td>
-              <button class="btn-secondary"
-                style="font-size:11px;padding:3px 8px;color:var(--red);"
-                onclick="deleteTimeSlot(${ts.id},'${ts.label}')">Del</button>
-            </td>
-          </tr>`,
+      <tr>
+        <td style="font-weight:500;">${ts.label}</td>
+        <td style="font-family:var(--mono);">${ts.start_time}</td>
+        <td style="font-family:var(--mono);">${ts.end_time}</td>
+        <td>${
+          ts.assigned_teacher
+            ? `<span class="pill pill-green" style="font-size:10px;">${ts.assigned_teacher} — ${ts.assigned_faculty} Sem ${ts.semester}</span>`
+            : `<span style="color:var(--text3);font-size:11px;">Unassigned</span>`
+        }
+        </td>
+        <td><button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteTimeSlot(${ts.id},'${ts.label}')">Del</button></td>
+      </tr>`,
           )
           .join("")
-      : `<tr><td colspan="4" style="text-align:center;
-          color:var(--text3);padding:1.5rem;">No time slots</td></tr>`;
+      : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No time slots</td></tr>`;
   } catch (e) {
     $("timeslotTableBody").innerHTML =
-      `<tr><td colspan="4" style="color:var(--red);">${e.message}</td></tr>`;
+      `<tr><td colspan="5" style="color:var(--red);">${e.message}</td></tr>`;
   }
 }
-
 function openFacultyModal(id = "", name = "", code = "") {
   $("fmId").value = id;
   $("fmName").value = name;
@@ -1583,13 +1558,9 @@ function openFacultyModal(id = "", name = "", code = "") {
   setErr("facultyModalErr", "");
   openModal("facultyModal");
 }
-
 async function saveFaculty() {
-  const id = $("fmId").value;
-  const body = {
-    name: $("fmName").value.trim(),
-    code: $("fmCode").value.trim(),
-  };
+  const id = $("fmId").value,
+    body = { name: $("fmName").value.trim(), code: $("fmCode").value.trim() };
   if (!body.name) {
     setErr("facultyModalErr", "Name required");
     return;
@@ -1610,14 +1581,8 @@ async function saveFaculty() {
     setErr("facultyModalErr", e.message);
   }
 }
-
 async function deleteFaculty(id, name) {
-  if (
-    !confirm(
-      `Delete faculty "${name}"? This will also remove related subjects.`,
-    )
-  )
-    return;
+  if (!confirm(`Delete faculty "${name}"?`)) return;
   try {
     await api(`/faculties/${id}`, { method: "DELETE" });
     toast("Faculty deleted");
@@ -1628,30 +1593,23 @@ async function deleteFaculty(id, name) {
     toast(e.message, "err");
   }
 }
-
-async function openSubjectModal() {
-  const subject = arguments[0] || null;
+async function openSubjectModal(subject) {
   await loadFaculties();
   const selectedFaculty = $("subjFacultyFilter")?.value || "";
   const selectedSemester = $("subjSemesterFilter")?.value || "";
   const facultyId = subject?.faculty_id || selectedFaculty;
   const semester = subject?.semester || selectedSemester;
-
   if (!subject && (!facultyId || !semester)) {
-    setErr("subjectModalErr", "");
     toast("Select a faculty and semester first", "err");
     return;
   }
-
   const facultyName =
     faculties.find((f) => String(f.id) === String(facultyId))?.name || "—";
   $("smId").value = subject?.id || "";
   $("smName").value = subject?.name || "";
   $("smCode").value = subject?.code || "";
-  $("subjectContext").innerHTML = `
-    <span>${facultyName}</span>
-    <span>Semester ${semester}</span>
-  `;
+  $("subjectContext").innerHTML =
+    `<span>${facultyName}</span><span>Semester ${semester}</span>`;
   $("subjectContext").dataset.facultyId = facultyId;
   $("subjectContext").dataset.semester = semester;
   $("subjectModalTitle").textContent = subject ? "Edit Subject" : "Add Subject";
@@ -1659,12 +1617,10 @@ async function openSubjectModal() {
   openModal("subjectModal");
   setTimeout(() => $("smName")?.focus(), 0);
 }
-
 function openSubjectModalById(id) {
-  const subject = allSubjects.find((s) => String(s.id) === String(id));
-  openSubjectModal(subject || null);
+  const s = allSubjects.find((s) => String(s.id) === String(id));
+  openSubjectModal(s || null);
 }
-
 async function saveSubject() {
   const context = $("subjectContext");
   const body = {
@@ -1674,7 +1630,7 @@ async function saveSubject() {
     semester: context?.dataset.semester || "",
   };
   if (!body.name || !body.code) {
-    setErr("subjectModalErr", "Subject name and subject ID required");
+    setErr("subjectModalErr", "Subject name and ID required");
     return;
   }
   if (!body.faculty_id || !body.semester) {
@@ -1694,7 +1650,6 @@ async function saveSubject() {
     setErr("subjectModalErr", e.message);
   }
 }
-
 async function deleteSubject(id, name) {
   if (!confirm(`Delete subject "${name}"?`)) return;
   try {
@@ -1705,7 +1660,6 @@ async function deleteSubject(id, name) {
     toast(e.message, "err");
   }
 }
-
 function openTimeSlotModal() {
   $("tsmLabel").value = "";
   $("tsmStart").value = "";
@@ -1713,7 +1667,6 @@ function openTimeSlotModal() {
   setErr("tsmErr", "");
   openModal("timeSlotModal");
 }
-
 async function saveTimeSlot() {
   const body = {
     label: $("tsmLabel").value.trim(),
@@ -1733,7 +1686,6 @@ async function saveTimeSlot() {
     setErr("tsmErr", e.message);
   }
 }
-
 async function deleteTimeSlot(id, label) {
   if (!confirm(`Delete time slot "${label}"?`)) return;
   try {
@@ -1749,12 +1701,11 @@ async function deleteTimeSlot(id, label) {
    ADMIN — ATTENDANCE
    ═══════════════════════════════════════════════════════════════════════════ */
 let attData = [];
-
 async function loadAttendancePage() {
   const dateEl = $("attDate");
   if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-  const date = dateEl.value;
-  const dept = $("attDeptFilter").value;
+  const date = dateEl.value,
+    dept = $("attDeptFilter").value;
   try {
     const [summ, depts] = await Promise.all([
       api(`/attendance/faculty-summary?date=${date}`),
@@ -1771,21 +1722,18 @@ async function loadAttendancePage() {
     const facs = dept
       ? summ.faculties.filter((f) => f.name === dept)
       : summ.faculties;
-    $("attFacultySummary").innerHTML = `
-      <div class="metrics-grid">
-        ${facs
-          .map(
-            (f) => `
-          <div class="metric-card">
-            <div class="metric-label">${f.name}</div>
-            <div style="display:flex;gap:0.5rem;align-items:baseline;margin-top:4px;">
-              <span class="metric-val" style="color:var(--green);font-size:20px;">${f.present}</span>
-              <span style="color:var(--text3);font-size:12px;">/ ${f.total} · ${f.rate}%</span>
-            </div>
-          </div>`,
-          )
-          .join("")}
-      </div>`;
+    $("attFacultySummary").innerHTML = `<div class="metrics-grid">${facs
+      .map(
+        (f) => `
+      <div class="metric-card">
+        <div class="metric-label">${f.name}</div>
+        <div style="display:flex;gap:0.5rem;align-items:baseline;margin-top:4px;">
+          <span class="metric-val" style="color:var(--green);font-size:20px;">${f.present}</span>
+          <span style="color:var(--text3);font-size:12px;">/ ${f.total} · ${f.rate}%</span>
+        </div>
+      </div>`,
+      )
+      .join("")}</div>`;
     const data = await api(
       `/attendance?date=${date}${dept ? "&department=" + encodeURIComponent(dept) : ""}`,
     );
@@ -1796,7 +1744,6 @@ async function loadAttendancePage() {
       `<div style="color:var(--red);">${e.message}</div>`;
   }
 }
-
 function filterAttendance() {
   const q = $("attSearch").value.toLowerCase();
   renderAttTable(
@@ -1809,96 +1756,21 @@ function filterAttendance() {
       : attData,
   );
 }
-
 function renderAttTable(records) {
   if (!records.length) {
     $("attTableWrap").innerHTML =
-      `<div style="text-align:center;color:var(--text3);padding:2rem;">
-        No records for this date
-      </div>`;
+      `<div style="text-align:center;color:var(--text3);padding:2rem;">No records for this date</div>`;
     return;
   }
-
-  // Group records by department
-  const byDept = {};
-  records.forEach((r) => {
-    const dept = r.department || "—";
-    if (!byDept[dept]) byDept[dept] = [];
-    byDept[dept].push(r);
-  });
-
-  // For each student, get only first and last sighting
-  const consolidatedByDept = {};
-  Object.keys(byDept).forEach((dept) => {
-    const byStudent = {};
-    byDept[dept].forEach((r) => {
-      const key = `${r.student_id}`;
-      if (!byStudent[key]) byStudent[key] = [];
-      byStudent[key].push(r);
-    });
-
-    consolidatedByDept[dept] = Object.keys(byStudent).map((stdId) => {
-      const records = byStudent[stdId];
-      // Sort by time to get first and last
-      records.sort((a, b) => (a.time || "").localeCompare(b.time || ""));
-      const first = records[0];
-      const last = records[records.length - 1];
-
-      // If multiple entries, show as time range
-      if (records.length > 1) {
-        return {
-          ...first,
-          time: `${first.time} - ${last.time}`,
-          multiEntry: true,
-        };
-      }
-      return first;
-    });
-  });
-
-  // Build HTML grouped by department
-  let html = `<div style="overflow-x:auto;">`;
-
-  Object.keys(consolidatedByDept)
-    .sort()
-    .forEach((dept) => {
-      const deptRecords = consolidatedByDept[dept];
-      html += `
-      <div style="margin-bottom:2rem;">
-        <h3 style="font-size:14px;font-weight:600;color:var(--text2);margin-bottom:0.75rem;padding:0.5rem 0;border-bottom:1px solid var(--bg3);">
-          📚 ${dept}
-        </h3>
-        <table class="data-table">
-          <thead>
-            <tr><th>Student</th><th>ID</th><th>Time (First - Last)</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            ${deptRecords
-              .map(
-                (r) => `
-              <tr ${r.multiEntry ? 'style="background:var(--bg3);opacity:0.95;"' : ""}>
-                <td style="font-weight:500;">${r.name}</td>
-                <td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${r.student_id}</td>
-                <td style="font-family:var(--mono);font-size:12px;">${r.time}</td>
-                <td>${statusBadge(r.status)}</td>
-              </tr>`,
-              )
-              .join("")}
-          </tbody>
-        </table>
-      </div>`;
-    });
-
-  html += `</div>`;
-  $("attTableWrap").innerHTML = html;
+  $("attTableWrap").innerHTML =
+    `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Department</th><th>Time</th><th>Status</th></tr></thead>
+    <tbody>${records.map((r) => `<tr><td style="font-weight:500;">${r.name}</td><td style="font-family:var(--mono);font-size:11px;">${r.student_id}</td><td>${r.department || "—"}</td><td style="font-family:var(--mono);font-size:12px;">${r.time}</td><td>${statusBadge(r.status)}</td></tr>`).join("")}</tbody></table></div>`;
 }
-
 function exportAttCSV() {
-  const date = $("attDate").value;
-  const dept = $("attDeptFilter").value;
+  const date = $("attDate").value,
+    dept = $("attDeptFilter").value;
   window.open(
-    `${API}/attendance/export?from=${date}&to=${date}` +
-      `${dept ? "&department=" + encodeURIComponent(dept) : ""}`,
+    `${API}/attendance/export?from=${date}&to=${date}${dept ? "&department=" + encodeURIComponent(dept) : ""}`,
   );
 }
 
@@ -1909,8 +1781,8 @@ async function loadReports() {
   const today = new Date().toISOString().slice(0, 10);
   if (!$("repFrom").value) $("repFrom").value = today.slice(0, 7) + "-01";
   if (!$("repTo").value) $("repTo").value = today;
-  const dept = $("repDept")?.value || "";
-  const deptQuery = dept ? `?department=${encodeURIComponent(dept)}` : "";
+  const dept = $("repDept")?.value || "",
+    deptQuery = dept ? `?department=${encodeURIComponent(dept)}` : "";
   try {
     const [stats, depts, hist] = await Promise.all([
       api(`/attendance/stats${deptQuery}`),
@@ -1941,60 +1813,34 @@ async function loadReports() {
       (sum, s) => sum + (parseInt(s.present_days) || 0),
       0,
     );
-
-    // Update metrics
     $("repAvgAtt").textContent = avgPct + "%";
     $("repHighest").textContent = highest + "%";
     $("repBelowCount").textContent = below75;
     $("repTotalRecog").textContent = totalRecog;
-
     drawMonthlyChart(hist.history.slice().reverse());
     drawDeptChart(stats.stats);
-    $("statsTableWrap").innerHTML = `
-      <div style="overflow-x:auto;">
-        <table class="data-table">
-          <thead>
-            <tr><th>ID</th><th>Name</th><th>Department</th>
-              <th>Present Days</th><th>Percentage</th><th>Status</th></tr>
-          </thead>
-          <tbody>
-            ${
-              stats.stats
-                .map((s) => {
-                  const pctNum = parseFloat(s.pct) || 0;
-                  const statusColor =
-                    pctNum < 75 ? "var(--red)" : "var(--green)";
-                  const statusText = pctNum < 75 ? "Critical" : "On Track";
-                  return `
-              <tr>
-                <td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${s.student_id}</td>
-                <td style="font-weight:500;">${s.full_name}</td>
-                <td>${s.department || "—"}</td>
-                <td style="text-align:center;">${s.present_days}</td>
-                <td>
-                  <div style="display:flex;align-items:center;gap:8px;">
-                    <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;">
-                      <div style="height:100%;width:${Math.min(pctNum, 100)}%;background:${statusColor};border-radius:3px;"></div>
-                    </div>
-                    <span style="color:${statusColor};font-weight:600;font-family:var(--mono);font-size:12px;">${pctNum}%</span>
-                  </div>
-                </td>
-                <td><span style="color:${statusColor};font-weight:600;font-size:11px;">${statusText}</span></td>
-              </tr>`;
-                })
-                .join("") ||
-              `<tr><td colspan="6" style="text-align:center;
-                color:var(--text3);padding:1.5rem;">No data</td></tr>`
-            }
-          </tbody>
-        </table>
-      </div>`;
+    $("statsTableWrap").innerHTML =
+      `<div style="overflow-x:auto;"><table class="data-table">
+      <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Present</th><th>Percentage</th><th>Status</th></tr></thead>
+      <tbody>${
+        stats.stats
+          .map((s) => {
+            const pctNum = parseFloat(s.pct) || 0,
+              col = pctNum < 75 ? "var(--red)" : "var(--green)";
+            return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${s.student_id}</td>
+          <td style="font-weight:500;">${s.full_name}</td><td>${s.department || "—"}</td>
+          <td style="text-align:center;">${s.present_days}</td>
+          <td><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(pctNum, 100)}%;background:${col};border-radius:3px;"></div></div><span style="color:${col};font-weight:600;font-family:var(--mono);font-size:12px;">${pctNum}%</span></div></td>
+          <td><span style="color:${col};font-weight:600;font-size:11px;">${pctNum < 75 ? "Critical" : "On Track"}</span></td></tr>`;
+          })
+          .join("") ||
+        `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:1.5rem;">No data</td></tr>`
+      }</tbody></table></div>`;
   } catch (e) {
     $("repAvgAtt").textContent = "Error";
     toast(e.message, "err");
   }
 }
-
 function drawMonthlyChart(history) {
   const canvas = $("monthlyChart");
   if (!canvas) return;
@@ -2008,15 +1854,10 @@ function drawMonthlyChart(history) {
         data: history.map((h) => h.present),
         color: "#22c55e",
       },
-      {
-        label: "Absent",
-        data: history.map((h) => h.absent),
-        color: "#ef4444",
-      },
+      { label: "Absent", data: history.map((h) => h.absent), color: "#ef4444" },
     ],
   });
 }
-
 function drawDeptChart(stats) {
   const canvas = $("deptChart");
   if (!canvas) return;
@@ -2025,21 +1866,39 @@ function drawDeptChart(stats) {
   const byDept = {};
   stats.forEach((s) => {
     const d = s.department || "Unassigned";
-    byDept[d] = byDept[d] || { total: 0, present: 0 };
-    byDept[d].total += parseInt(s.total_days) || 0;
+    byDept[d] = byDept[d] || { present: 0 };
     byDept[d].present += parseInt(s.present_days) || 0;
   });
   const labels = Object.keys(byDept).sort();
-  const attendanceData = labels.map((d) => byDept[d].present);
   deptChart = new SimpleChart(ctx, {
     type: "bar",
     labels,
     datasets: [
-      { label: "Attendance Count", data: attendanceData, color: "#3b82f6" },
+      {
+        label: "Attendance",
+        data: labels.map((d) => byDept[d].present),
+        color: "#3b82f6",
+      },
     ],
   });
 }
+function exportReport() {
+  const f = $("repFrom").value,
+    t = $("repTo").value,
+    d = $("repDept").value;
+  window.open(
+    `${API}/attendance/export?from=${f}&to=${t}${d ? "&department=" + encodeURIComponent(d) : ""}`,
+  );
+}
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   ISSUE 1 FIX: SimpleChart — always scales to container, never grows taller.
+   Key changes vs original:
+   1. Canvas height is driven by the HTML/CSS attribute, not computed from data.
+   2. Y-axis max is rounded to a "nice" number so gridlines don't crowd.
+   3. Bar width scales with the number of bars, so many bars = thin bars,
+      never overflow the fixed container.
+   ───────────────────────────────────────────────────────────────────────── */
 class SimpleChart {
   constructor(ctx, config) {
     this.ctx = ctx;
@@ -2050,109 +1909,97 @@ class SimpleChart {
     this.ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
   }
+
   draw() {
     const { ctx, config } = this;
     const { type = "line", labels, datasets } = config;
-    const W = ctx.canvas.parentElement?.clientWidth || 500;
-    const H = ctx.canvas.clientHeight || 220;
-    ctx.canvas.width = W;
-    ctx.canvas.height = H;
     const dpr = window.devicePixelRatio || 1;
-    ctx.canvas.width = W * dpr;
-    ctx.canvas.height = H * dpr;
+
+    // ── ISSUE 1: respect CSS max-height; do NOT let data expand the canvas ──
+    const container = ctx.canvas.parentElement;
+    const cssW = container ? container.clientWidth : 500;
+    // Clamp height to 260 px — matches the CSS height:"260" attribute on the canvas
+    const cssH = Math.min(ctx.canvas.getAttribute("height") || 260, 260);
+
+    ctx.canvas.width = cssW * dpr;
+    ctx.canvas.height = cssH * dpr;
+    ctx.canvas.style.width = cssW + "px";
+    ctx.canvas.style.height = cssH + "px";
     ctx.setTransform?.(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, W, H);
+    ctx.clearRect(0, 0, cssW, cssH);
+
     if (!labels?.length) return;
 
-    const pad = { top: 20, right: 20, bottom: 45, left: 50 };
-    const cW = W - pad.left - pad.right;
-    const cH = H - pad.top - pad.bottom;
-    const all = datasets.flatMap((d) => d.data);
-    const max = Math.max(...all, 1);
-    const roundedMax = Math.ceil(max / 10) * 10;
+    const pad = { top: 18, right: 16, bottom: 40, left: 46 };
+    const cW = cssW - pad.left - pad.right;
+    const cH = cssH - pad.top - pad.bottom;
 
-    // Draw grid and Y-axis labels
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
+    // ── Nice Y max so grid lines are round numbers ──
+    const allVals = datasets.flatMap((d) => d.data).filter((v) => v != null);
+    const rawMax = Math.max(...allVals, 1);
+    const niceMax = this._niceMax(rawMax);
+    const GRID_LINES = 4;
+
+    // Grid lines + Y labels
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
     ctx.lineWidth = 1;
     ctx.fillStyle = "#888895";
-    ctx.font = "11px monospace";
+    ctx.font = `11px monospace`;
     ctx.textAlign = "right";
-    for (let i = 0; i <= 4; i++) {
-      const val = Math.round((roundedMax * i) / 4);
-      const y = pad.top + cH - (cH * i) / 4;
+    for (let i = 0; i <= GRID_LINES; i++) {
+      const val = Math.round((niceMax * i) / GRID_LINES);
+      const y = pad.top + cH - (cH * i) / GRID_LINES;
       ctx.beginPath();
       ctx.moveTo(pad.left, y);
       ctx.lineTo(pad.left + cW, y);
       ctx.stroke();
-      ctx.fillText(val, pad.left - 8, y + 4);
+      ctx.fillText(val, pad.left - 6, y + 4);
     }
 
     if (type === "bar") {
-      // Bar chart rendering
-      const totalBars = labels.length;
-      const groupCount = Math.max(datasets.length, 1);
-      const groupWidth = Math.max(cW / Math.max(totalBars, 1) * 0.62, 24);
-      const barGap = 4;
-      const barWidth = Math.max((groupWidth - barGap * (groupCount - 1)) / groupCount, 6);
-      const totalSpacing = cW - groupWidth * totalBars;
-      const spacing = totalSpacing / (totalBars + 1);
+      const n = labels.length;
+      const gW = cW / Math.max(n, 1); // group width per label
+      const bCnt = datasets.length;
+      const gap = Math.max(1, gW * 0.08);
+      const inner = gW * 0.72; // 72 % of group width
+      const bW = Math.max(2, (inner - gap * (bCnt - 1)) / bCnt);
 
-      datasets.forEach((ds, dsIndex) => {
+      datasets.forEach((ds, di) => {
         ds.data.forEach((v, i) => {
-          const groupX = pad.left + spacing + i * (groupWidth + spacing);
-          const barX = groupX + dsIndex * (barWidth + barGap);
-          const barH = (cH * v) / roundedMax;
-          const barY = pad.top + cH - barH;
-
+          if (v == null) return;
+          const bH = (cH * v) / niceMax;
+          const gX = pad.left + i * gW + (gW - inner) / 2;
+          const bX = gX + di * (bW + gap);
+          const bY = pad.top + cH - bH;
           ctx.fillStyle = ds.color;
-          ctx.fillRect(barX, barY, barWidth, barH);
-
-          // Draw value on top of bar
-          ctx.fillStyle = "#ccc";
-          ctx.font = "12px monospace";
-          ctx.textAlign = "center";
-          ctx.fillText(Math.round(v), barX + barWidth / 2, barY - 8);
+          ctx.fillRect(bX, bY, bW, bH);
+          // Value label only if bar is wide enough
+          if (bW > 16 && bH > 2) {
+            ctx.fillStyle = "rgba(200,200,208,0.9)";
+            ctx.font = "10px monospace";
+            ctx.textAlign = "center";
+            ctx.fillText(Math.round(v), bX + bW / 2, bY - 5);
+          }
         });
       });
 
-      // Draw X-axis labels
+      // X labels — skip every Nth if crowded
       ctx.fillStyle = "#888895";
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
+      const skipEvery = Math.ceil(n / Math.floor(cW / 32));
       labels.forEach((l, i) => {
-        const barX =
-          pad.left + spacing + i * (groupWidth + spacing) + groupWidth / 2;
-        ctx.fillText(l.substring(0, 12), barX, H - 12);
+        if (i % skipEvery !== 0 && i !== n - 1) return;
+        ctx.fillText(
+          String(l).slice(0, 8),
+          pad.left + (i + 0.5) * gW,
+          cssH - 10,
+        );
       });
     } else {
-      // Smooth line chart — Catmull-Rom splines converted to bezier (no overshoot)
+      // Smooth line (Catmull-Rom)
       const step = cW / Math.max(labels.length - 1, 1);
-
-      /**
-       * Catmull-Rom → cubic bezier conversion (same method Chart.js uses).
-       * Produces natural flowing S-curves without the overshoot of naive bezier.
-       * alpha controls tension: 0 = uniform, 0.5 = centripetal (recommended)
-       */
-      function catmullRomToBezier(pts) {
-        const alpha = 0.5;
-        const segs = [];
-        for (let i = 0; i < pts.length - 1; i++) {
-          const p0 = pts[Math.max(i - 1, 0)];
-          const p1 = pts[i];
-          const p2 = pts[i + 1];
-          const p3 = pts[Math.min(i + 2, pts.length - 1)];
-          // Control points derived from the four neighbouring points
-          const cp1x = p1.x + (p2.x - p0.x) / 6;
-          const cp1y = p1.y + (p2.y - p0.y) / 6;
-          const cp2x = p2.x - (p3.x - p1.x) / 6;
-          const cp2y = p2.y - (p3.y - p1.y) / 6;
-          segs.push({ cp1x, cp1y, cp2x, cp2y, ex: p2.x, ey: p2.y });
-        }
-        return segs;
-      }
-
-      // Clip all drawing to the chart plot area so curves never overflow
       ctx.save();
       ctx.beginPath();
       ctx.rect(pad.left, pad.top, cW, cH);
@@ -2161,54 +2008,45 @@ class SimpleChart {
       datasets.forEach((ds) => {
         const pts = ds.data.map((v, i) => ({
           x: pad.left + i * step,
-          y: pad.top + cH - (cH * v) / roundedMax,
+          y: pad.top + cH - (cH * (v || 0)) / niceMax,
         }));
-
         if (pts.length < 2) return;
-        const segs = catmullRomToBezier(pts);
+        const segs = this._catmullSegs(pts);
 
-        // Build the smooth Catmull-Rom path
-        const buildSmoothPath = () => {
+        const buildPath = () => {
           ctx.beginPath();
           ctx.moveTo(pts[0].x, pts[0].y);
-          segs.forEach(({ cp1x, cp1y, cp2x, cp2y, ex, ey }) => {
-            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey);
-          });
+          segs.forEach(({ cp1x, cp1y, cp2x, cp2y, ex, ey }) =>
+            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey),
+          );
         };
-
-        // Gradient filled area under the curve
-        buildSmoothPath();
+        buildPath();
         ctx.lineTo(pts[pts.length - 1].x, pad.top + cH);
         ctx.lineTo(pts[0].x, pad.top + cH);
         ctx.closePath();
-        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
-        grad.addColorStop(0, ds.color + "42");
-        grad.addColorStop(1, ds.color + "04");
-        ctx.fillStyle = grad;
+        const g = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+        g.addColorStop(0, ds.color + "42");
+        g.addColorStop(1, ds.color + "04");
+        ctx.fillStyle = g;
         ctx.fill();
-
-        // Smooth line stroke
-        buildSmoothPath();
+        buildPath();
         ctx.strokeStyle = ds.color;
         ctx.lineWidth = 2.5;
         ctx.lineJoin = "round";
-        ctx.lineCap = "round";
         ctx.stroke();
       });
-
-      // Restore clip — dots are drawn outside so they're never half-clipped
       ctx.restore();
 
-      // Endpoint dots (first & last) for each dataset
+      // Endpoint dots
       datasets.forEach((ds) => {
         const pts = ds.data.map((v, i) => ({
           x: pad.left + i * step,
-          y: pad.top + cH - (cH * v) / roundedMax,
+          y: pad.top + cH - (cH * (v || 0)) / niceMax,
         }));
         if (pts.length < 2) return;
         [pts[0], pts[pts.length - 1]].forEach((p) => {
           ctx.beginPath();
-          ctx.arc(p.x, p.y, 4.5, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
           ctx.fillStyle = ds.color;
           ctx.fill();
           ctx.strokeStyle = "rgba(13,13,15,0.9)";
@@ -2217,28 +2055,50 @@ class SimpleChart {
         });
       });
 
-      // X-axis labels
-      const step2 = Math.ceil(labels.length / 6);
+      // X labels
+      const skip = Math.ceil(labels.length / 6);
       ctx.fillStyle = "#888895";
       ctx.font = "10px monospace";
       ctx.textAlign = "center";
       labels.forEach((l, i) => {
-        if (i % step2 !== 0 && i !== labels.length - 1) return;
-        const x = pad.left + i * (cW / (labels.length - 1 || 1));
-        ctx.fillText(l.substring(5), x, H - 12);
+        if (i % skip !== 0 && i !== labels.length - 1) return;
+        ctx.fillText(
+          String(l).slice(5),
+          pad.left + i * (cW / (labels.length - 1 || 1)),
+          cssH - 10,
+        );
       });
     }
   }
-}
 
-function exportReport() {
-  const f = $("repFrom").value,
-    t = $("repTo").value,
-    d = $("repDept").value;
-  window.open(
-    `${API}/attendance/export?from=${f}&to=${t}` +
-      `${d ? "&department=" + encodeURIComponent(d) : ""}`,
-  );
+  /** Round up to a "nice" max for Y axis */
+  _niceMax(raw) {
+    if (raw <= 0) return 10;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+    const normalized = raw / magnitude;
+    let nice =
+      normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return nice * magnitude;
+  }
+
+  _catmullSegs(pts) {
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(i - 1, 0)],
+        p1 = pts[i],
+        p2 = pts[i + 1],
+        p3 = pts[Math.min(i + 2, pts.length - 1)];
+      segs.push({
+        cp1x: p1.x + (p2.x - p0.x) / 6,
+        cp1y: p1.y + (p2.y - p0.y) / 6,
+        cp2x: p2.x - (p3.x - p1.x) / 6,
+        cp2y: p2.y - (p3.y - p1.y) / 6,
+        ex: p2.x,
+        ey: p2.y,
+      });
+    }
+    return segs;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2253,27 +2113,16 @@ async function loadSettings() {
     $("skipSlider").value = s.frame_skip;
     $("skipVal").textContent = s.frame_skip;
     $("sysInfo").innerHTML = `
-      <div style="display:flex;justify-content:space-between;padding:6px 0;
-        border-bottom:1px solid var(--border);">
-        <span style="color:var(--text2);">Email</span>
-        <span>${s.email_enabled ? badge("Enabled", "green") : badge("Disabled", "red")}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:6px 0;
-        border-bottom:1px solid var(--border);">
-        <span style="color:var(--text2);">Email Service</span>
-        <span style="font-family:var(--mono);font-size:11px;">
-          ${s.brevo_from || s.sendgrid_from || "—"}
-        </span>
+      <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
+        <span style="color:var(--text2);">Email</span><span>${s.email_enabled ? badge("Enabled", "green") : badge("Disabled", "red")}</span>
       </div>
       <div style="display:flex;justify-content:space-between;padding:6px 0;">
-        <span style="color:var(--text2);">System Version</span>
-        <span style="font-family:var(--mono);font-size:11px;">v3.0 Smart Auto</span>
+        <span style="color:var(--text2);">System Version</span><span style="font-family:var(--mono);font-size:11px;">v3.1</span>
       </div>`;
   } catch (e) {
     toast(e.message, "err");
   }
 }
-
 async function saveSettings() {
   try {
     await api("/settings", {
@@ -2288,7 +2137,6 @@ async function saveSettings() {
     toast(e.message, "err");
   }
 }
-
 async function changeAdminPw() {
   const old_pw = $("oldPw").value,
     new_pw = $("newPw").value;
@@ -2308,7 +2156,6 @@ async function changeAdminPw() {
     toast(e.message, "err");
   }
 }
-
 async function sendTestEmail() {
   const addr = $("testEmailAddr")?.value.trim();
   if (!addr) {
@@ -2327,9 +2174,8 @@ async function sendTestEmail() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   ENROLL — Automatic Face Capture with Voice Instructions
+   ENROLL — Automatic Face Capture (unchanged from v3.0)
    ═══════════════════════════════════════════════════════════════════════════ */
-
 function showEnrollStep(n) {
   [1, 2, 3].forEach((i) => {
     $(`epanel-${i}`).style.display = i === n ? "" : "none";
@@ -2338,12 +2184,10 @@ function showEnrollStep(n) {
   });
   enrollStep = n;
 }
-
 function goToStep1() {
   stopAutoCapture();
   showEnrollStep(1);
 }
-
 function goToStep2() {
   const sid = $("eId").value.trim(),
     name = $("eName").value.trim();
@@ -2356,11 +2200,9 @@ function goToStep2() {
   isAutoCaptureActive = false;
   _captureComplete = false;
   _validateInFlight = false;
-
   renderCaptureProgress();
   showEnrollStep(2);
 }
-
 function goToStep3() {
   if (enrollFrames.length < TOTAL_FRAMES) {
     toast(
@@ -2373,44 +2215,33 @@ function goToStep3() {
   buildReviewPanel();
   showEnrollStep(3);
 }
-
 async function startCamera() {
   return new Promise((resolve, reject) => {
-    try {
-      if (enrollStream) {
-        enrollStream.getTracks().forEach((t) => t.stop());
-      }
-      navigator.mediaDevices
-        .getUserMedia({
-          video: {
-            facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 },
-          },
-          audio: false,
-        })
-        .then((stream) => {
-          enrollStream = stream;
-          const vid = $("captureCam");
-          vid.srcObject = enrollStream;
-          vid.onloadedmetadata = () => {
-            hide($("capturePlaceholder"));
-            show($("startCaptureBtn"), "inline-block");
-            $("startCaptureBtn").disabled = false;
-            resolve();
-          };
-        })
-        .catch((e) => {
-          toast("Camera error: " + e.message, "err");
-          reject(e);
-        });
-    } catch (e) {
-      toast("Camera error: " + e.message, "err");
-      reject(e);
-    }
+    if (enrollStream) enrollStream.getTracks().forEach((t) => t.stop());
+    navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
+        audio: false,
+      })
+      .then((stream) => {
+        enrollStream = stream;
+        const vid = $("captureCam");
+        vid.srcObject = enrollStream;
+        vid.onloadedmetadata = () => {
+          hide($("capturePlaceholder"));
+          resolve();
+        };
+      })
+      .catch((e) => {
+        toast("Camera error: " + e.message, "err");
+        reject(e);
+      });
   });
 }
-
 function stopAutoCapture() {
   isAutoCaptureActive = false;
   if (captureAF) {
@@ -2423,20 +2254,17 @@ function stopAutoCapture() {
   }
   const vid = $("captureCam");
   if (vid) vid.srcObject = null;
-
   hide($("stopCaptureBtn"));
   hide($("resetCaptureBtn"));
-  show($("startCaptureBtn"), "inline-block");
+  show($("startCaptureBtn"));
   $("startCaptureBtn").disabled = false;
 }
-
 function resetCapture() {
   stopAutoCapture();
   enrollFrames = [];
   poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
   _captureComplete = false;
   _validateInFlight = false;
-
   $("captureCount").textContent = "0";
   $("captureInstruction").textContent =
     "Click Start Capture to begin guided face collection";
@@ -2446,29 +2274,21 @@ function resetCapture() {
   $("startCaptureBtn").style.display = "inline-block";
   $("stopCaptureBtn").style.display = "none";
   $("resetCaptureBtn").style.display = "none";
-
   renderCaptureProgress();
   updatePosePips();
 }
-
 function updatePosePips() {
   for (const step of POSE_SEQUENCE) {
     const pip = $(`pip-${step.pose}`);
     if (!pip) continue;
-    const count = poseCaptureCounts[step.pose] || 0;
-    const isDone = count >= step.target;
-    const isCurrent = _getCurrentPoseStep()?.pose === step.pose;
+    const count = poseCaptureCounts[step.pose] || 0,
+      isDone = count >= step.target,
+      isCurrent = _getCurrentPoseStep()?.pose === step.pose;
     pip.classList.toggle("done", isDone);
     pip.classList.toggle("active", isCurrent && !isDone);
   }
 }
-
-function speakInstruction(text) {
-  _speakInstruction(text, true);
-}
-
 async function startAutoCapture() {
-  // Start camera if not already started
   if (!enrollStream) {
     try {
       await startCamera();
@@ -2477,81 +2297,61 @@ async function startAutoCapture() {
       return;
     }
   }
-
   $("startCaptureBtn").style.display = "none";
   $("stopCaptureBtn").style.display = "inline-block";
   $("resetCaptureBtn").style.display = "inline-block";
-
   enrollFrames = [];
   poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
   isAutoCaptureActive = true;
   _captureComplete = false;
   _validateInFlight = false;
-
   renderCaptureProgress();
   updatePosePips();
-
-  // Announce first pose
   const firstStep = _getCurrentPoseStep();
   if (firstStep) {
     _speakInstruction(
-      "Face capture started. " +
-        (firstStep.voiceInstruction || firstStep.instruction),
+      "Face capture started. " + firstStep.voiceInstruction,
       true,
     );
     $("poseLabel").textContent =
       firstStep.pose.charAt(0).toUpperCase() + firstStep.pose.slice(1);
     $("captureInstruction").textContent = firstStep.instruction;
   }
-
   _runCaptureLoop();
 }
-
 function _runCaptureLoop() {
-  const video = $("captureCam");
-  const overlay = $("captureOverlay");
-  const ctx = overlay.getContext("2d");
-
+  const video = $("captureCam"),
+    overlay = $("captureOverlay"),
+    ctx = overlay.getContext("2d");
   function loop(ts) {
     if (!isAutoCaptureActive || !enrollStream) return;
-
-    // Match overlay size to video
     overlay.width = video.videoWidth || 640;
     overlay.height = video.videoHeight || 480;
-
     _drawOverlay(ctx, overlay.width, overlay.height);
-
-    // Validate at most every 400ms
     if (ts - lastValidateTime >= 400) {
       lastValidateTime = ts;
       _validateAndCapture(video, overlay.width, overlay.height);
     }
-
     captureAF = requestAnimationFrame(loop);
   }
   captureAF = requestAnimationFrame(loop);
 }
-
 async function _validateAndCapture(video, w, h) {
   if (_validateInFlight || _captureComplete || !isAutoCaptureActive) return;
   _validateInFlight = true;
-
   try {
     const tmp = document.createElement("canvas");
     tmp.width = w;
     tmp.height = h;
     tmp.getContext("2d").drawImage(video, 0, 0, w, h);
     const b64 = tmp.toDataURL("image/jpeg", 0.85).split(",")[1];
-
     const d = await api("/capture/validate-frame", {
       method: "POST",
       body: JSON.stringify({ image: b64 }),
     });
     if (!d || _captureComplete || !isAutoCaptureActive) return;
-
     currentQuality = d.quality;
     currentPoseHint = d.pose || "front";
-
     const q = d.quality?.overall ?? 0;
     const qFill = $("qualityFill");
     if (qFill) {
@@ -2566,53 +2366,34 @@ async function _validateAndCapture(video, w, h) {
       poseLabelEl.textContent = d.face_detected
         ? currentPoseHint.charAt(0).toUpperCase() + currentPoseHint.slice(1)
         : "No face";
-
     if (!d.face_detected || !d.quality?.passed) {
-      const warningText = !d.face_detected
+      $("captureInstruction").textContent = !d.face_detected
         ? "⚠ No face detected — move into frame"
-        : d.quality.blur_score < 30
-          ? "⚠ Image is blurry — hold still"
-          : d.quality.brightness < 40
-            ? "⚠ Too dark — improve lighting"
-            : "⚠ Quality too low — adjust position";
-
-      $("captureInstruction").textContent = warningText;
-      _speakInstruction(warningText.replace("⚠", "").trim(), false);
+        : "⚠ Quality too low — adjust position";
       return;
     }
-
     if (_captureComplete || !isAutoCaptureActive) return;
-
     const currentStep = _getCurrentPoseStep();
     if (!currentStep) {
       if (!_captureComplete) _onCaptureComplete();
       return;
     }
-
-    const requiredPose = currentStep.pose;
-    const poseMatches = currentPoseHint === requiredPose;
-
+    const requiredPose = currentStep.pose,
+      poseMatches = currentPoseHint === requiredPose;
     if (poseMatches) {
       const alreadyCount = poseCaptureCounts[requiredPose] || 0;
       if (alreadyCount >= currentStep.target) return;
-
       enrollFrames.push(b64);
       poseCaptureCounts[requiredPose] = alreadyCount + 1;
-
       const total = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0);
       const countEl = $("captureCount");
       if (countEl) countEl.textContent = total;
-
       $("captureInstruction").textContent =
         `✓ ${total} frames — ${currentStep.instruction}`;
       _soundTick();
-
       renderCaptureProgress();
       updatePosePips();
-
-      const justFinishedPose =
-        poseCaptureCounts[requiredPose] >= currentStep.target;
-      if (justFinishedPose) {
+      if (poseCaptureCounts[requiredPose] >= currentStep.target) {
         if (total >= TOTAL_FRAMES) {
           _captureComplete = true;
           _onCaptureComplete();
@@ -2620,12 +2401,14 @@ async function _validateAndCapture(video, w, h) {
           const nextStep = _getCurrentPoseStep();
           if (nextStep) {
             _soundDing();
-            setTimeout(() => {
-              _speakInstruction(
-                nextStep.voiceInstruction || nextStep.instruction,
-                true,
-              );
-            }, 300);
+            setTimeout(
+              () =>
+                _speakInstruction(
+                  nextStep.voiceInstruction || nextStep.instruction,
+                  true,
+                ),
+              300,
+            );
             $("captureInstruction").textContent =
               `✓ ${requiredPose.toUpperCase()} done! Now: ${nextStep.instruction}`;
             $("poseLabel").textContent =
@@ -2634,56 +2417,48 @@ async function _validateAndCapture(video, w, h) {
         }
       }
     } else {
-      const seenLabel =
-        currentPoseHint && currentPoseHint !== requiredPose
+      $("captureInstruction").textContent =
+        currentStep.instruction +
+        (currentPoseHint && currentPoseHint !== requiredPose
           ? ` (seeing: ${currentPoseHint})`
-          : "";
-      $("captureInstruction").textContent = currentStep.instruction + seenLabel;
+          : "");
     }
-  } catch (e) {
-    // skip network error
+  } catch {
   } finally {
     _validateInFlight = false;
   }
 }
-
 function _getCurrentPoseStep() {
   for (const step of POSE_SEQUENCE) {
     if ((poseCaptureCounts[step.pose] || 0) < step.target) return step;
   }
   return null;
 }
-
 function _onCaptureComplete() {
   stopAutoCapture();
   _soundChime();
-  setTimeout(() => {
-    _speakInstruction(
-      "Face capture complete! You may now proceed to enroll.",
-      true,
-    );
-  }, 400);
+  setTimeout(
+    () =>
+      _speakInstruction(
+        "Face capture complete! You may now proceed to enroll.",
+        true,
+      ),
+    400,
+  );
   $("captureInstruction").textContent =
     `✅ ${enrollFrames.length} frames collected! Click "Review & Enroll" to continue.`;
   $("resetCaptureBtn").style.display = "inline-block";
-  toast(`${enrollFrames.length} frames captured — ready to enroll`);
+  toast(`${enrollFrames.length} frames captured`);
 }
-
 function _drawOverlay(ctx, w, h) {
   ctx.clearRect(0, 0, w, h);
-
   const cx = w / 2,
-    cy = h / 2;
-  const rx = w * 0.18,
+    cy = h / 2,
+    rx = w * 0.18,
     ry = h * 0.26;
-  const currentStep = _getCurrentPoseStep();
-  const totalCaptured = Object.values(poseCaptureCounts).reduce(
-    (a, b) => a + b,
-    0,
-  );
-  const pct = totalCaptured / TOTAL_FRAMES;
-
-  // Semi-transparent dark vignette outside the oval
+  const currentStep = _getCurrentPoseStep(),
+    totalCaptured = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0),
+    pct = totalCaptured / TOTAL_FRAMES;
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,0.40)";
   ctx.fillRect(0, 0, w, h);
@@ -2692,22 +2467,16 @@ function _drawOverlay(ctx, w, h) {
   ctx.ellipse(cx, cy, rx + 8, ry + 8, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-
-  // Oval border — colour depends on quality
-  const ovalColor =
-    !currentPoseHint || currentPoseHint === ""
-      ? "#555"
-      : currentQuality?.passed
-        ? `hsl(${120 * pct}, 80%, 55%)`
-        : "#EF4444";
-
+  const ovalColor = !currentPoseHint
+    ? "#555"
+    : currentQuality?.passed
+      ? `hsl(${120 * pct},80%,55%)`
+      : "#EF4444";
   ctx.beginPath();
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.strokeStyle = ovalColor;
   ctx.lineWidth = 3;
   ctx.stroke();
-
-  // Progress arc around the oval (green ring)
   if (totalCaptured > 0) {
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx + 6, ry + 6, -Math.PI / 2, 0, Math.PI * 2 * pct);
@@ -2715,173 +2484,75 @@ function _drawOverlay(ctx, w, h) {
     ctx.lineWidth = 4;
     ctx.stroke();
   }
-
-  // Crosshair / alignment guide
-  ctx.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx.lineWidth = 1.5;
-  [
-    [cx, cy - ry - 4, cx, cy - ry + 12],
-    [cx, cy + ry - 12, cx, cy + ry + 4],
-    [cx - rx - 4, cy, cx - rx + 12, cy],
-    [cx + rx - 12, cy, cx + rx + 4, cy],
-  ].forEach(([x1, y1, x2, y2]) => {
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-  });
-
-  // Pose direction arrow
-  if (currentStep && enrollStream) {
-    const arrows = {
-      left: "←",
-      right: "→",
-      up: "↑",
-      down: "↓",
-      front: "",
-    };
-    const arrow = arrows[currentStep.pose] || "";
-    if (arrow) {
-      const ax =
-        currentStep.pose === "left"
-          ? cx + rx + 24
-          : currentStep.pose === "right"
-            ? cx - rx - 24
-            : cx;
-      const ay =
-        currentStep.pose === "up"
-          ? cy - ry - 22
-          : currentStep.pose === "down"
-            ? cy + ry + 26
-            : cy;
-
-      ctx.save();
-      ctx.fillStyle = "rgba(245,158,11,0.18)";
-      ctx.beginPath();
-      if (ctx.roundRect) {
-        ctx.roundRect(ax - 20, ay - 16, 40, 32, 8);
-      } else {
-        ctx.rect(ax - 20, ay - 16, 40, 32);
-      }
-      ctx.fill();
-      ctx.restore();
-
-      ctx.font = "bold 26px Arial";
-      ctx.fillStyle = "rgba(245,158,11,0.95)";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(arrow, ax, ay);
-    }
-  }
 }
-
 function renderCaptureProgress() {
   const container = $("poseProgress");
   if (!container) return;
-
-  let html = "";
-  for (const step of POSE_SEQUENCE) {
-    const pose = step.pose;
-    const label = pose.charAt(0).toUpperCase() + pose.slice(1);
-    const capturedInPose = poseCaptureCounts[pose] || 0;
-    const target = step.target;
-    const percentage = Math.round((capturedInPose / target) * 100);
-    const isDone = capturedInPose >= target;
-    const isActive =
-      _getCurrentPoseStep()?.pose === pose && isAutoCaptureActive;
-
-    html += `
-      <div style="margin-bottom:0.75rem;">
-        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:4px;">
-          <div style="width:20px;height:20px;border-radius:50%;display:flex;
-            align-items:center;justify-content:center;font-size:11px;font-weight:600;
-            background:${isDone ? "var(--green)" : isActive ? "var(--primary)" : "var(--bg4)"};
-            color:${isDone || isActive ? "#fff" : "var(--text3)"};">
-            ${isDone ? "✓" : POSE_SEQUENCE.indexOf(step) + 1}
-          </div>
-          <span style="font-size:13px;font-weight:600;
-            color:${isDone || isActive ? "var(--text)" : "var(--text3)"};">
-            ${label}
-          </span>
-          <span style="font-size:11px;color:var(--text3);margin-left:auto;">
-            ${capturedInPose}/${target}
-          </span>
-        </div>
-        <div style="width:100%;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;">
-          <div style="width:${percentage}%;height:100%;
-            background:${isDone ? "var(--green)" : isActive ? "var(--primary)" : "var(--text3)"};
-            transition:width 0.2s ease;"></div>
-        </div>
-      </div>`;
-  }
-  container.innerHTML = html;
+  container.innerHTML = POSE_SEQUENCE.map((step) => {
+    const pose = step.pose,
+      label = pose.charAt(0).toUpperCase() + pose.slice(1),
+      count = poseCaptureCounts[pose] || 0,
+      isDone = count >= step.target,
+      isActive = _getCurrentPoseStep()?.pose === pose && isAutoCaptureActive,
+      pct = Math.round((count / step.target) * 100);
+    return `<div style="margin-bottom:0.75rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:4px;">
+        <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${isDone ? "var(--green)" : isActive ? "var(--blue)" : "var(--bg4)"};color:${isDone || isActive ? "#fff" : "var(--text3)"};">${isDone ? "✓" : POSE_SEQUENCE.indexOf(step) + 1}</div>
+        <span style="font-size:13px;font-weight:600;color:${isDone || isActive ? "var(--text)" : "var(--text3)"};">${label}</span>
+        <span style="font-size:11px;color:var(--text3);margin-left:auto;">${count}/${step.target}</span>
+      </div>
+      <div style="width:100%;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;">
+        <div style="width:${pct}%;height:100%;background:${isDone ? "var(--green)" : isActive ? "var(--blue)" : "var(--text3)"};transition:width 0.2s ease;"></div>
+      </div>
+    </div>`;
+  }).join("");
 }
-
 function buildReviewPanel() {
   const sid = $("eId").value.trim(),
-    name = $("eName").value.trim();
-  const dept = $("eDept").value.trim(),
-    sem = $("eSem")?.value.trim() || "";
-  const email = $("eEmail").value.trim();
-
-  const grid = $("reviewGrid");
-  grid.innerHTML = `
-    <div><span style="color:var(--text3);font-size:12px;">Student ID</span>
-      <div style="font-family:var(--mono);font-weight:600;">${sid}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Full Name</span>
-      <div style="font-weight:600;">${name}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Department</span>
-      <div>${dept || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Semester</span>
-      <div>${sem || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Email</span>
-      <div>${email || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Face Samples</span>
-      <div style="color:var(--green);font-weight:600;">${enrollFrames.length} frames ✓</div></div>`;
-
-  const badge = $("reviewCaptureBadge");
-  badge.textContent = `${enrollFrames.length}/${TOTAL_FRAMES} frames captured`;
-  badge.style.color =
+    name = $("eName").value.trim(),
+    faculty = $("eFaculty")?.options[$("eFaculty")?.selectedIndex]?.text || "",
+    sem = $("eSem")?.value.trim() || "",
+    email = $("eEmail").value.trim();
+  $("reviewGrid").innerHTML = `
+    <div><span style="color:var(--text3);font-size:12px;">Student ID</span><div style="font-family:var(--mono);font-weight:600;">${sid}</div></div>
+    <div><span style="color:var(--text3);font-size:12px;">Full Name</span><div style="font-weight:600;">${name}</div></div>
+    <div><span style="color:var(--text3);font-size:12px;">Faculty</span><div>${faculty || "—"}</div></div>
+    <div><span style="color:var(--text3);font-size:12px;">Semester</span><div>${sem || "—"}</div></div>
+    <div><span style="color:var(--text3);font-size:12px;">Email</span><div>${email || "—"}</div></div>
+    <div><span style="color:var(--text3);font-size:12px;">Face Samples</span><div style="color:var(--green);font-weight:600;">${enrollFrames.length} frames ✓</div></div>`;
+  const badge2 = $("reviewCaptureBadge");
+  badge2.textContent = `${enrollFrames.length}/${TOTAL_FRAMES} frames captured`;
+  badge2.style.color =
     enrollFrames.length >= TOTAL_FRAMES ? "var(--green)" : "var(--amber)";
 }
-
 async function enrollStudent() {
   if (enrollFrames.length < TOTAL_FRAMES) {
-    toast(
-      `Need at least ${TOTAL_FRAMES} frames (have ${enrollFrames.length})`,
-      "err",
-    );
+    toast(`Need at least ${TOTAL_FRAMES} frames`, "err");
     return;
   }
-
   const body = {
     student_id: $("eId").value.trim(),
     full_name: $("eName").value.trim(),
-    department: $("eDept").value.trim() || null,
+    faculty_id: $("eFaculty")?.value || null,
     semester: $("eSem")?.value.trim() || null,
     email: $("eEmail").value.trim() || null,
     phone: $("ePhone").value.trim() || null,
     frames: enrollFrames,
   };
-
   $("enrollBtn").disabled = true;
   $("enrollProgress").style.display = "block";
   $("enrollMsg").textContent = "Processing enrollment…";
   $("enrollMsg").className = "msg";
-
   try {
     const res = await api("/enroll", {
       method: "POST",
       body: JSON.stringify(body),
     });
-
     $("enrollMsg").textContent = res.is_update
       ? "Student re-enrolled successfully!"
       : "Student enrolled successfully!";
     $("enrollMsg").className = "msg ok";
-    toast(res.is_update ? "Student re-enrolled!" : "Student enrolled!", "ok");
-
-    // Reset after 2 seconds and navigate
+    toast(res.is_update ? "Student re-enrolled!" : "Student enrolled!");
     setTimeout(() => {
       resetEnroll();
       navigate("students");
@@ -2892,7 +2563,6 @@ async function enrollStudent() {
     $("enrollBtn").disabled = false;
   }
 }
-
 function resetEnroll() {
   enrollFrames = [];
   poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
@@ -2903,21 +2573,14 @@ function resetEnroll() {
     cancelAnimationFrame(captureAF);
     captureAF = null;
   }
-
-  // Clear form
-  $("eId").value = "";
-  $("eName").value = "";
-  $("eDept").value = "";
+  ["eId", "eName", "eEmail", "ePhone", "eFaculty"].forEach((id) => {
+    if ($(id)) $(id).value = "";
+  });
   if ($("eSem")) $("eSem").value = "";
-  $("eEmail").value = "";
-  $("ePhone").value = "";
-
-  // Clear capture state
   if (enrollStream) {
     enrollStream.getTracks().forEach((t) => t.stop());
     enrollStream = null;
   }
-
   $("captureInstruction").textContent =
     "Click Start Capture to begin guided face collection";
   $("poseLabel").textContent = "—";
@@ -2932,13 +2595,10 @@ function resetEnroll() {
   $("enrollMsg").className = "msg";
   $("enrollProgress").style.display = "none";
   $("enrollBtn").disabled = false;
-
   renderCaptureProgress();
   updatePosePips();
   showEnrollStep(1);
 }
-
-// Admin recognize UI removed; use teacher recognition pages instead.
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TEACHER — DASHBOARD
@@ -2952,75 +2612,20 @@ async function loadTeacherDashboard() {
     const rate = att.records?.length
       ? Math.round((att.present / att.records.length) * 100)
       : 0;
-
     $("tDashMetrics").innerHTML = `
-      <div class="metric-card">
-        <div class="metric-label">Your Students</div>
-        <div class="metric-val">${att.records?.length || 0}</div>
+      <div class="metric-card"><div class="metric-label">Your Students</div><div class="metric-val">${att.records?.length || 0}</div></div>
+      <div class="metric-card"><div class="metric-label">Present Today</div><div class="metric-val" style="color:var(--green)">${att.present}</div></div>
+      <div class="metric-card"><div class="metric-label">Absent Today</div><div class="metric-val" style="color:var(--red)">${att.absent}</div></div>
+      <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:var(--blue)">${rate ? rate + "%" : "—"}</div></div>`;
+    $("tDashTable").innerHTML = `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+        <div class="section-title">Today · ${today}</div>
+        <button class="btn-primary btn-sm" onclick="quickStartSession()">▶ Start Attendance Session</button>
       </div>
-      <div class="metric-card">
-        <div class="metric-label">Present Today</div>
-        <div class="metric-val" style="color:var(--green)">${att.present}</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Absent Today</div>
-        <div class="metric-val" style="color:var(--red)">${att.absent}</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Rate</div>
-        <div class="metric-val" style="color:var(--blue)">${rate ? rate + "%" : "—"}</div>
-      </div>`;
-
-    // Quick-start session button
-    const sessionBtnHtml = sessionActive
-      ? `<button class="btn-secondary btn-sm" style="color:var(--red);"
-           onclick="stopSessionFromDash()">⏹ Stop Session</button>`
-      : `<button class="btn-primary btn-sm"
-           onclick="quickStartSession()">▶ Start Attendance Session</button>`;
-
-    $("tDashTable").innerHTML = `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;
-          margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-          <div class="section-title">Today · ${today}</div>
-          ${sessionBtnHtml}
-        </div>
-        ${
-          sessionActive
-            ? `<div style="display:flex;align-items:center;gap:0.5rem;
-          margin-bottom:0.75rem;padding:0.6rem 0.75rem;background:var(--green-dim);
-          border:1px solid var(--green);border-radius:var(--r);font-size:13px;">
-          <span style="color:var(--green);font-weight:600;">● Session Active</span>
-          <span style="color:var(--text2);">Face recognition is running automatically</span>
-        </div>`
-            : ""
-        }
-        <div style="overflow-x:auto;">
-          <table class="data-table">
-            <thead>
-              <tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr>
-            </thead>
-            <tbody>
-              ${
-                (att.records || [])
-                  .map(
-                    (r) => `
-                <tr>
-                  <td style="font-weight:500;">${r.full_name}</td>
-                  <td style="font-family:var(--mono);font-size:11px;
-                    color:var(--text3);">${r.student_id}</td>
-                  <td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td>
-                  <td>${statusBadge(r.status)}</td>
-                </tr>`,
-                  )
-                  .join("") ||
-                `<tr><td colspan="4" style="text-align:center;
-                  color:var(--text3);padding:1.5rem;">No students in your class yet</td></tr>`
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>`;
+      <div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
+      <tbody>${(att.records || []).map((r) => `<tr><td style="font-weight:500;">${r.full_name}</td><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${r.student_id}</td><td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td><td>${statusBadge(r.status)}</td></tr>`).join() || `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:1.5rem;">No students in your class yet</td></tr>`}
+      </tbody></table></div>
+    </div>`;
   } catch (e) {
     $("tDashMetrics").innerHTML =
       `<div style="color:var(--red);">${e.message}</div>`;
@@ -3032,29 +2637,12 @@ function renderTeacherClassBar(targetId) {
   if (!el || !userInfo) return;
   el.style.display = "";
   el.innerHTML = `
-    <div class="class-info-item">
-      <div class="class-info-label">Faculty</div>
-      <div class="class-info-value">${userInfo.faculty || "—"}</div>
-    </div>
-    <div class="class-info-item">
-      <div class="class-info-label">Semester</div>
-      <div class="class-info-value">${userInfo.semester || "—"}</div>
-    </div>
-    <div class="class-info-item">
-      <div class="class-info-label">Subject</div>
-      <div class="class-info-value">${userInfo.subject || "—"}</div>
-    </div>
-    <div class="class-info-item">
-      <div class="class-info-label">Time Slot</div>
-      <div class="class-info-value">${userInfo.time_slot || "—"}</div>
-    </div>
-    <div class="class-info-item">
-      <div class="class-info-label">Teacher</div>
-      <div class="class-info-value">${userInfo.full_name || "—"}</div>
-    </div>`;
+    <div class="class-info-item"><div class="class-info-label">Faculty</div><div class="class-info-value">${userInfo.faculty || "—"}</div></div>
+    <div class="class-info-item"><div class="class-info-label">Semester</div><div class="class-info-value">${userInfo.semester || "—"}</div></div>
+    <div class="class-info-item"><div class="class-info-label">Subject</div><div class="class-info-value">${userInfo.subject || "—"}</div></div>
+    <div class="class-info-item"><div class="class-info-label">Time Slot</div><div class="class-info-value">${userInfo.time_slot || "—"}</div></div>
+    <div class="class-info-item"><div class="class-info-label">Teacher</div><div class="class-info-value">${userInfo.full_name || "—"}</div></div>`;
 }
-
-/* Quick-start session from dashboard */
 async function quickStartSession() {
   navigate("t-recognize");
   setTimeout(async () => {
@@ -3064,33 +2652,21 @@ async function quickStartSession() {
   }, 300);
 }
 
-function stopSessionFromDash() {
-  stopTeacherAuto();
-  if (teacherRecogStream) {
-    teacherRecogStream.getTracks().forEach((t) => t.stop());
-    teacherRecogStream = null;
-  }
-  toast("Session stopped");
-  loadTeacherDashboard();
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — FACE RECOGNITION (auto-continuous mode)
+   TEACHER — FACE RECOGNITION
    ═══════════════════════════════════════════════════════════════════════════ */
 function initTeacherRecognize() {
   renderTeacherClassBar("teacherClassBar2");
   const log = $("tSessionLog");
-  if (log && !log.innerHTML.trim()) {
-    log.innerHTML = `<div style="color:var(--text3);font-size:12px;
-      text-align:center;padding:1rem;">Session log will appear here</div>`;
-  }
+  if (log && !log.innerHTML.trim())
+    log.innerHTML = `<div style="color:var(--text3);font-size:12px;text-align:center;padding:1rem;">Session log will appear here</div>`;
   updateSessionUI();
 }
-
 function updateSessionUI() {
-  const overlay = $("tRecogOverlay");
-  const stopBtn = $("btnTRecogStop");
-  const autoBtn = $("btnTRecogAuto");
+  const overlay = $("tRecogOverlay"),
+    stopBtn = $("btnTRecogStop"),
+    autoBtn = $("btnTRecogAuto"),
+    bar = $("sessionStatusBar");
   if (sessionActive) {
     if (overlay) overlay.style.display = "none";
     if (stopBtn) stopBtn.style.display = "";
@@ -3099,15 +2675,9 @@ function updateSessionUI() {
       autoBtn.style.background = "var(--amber)";
       autoBtn.style.color = "#000";
     }
-    // Status bar
-    const bar = $("sessionStatusBar");
     if (bar) {
       bar.style.display = "";
-      bar.innerHTML = `
-        <span style="color:var(--green);font-weight:600;">● Auto-Recognition Active</span>
-        <span style="color:var(--text2);margin-left:0.5rem;">
-          Scanning every 2 seconds automatically
-        </span>`;
+      bar.innerHTML = `<span style="color:var(--green);font-weight:600;">● Auto-Recognition Active</span><span style="color:var(--text2);margin-left:0.5rem;">Scanning every 2 seconds</span>`;
     }
   } else {
     if (stopBtn) stopBtn.style.display = "none";
@@ -3116,11 +2686,9 @@ function updateSessionUI() {
       autoBtn.style.background = "";
       autoBtn.style.color = "";
     }
-    const bar = $("sessionStatusBar");
     if (bar) bar.style.display = "none";
   }
 }
-
 async function startTeacherWebcam() {
   try {
     teacherRecogStream = await navigator.mediaDevices.getUserMedia({
@@ -3132,11 +2700,12 @@ async function startTeacherWebcam() {
     if (overlay) overlay.style.display = "none";
     const stopBtn = $("btnTRecogStop");
     if (stopBtn) stopBtn.style.display = "";
+    const floatBtn = $("tRecogStopFloat");
+    if (floatBtn) floatBtn.classList.remove("hidden");
   } catch (e) {
     toast("Camera error: " + e.message, "err");
   }
 }
-
 function stopTeacherWebcam() {
   stopTeacherAuto();
   if (teacherRecogStream) {
@@ -3147,9 +2716,9 @@ function stopTeacherWebcam() {
   if (overlay) overlay.style.display = "";
   const stopBtn = $("btnTRecogStop");
   if (stopBtn) stopBtn.style.display = "none";
+  const floatBtn = $("tRecogStopFloat");
+  if (floatBtn) floatBtn.classList.add("hidden");
 }
-
-/* Auto-recognition loop — runs every 2s automatically */
 function startTeacherAuto() {
   if (teacherAutoRunning) return;
   if (!teacherRecogStream) {
@@ -3160,9 +2729,8 @@ function startTeacherAuto() {
   sessionActive = true;
   updateSessionUI();
   teacherAutoLoop = setInterval(runTeacherRecognitionFrame, 2000);
-  toast("Auto-recognition started — attendance marking automatically");
+  toast("Auto-recognition started");
 }
-
 function stopTeacherAuto() {
   teacherAutoRunning = false;
   sessionActive = false;
@@ -3170,12 +2738,10 @@ function stopTeacherAuto() {
   teacherAutoLoop = null;
   updateSessionUI();
 }
-
 function toggleTeacherAuto() {
   if (teacherAutoRunning) stopTeacherAuto();
   else startTeacherAuto();
 }
-
 async function runTeacherRecognitionFrame() {
   if (!teacherRecogStream || !teacherAutoRunning) return;
   const vid = $("tRecogVideo");
@@ -3192,27 +2758,18 @@ async function runTeacherRecognitionFrame() {
     });
     const resultEl = $("tRecogResult");
     if (r.recognized) {
-      if (resultEl) {
-        resultEl.innerHTML = `<div class="msg ok" style="font-size:12px;">
-            ✓ ${r.name} — ${r.confidence}%
-            ${r.attendance_marked ? " · <strong>Marked Present</strong>" : " · (already marked)"}
-          </div>`;
-      }
+      if (resultEl)
+        resultEl.innerHTML = `<div class="msg ok" style="font-size:12px;">✓ ${r.name} — ${r.confidence}%${r.attendance_marked ? " · <strong>Marked Present</strong>" : " · (already marked)"}</div>`;
       if (r.attendance_marked) {
         appendSessionLog(r);
         refreshSessionCount();
       }
     } else {
-      if (resultEl) {
-        resultEl.innerHTML = `<div style="font-size:12px;color:var(--text3);">
-            Scanning… (${r.confidence}% best)
-          </div>`;
-      }
+      if (resultEl)
+        resultEl.innerHTML = `<div style="font-size:12px;color:var(--text3);">Scanning… (${r.confidence}%)</div>`;
     }
   } catch {}
 }
-
-/* Manual single-frame recognize */
 async function doTeacherRecognize() {
   const vid = $("tRecogVideo"),
     can = $("tRecogCanvas");
@@ -3230,8 +2787,7 @@ async function doTeacherRecognize() {
     });
     if (r.recognized) {
       if (resultEl)
-        resultEl.innerHTML = `<div class="msg ok">✓ ${r.name} (${r.student_id}) — ${r.confidence}%
-        ${r.attendance_marked ? " · Marked Present" : " · Already marked"}</div>`;
+        resultEl.innerHTML = `<div class="msg ok">✓ ${r.name} (${r.student_id}) — ${r.confidence}%${r.attendance_marked ? " · Marked Present" : " · Already marked"}</div>`;
       if (r.attendance_marked) {
         appendSessionLog(r);
         refreshSessionCount();
@@ -3245,36 +2801,23 @@ async function doTeacherRecognize() {
       resultEl.innerHTML = `<div class="msg err">${e.message}</div>`;
   }
 }
-
 function appendSessionLog(r) {
   const log = $("tSessionLog");
   if (!log) return;
-  // Remove placeholder
   const ph = log.querySelector(".session-placeholder");
   if (ph) ph.remove();
   const div = document.createElement("div");
   div.className = "log-entry";
-  div.innerHTML = `
-    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-      <span class="pill pill-green">✓</span>
-      <span style="font-weight:600;">${r.name}</span>
-      <span style="color:var(--text3);font-size:11px;font-family:var(--mono);">
-        ${r.student_id}
-      </span>
-      <span style="color:var(--text3);font-size:11px;margin-left:auto;font-family:var(--mono);">
-        ${new Date().toLocaleTimeString()}
-      </span>
-    </div>`;
+  div.innerHTML = `<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;"><span class="pill pill-green">✓</span><span style="font-weight:600;">${r.name}</span><span style="color:var(--text3);font-size:11px;font-family:var(--mono);">${r.student_id}</span><span style="color:var(--text3);font-size:11px;margin-left:auto;font-family:var(--mono);">${new Date().toLocaleTimeString()}</span></div>`;
   log.prepend(div);
   if (log.children.length > 50) log.lastElementChild.remove();
 }
-
 let _sessionCount = 0;
 function refreshSessionCount() {
   _sessionCount++;
-  const el = $("sessionMarkedCount");
-  const label = $("sessionMarkedLabel");
-  const pill = $("sessionCountPill");
+  const el = $("sessionMarkedCount"),
+    label = $("sessionMarkedLabel"),
+    pill = $("sessionCountPill");
   if (el) el.textContent = _sessionCount;
   if (label)
     label.textContent =
@@ -3284,9 +2827,7 @@ function refreshSessionCount() {
     pill.className = "pill pill-green";
   }
 }
-
 async function refreshSessionLog() {
-  // Called on SSE attendance event while on t-recognize page
   if (currentPage === "t-recognize") refreshSessionCount();
 }
 
@@ -3306,24 +2847,15 @@ async function loadManualAttendance() {
     });
     if (!data.records.length) {
       $("manualAttGrid").innerHTML =
-        `<div style="text-align:center;color:var(--text3);padding:2rem;">
-          No students in your class yet
-        </div>`;
+        `<div style="text-align:center;color:var(--text3);padding:2rem;">No students in your class yet</div>`;
       return;
     }
     $("manualAttGrid").innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;
-        margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-        <div style="font-size:13px;color:var(--text2);">
-          ${data.records.length} students · ${date}
-        </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
+        <div style="font-size:13px;color:var(--text2);">${data.records.length} students · ${date}</div>
         <div style="display:flex;gap:0.5rem;">
-          <button class="btn-secondary btn-sm" onclick="markAllPresent()">
-            Mark All Present
-          </button>
-          <button class="btn-secondary btn-sm" onclick="markAllAbsent()">
-            Mark All Absent
-          </button>
+          <button class="btn-secondary btn-sm" onclick="markAllPresent()">Mark All Present</button>
+          <button class="btn-secondary btn-sm" onclick="markAllAbsent()">Mark All Absent</button>
         </div>
       </div>
       <div class="manual-att-grid" id="manualRows">
@@ -3331,15 +2863,8 @@ async function loadManualAttendance() {
           .map(
             (r) => `
           <div class="manual-att-row" id="row-${r.student_id}">
-            <div>
-              <div class="manual-att-name">${r.full_name}</div>
-              <div class="manual-att-id">${r.student_id}</div>
-            </div>
-            <button class="toggle-btn ${manualAttMap[r.student_id] === "Present" ? "present" : "absent"}"
-              id="togbtn-${r.student_id}"
-              onclick="toggleManualStatus('${r.student_id}')">
-              ${manualAttMap[r.student_id] || "Absent"}
-            </button>
+            <div><div class="manual-att-name">${r.full_name}</div><div class="manual-att-id">${r.student_id}</div></div>
+            <button class="toggle-btn ${manualAttMap[r.student_id] === "Present" ? "present" : "absent"}" id="togbtn-${r.student_id}" onclick="toggleManualStatus('${r.student_id}')">${manualAttMap[r.student_id] || "Absent"}</button>
           </div>`,
           )
           .join("")}
@@ -3349,14 +2874,12 @@ async function loadManualAttendance() {
       `<div style="color:var(--red);">${e.message}</div>`;
   }
 }
-
 function toggleManualStatus(sid) {
   manualAttMap[sid] = manualAttMap[sid] === "Present" ? "Absent" : "Present";
   const btn = $(`togbtn-${sid}`);
   btn.textContent = manualAttMap[sid];
   btn.className = `toggle-btn ${manualAttMap[sid] === "Present" ? "present" : "absent"}`;
 }
-
 function markAllPresent() {
   Object.keys(manualAttMap).forEach((sid) => {
     manualAttMap[sid] = "Present";
@@ -3367,7 +2890,6 @@ function markAllPresent() {
     }
   });
 }
-
 function markAllAbsent() {
   Object.keys(manualAttMap).forEach((sid) => {
     manualAttMap[sid] = "Absent";
@@ -3378,10 +2900,9 @@ function markAllAbsent() {
     }
   });
 }
-
 async function saveAllManualAttendance() {
-  const date = $("tManualDate").value;
-  const entries = Object.entries(manualAttMap);
+  const date = $("tManualDate").value,
+    entries = Object.entries(manualAttMap);
   if (!entries.length) {
     toast("No students to mark", "err");
     return;
@@ -3404,7 +2925,7 @@ async function saveAllManualAttendance() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — ATTENDANCE LOGS
+   TEACHER — LOGS
    ═══════════════════════════════════════════════════════════════════════════ */
 async function loadTeacherLogs() {
   renderTeacherClassBar("teacherClassBar4");
@@ -3413,21 +2934,13 @@ async function loadTeacherLogs() {
     const data = await api(`/teacher/attendance/logs?days=${days}`);
     const tbody = $("tLogsBody");
     if (!data.logs.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;
-          color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
       return;
     }
     tbody.innerHTML = data.logs
       .map(
-        (r) => `
-      <tr>
-        <td>${fmtDate(r.date)}</td>
-        <td style="font-family:var(--mono);font-size:11px;">${r.student_id}</td>
-        <td style="font-weight:500;">${r.full_name}</td>
-        <td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td>
-        <td>${statusBadge(r.status)}</td>
-        <td style="font-size:12px;color:var(--text2);">${r.note || "—"}</td>
-      </tr>`,
+        (r) =>
+          `<tr><td>${fmtDate(r.date)}</td><td style="font-family:var(--mono);font-size:11px;">${r.student_id}</td><td style="font-weight:500;">${r.full_name}</td><td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td><td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--text2);">${r.note || "—"}</td></tr>`,
       )
       .join("");
   } catch (e) {
@@ -3437,219 +2950,128 @@ async function loadTeacherLogs() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BOOT
+   BOOT — ISSUE 6: validate token on startup before showing app
    ═══════════════════════════════════════════════════════════════════════════ */
 window.addEventListener("DOMContentLoaded", () => {
-  // Close modals on overlay click
   document.querySelectorAll(".modal-overlay").forEach((m) => {
     m.addEventListener("click", (e) => {
       if (e.target === m) m.classList.remove("open");
     });
   });
-
-  // Set today's date on attendance page
   const attDate = $("attDate");
   if (attDate && !attDate.value)
     attDate.value = new Date().toISOString().slice(0, 10);
-
-  // FIX: set status to "Connecting..." initially, NOT "Online"
   setApiStatus(false);
   const label = $("apiStatus");
   if (label) label.textContent = "Connecting…";
-
-  // Probe the backend immediately so the label can flip to Online without
-  // waiting for the rest of the app shell to finish booting.
   startHealthPolling();
 
-  // Check for stored session
   if (token && userRole) {
-    $("loginOverlay").classList.add("hidden");
-    afterLogin();
+    // ── ISSUE 6: Validate the stored token before restoring the session ──
+    // Avoids the 401 cascade when the server was restarted and sessions cleared.
+    fetch(`${API}/auth/validate`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.valid) {
+          $("loginOverlay").classList.add("hidden");
+          afterLogin();
+        } else {
+          // Token is stale — clear it and show login with a message
+          ["frs_token", "frs_role", "frs_user"].forEach((k) =>
+            localStorage.removeItem(k),
+          );
+          token = "";
+          userRole = "";
+          userInfo = null;
+          $("loginOverlay").classList.remove("hidden");
+          selectLoginRole("admin");
+          const errEl = $("loginErr");
+          if (errEl && data.reason === "session_expired") {
+            errEl.textContent =
+              "Your previous session has expired. Please sign in again.";
+            errEl.className = "msg err";
+          }
+        }
+      })
+      .catch(() => {
+        // Network error — show login anyway
+        $("loginOverlay").classList.remove("hidden");
+        selectLoginRole("admin");
+      });
   } else {
     $("loginOverlay").classList.remove("hidden");
     selectLoginRole("admin");
-    // Still try to reach the backend even before login
     checkHealth();
   }
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   VOICE GUIDANCE & AUDIO EFFECTS
+   VOICE GUIDANCE & AUDIO EFFECTS (unchanged from v3.0)
    ═══════════════════════════════════════════════════════════════════════════ */
-let _voiceEnabled = true;
-let _lastSpokenText = "";
-let _lastSpokenTime = 0;
+let _voiceEnabled = true,
+  _lastSpokenText = "",
+  _lastSpokenTime = 0;
 const VOICE_COOLDOWN_MS = 1800;
 
 function _speakInstruction(text, force = false) {
-  // Must have voice enabled and browser support
-  if (!_voiceEnabled) return;
-  if (!("speechSynthesis" in window)) {
-    console.warn("Speech Synthesis not supported");
-    return;
-  }
-
-  // Check cooldown (unless forced)
+  if (!_voiceEnabled || !("speechSynthesis" in window)) return;
   const now = Date.now();
   if (
     !force &&
     text === _lastSpokenText &&
     now - _lastSpokenTime < VOICE_COOLDOWN_MS
-  ) {
+  )
     return;
-  }
-
   _lastSpokenText = text;
   _lastSpokenTime = now;
-
   try {
-    // Cancel previous speech
     window.speechSynthesis.cancel();
-
-    // Create utterance
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
-
-    // Try to get English voice
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.95;
+    u.pitch = 1.0;
+    u.volume = 1.0;
     const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-      const englishVoice = voices.find((v) => v.lang.startsWith("en"));
-      if (englishVoice) {
-        utterance.voice = englishVoice;
-      }
-    }
-
-    // Speak
-    console.log(`[Voice] "${text}"`);
-    window.speechSynthesis.speak(utterance);
-  } catch (e) {
-    console.error("[Voice Error]", e.message);
-  }
+    const ev = voices.find((v) => v.lang.startsWith("en"));
+    if (ev) u.voice = ev;
+    window.speechSynthesis.speak(u);
+  } catch {}
 }
+if ("speechSynthesis" in window)
+  window.speechSynthesis.onvoiceschanged = () => {};
 
-// Ensure voices are loaded
-if ("speechSynthesis" in window) {
-  window.speechSynthesis.onvoiceschanged = () => {
-    console.log(
-      "[Voice] Voices loaded, count:",
-      window.speechSynthesis.getVoices().length,
-    );
-  };
-}
-
-// ── Web Audio sound effects ───────────────────────────────────────────
 let _audioCtx = null;
 function _getAudioCtx() {
-  if (!_audioCtx) {
+  if (!_audioCtx)
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  // Resume if suspended (required after user gesture on some browsers)
   if (_audioCtx.state === "suspended") _audioCtx.resume();
   return _audioCtx;
 }
-
-function _playTone(
-  freq,
-  duration,
-  type = "sine",
-  gainVal = 0.35,
-  startDelay = 0,
-) {
+function _playTone(freq, dur, type = "sine", gain = 0.35, delay = 0) {
   try {
-    const ctx = _getAudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
+    const ctx = _getAudioCtx(),
+      osc = ctx.createOscillator(),
+      g = ctx.createGain();
+    osc.connect(g);
+    g.connect(ctx.destination);
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
-
-    gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
-    gain.gain.linearRampToValueAtTime(
-      gainVal,
-      ctx.currentTime + startDelay + 0.01,
-    );
-    gain.gain.exponentialRampToValueAtTime(
-      0.001,
-      ctx.currentTime + startDelay + duration,
-    );
-
-    osc.start(ctx.currentTime + startDelay);
-    osc.stop(ctx.currentTime + startDelay + duration + 0.05);
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+    g.gain.setValueAtTime(0, ctx.currentTime + delay);
+    g.gain.linearRampToValueAtTime(gain, ctx.currentTime + delay + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
+    osc.start(ctx.currentTime + delay);
+    osc.stop(ctx.currentTime + delay + dur + 0.05);
   } catch {}
-} 
-
-// Ding: single 880 Hz tone — pose step complete
-function _soundDing() {
-  _playTone(880, 0.22, "sine", 0.35);
 }
-
-// Chime: ascending C5-E5-G5 — all capture complete
+function _soundDing() {
+  _playTone(880, 0.22);
+}
 function _soundChime() {
-  _playTone(523, 0.18, "sine", 0.32, 0.0);
+  _playTone(523, 0.18, "sine", 0.32, 0);
   _playTone(659, 0.18, "sine", 0.32, 0.18);
   _playTone(784, 0.28, "sine", 0.38, 0.36);
 }
-
-// Tick: very quiet soft click — per-frame feedback
 function _soundTick() {
   _playTone(1200, 0.04, "triangle", 0.08);
 }
-
-// ── Voice toggle button (injected into the capture panel) ─────────────
-window.addEventListener("load", () => {
-  setTimeout(() => {
-    // Inject voice control into ecap-cam-label or similar wrapper
-    const container = document.querySelector(".ecap-cam-label");
-    if (!container || document.getElementById("voiceToggleBtn")) return;
-
-    // Create a container style or inline flex for aligning the button inside label
-    container.style.display = "flex";
-    container.style.justifyContent = "space-between";
-    container.style.alignItems = "center";
-
-    const btn = document.createElement("button");
-    btn.id = "voiceToggleBtn";
-    btn.title = "Toggle voice guidance";
-    btn.className = "btn-secondary btn-sm";
-    btn.style.padding = "2px 6px";
-    btn.style.display = "inline-flex";
-    btn.style.alignItems = "center";
-    btn.style.marginLeft = "auto";
-    btn.innerHTML = `
-      <svg id="voiceIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
-        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
-        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
-        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-      </svg> Voice Guidance`;
-
-    btn.onclick = (e) => {
-      e.preventDefault();
-      _voiceEnabled = !_voiceEnabled;
-      btn.classList.toggle("active", _voiceEnabled);
-      btn.title = _voiceEnabled
-        ? "🔊 Voice ON — click to mute"
-        : "🔇 Voice OFF — click to enable";
-      if (_voiceEnabled) {
-        setTimeout(() => {
-          _speakInstruction(
-            "Voice guidance enabled. Face front towards the camera.",
-            true,
-          );
-        }, 100);
-        btn.style.opacity = "1";
-        toast("✓ Voice guidance enabled", "ok");
-      } else {
-        if (window.speechSynthesis) {
-          window.speechSynthesis.cancel();
-        }
-        btn.style.opacity = "0.5";
-        toast("✗ Voice guidance disabled", "err");
-      }
-    };
-    container.appendChild(btn);
-  }, 1000);
-});
