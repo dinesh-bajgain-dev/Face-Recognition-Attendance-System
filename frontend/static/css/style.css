@@ -4066,3 +4066,297 @@ label .req {
   background: var(--amber-dim);
   color: var(--amber);
 }
+.analytics-card {
+  /* existing: background, border, padding */
+  overflow: hidden;          /* clip any accidental overflow */
+}
+
+.analytics-card canvas#dashboardChart {
+  /* ISSUE 1 FIX: hard cap — chart never taller than this regardless of rows */
+  max-height: 260px !important;
+  height: 260px !important;
+  width: 100% !important;
+  display: block;
+}
+
+/* Reports charts — same treatment so they don't shift layout */
+.reports-chart-grid canvas {
+  max-height: 220px !important;
+  height: 220px !important;
+  width: 100% !important;
+  display: block;
+}
+
+/* Teacher dashboard metric grid — ensure uniform row height */
+#tDashMetrics.metrics-grid,
+#dashMetrics.metrics-grid {
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (max-width: 700px) {
+  #tDashMetrics.metrics-grid,
+  #dashMetrics.metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ISSUE 2 — Time slot schedule: show assigned teacher/subject badge
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Time slots table gets a 5th column for "Assigned To" */
+#timeslotTableBody tr td:nth-child(4),
+#page-manage .data-table thead tr th:nth-child(4) {
+  min-width: 160px;
+}
+
+/* Schedule assignment badge inside the time slot row */
+.ts-assigned-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-family: var(--mono);
+  background: var(--green-dim);
+  color: var(--green);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ts-unassigned {
+  color: var(--text3);
+  font-size: 11px;
+}
+
+/* Schedule conflict warning toast — more prominent */
+.schedule-conflict-msg {
+  background: var(--amber-dim);
+  border: 1px solid var(--amber);
+  border-radius: var(--r);
+  color: var(--amber);
+  padding: 0.5rem 0.75rem;
+  font-size: 12px;
+  font-family: var(--mono);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ISSUE 3 — Subject dropdown states
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Disabled/placeholder state for subject select before faculty+semester chosen */
+select#tmSubject option[value=""]:first-child {
+  color: var(--text3);
+  font-style: italic;
+}
+
+/* Highlighted border on semester field to signal "select me first" */
+#tmSemester:not([value=""]):valid + label,
+#tmFaculty:has(option[value=""]:checked) ~ .form-group #tmSemester {
+  border-color: var(--amber);
+}
+
+/* Visual cue: faculty → semester → subject cascade */
+.modal-form-grid .subject-cascade-hint {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+  padding: 0.3rem 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.subject-cascade-hint::before {
+  content: "ℹ";
+  font-size: 13px;
+  color: var(--blue);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ISSUE 4 — Multiple assignments: teacher table & assignments modal
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Teacher table subject cell — allows pill wrapping */
+#teacherTableBody tr td:nth-child(5) {
+  max-width: 240px;
+  white-space: normal;
+  line-height: 1.6;
+}
+
+/* Assignment pill in teacher table */
+.assignment-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-family: var(--mono);
+  background: var(--blue-dim);
+  color: var(--blue);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  margin: 1px;
+  white-space: nowrap;
+}
+.assignment-pill.primary {
+  background: var(--green-dim);
+  color: var(--green);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+/* Assignments modal list */
+#assignmentsList {
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--bg3);
+}
+#assignmentsList > div {
+  background: var(--bg2);
+  transition: background 0.12s;
+}
+#assignmentsList > div:hover {
+  background: var(--bg3);
+}
+#assignmentsList > div:last-child {
+  border-bottom: none !important;
+}
+
+/* Add-assignment section within the modal */
+#assignmentsModal .modal-box > div:last-of-type {
+  background: var(--bg3);
+  border-radius: var(--r);
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ISSUE 5 — Schedule conflict error: distinct from regular errors
+   ══════════════════════════════════════════════════════════════════════ */
+
+.msg.conflict {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--r);
+  padding: 0.5rem 0.75rem;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Teacher modal error: make conflict errors amber, not red */
+#teacherModalErr.conflict,
+#asgErr.conflict {
+  color: var(--amber) !important;
+  background: var(--amber-dim);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--r);
+  padding: 0.4rem 0.6rem;
+  font-size: 12px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ISSUE 6 — Session expired: login overlay message styling
+   ══════════════════════════════════════════════════════════════════════ */
+
+#loginErr {
+  min-height: 18px;
+  transition: all 0.2s;
+}
+
+/* Session expired gets a softer amber warning, not red error */
+#loginErr.session-expired {
+  color: var(--amber);
+  font-size: 12px;
+  font-family: var(--mono);
+  padding: 0.4rem 0.6rem;
+  background: var(--amber-dim);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--r);
+  margin-top: 0.25rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   GENERAL POLISH
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Assign button in teacher table — distinct from edit */
+#teacherTableBody .action-btns .btn-secondary:nth-child(2) {
+  color: var(--blue);
+  border-color: rgba(59, 130, 246, 0.3);
+  background: var(--blue-dim);
+}
+#teacherTableBody .action-btns .btn-secondary:nth-child(2):hover {
+  background: rgba(59, 130, 246, 0.18);
+}
+
+/* Cascading selects — faculty → semester → subject visual guide */
+.cascade-arrow {
+  display: inline-block;
+  color: var(--text3);
+  font-size: 14px;
+  margin: 0 4px;
+  vertical-align: middle;
+}
+
+/* Modal form: semester field has a subtle required indicator */
+#tmSemester::placeholder {
+  color: var(--text3);
+}
+#tmSemester:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+}
+
+/* Class schedule view in Manage → Time Slots */
+.schedule-grid {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  overflow: hidden;
+  font-size: 12px;
+}
+.schedule-grid-header {
+  background: var(--bg3);
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text3);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.schedule-grid-cell {
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  color: var(--text2);
+}
+.schedule-grid-cell:last-child {
+  border-right: none;
+}
+.schedule-grid-cell.filled {
+  background: var(--green-dim);
+  color: var(--green);
+}
+.schedule-grid-cell.empty {
+  color: var(--text3);
+  font-style: italic;
+}
+
+/* Responsive: stack dashboard metrics on mobile */
+@media (max-width: 560px) {
+  #dashMetrics.metrics-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .analytics-card canvas#dashboardChart {
+    height: 200px !important;
+    max-height: 200px !important;
+  }
+}
