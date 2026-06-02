@@ -1918,8 +1918,8 @@ class SimpleChart {
     // ── ISSUE 1: respect CSS max-height; do NOT let data expand the canvas ──
     const container = ctx.canvas.parentElement;
     const cssW = container ? container.clientWidth : 500;
-    // Clamp height to 260 px — matches the CSS height:"260" attribute on the canvas
-    const cssH = Math.min(ctx.canvas.getAttribute("height") || 260, 260);
+    // Clamp height to 420 px — matches the CSS height:"420" attribute on the canvas
+    const cssH = Math.min(ctx.canvas.getAttribute("height") || 420, 420);
 
     ctx.canvas.width = cssW * dpr;
     ctx.canvas.height = cssH * dpr;
@@ -1961,25 +1961,36 @@ class SimpleChart {
       const n = labels.length;
       const gW = cW / Math.max(n, 1); // group width per label
       const bCnt = datasets.length;
-      const gap = Math.max(1, gW * 0.08);
-      const inner = gW * 0.72; // 72 % of group width
-      const bW = Math.max(2, (inner - gap * (bCnt - 1)) / bCnt);
+      const gap = 0; // NO GAP between bars for same day
+      const inner = gW * 0.85; // 85% of group width for bars (more space used)
+      const bW = Math.max(2, (inner - gap * Math.max(0, bCnt - 1)) / bCnt);
 
       datasets.forEach((ds, di) => {
         ds.data.forEach((v, i) => {
           if (v == null) return;
           const bH = (cH * v) / niceMax;
           const gX = pad.left + i * gW + (gW - inner) / 2;
-          const bX = gX + di * (bW + gap);
+          const bX = gX + di * bW; // NO gap between bars
           const bY = pad.top + cH - bH;
           ctx.fillStyle = ds.color;
-          ctx.fillRect(bX, bY, bW, bH);
+          // Use crisp pixels for clear bars
+          ctx.fillRect(
+            Math.round(bX),
+            Math.round(bY),
+            Math.round(bW),
+            Math.round(bH),
+          );
           // Value label only if bar is wide enough
           if (bW > 16 && bH > 2) {
-            ctx.fillStyle = "rgba(200,200,208,0.9)";
-            ctx.font = "10px monospace";
+            ctx.fillStyle = "rgba(200,200,208,0.95)";
+            ctx.font = "11px monospace";
+            ctx.fontWeight = "bold";
             ctx.textAlign = "center";
-            ctx.fillText(Math.round(v), bX + bW / 2, bY - 5);
+            ctx.fillText(
+              Math.round(v),
+              Math.round(bX + bW / 2),
+              Math.round(bY - 5),
+            );
           }
         });
       });
