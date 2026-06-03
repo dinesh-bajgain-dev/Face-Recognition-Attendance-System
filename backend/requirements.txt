@@ -1,11 +1,38 @@
+# ── Web framework ────────────────────────────────────────────────────────────
 flask==3.0.3
 flask-cors==4.0.1
+
+# ── Database ─────────────────────────────────────────────────────────────────
 psycopg2-binary==2.9.9
 pgvector==0.3.2
 python-dotenv==1.0.1
+
+# ── Computer vision — core ────────────────────────────────────────────────────
 opencv-python==4.9.0.80
 numpy==1.26.4
 
-# Face recognition — Python 3.13 compatible, no TensorFlow
+# ── YOLOv8 — face detection (NEW in v3.2) ────────────────────────────────────
+# Ultralytics provides YOLOv8 with a clean Python API.
+# GPU support is automatic when torch+cuda is present.
+# CPU inference is the fallback and works out-of-the-box.
+ultralytics==8.2.0
+
+# ── PyTorch — required by ultralytics ────────────────────────────────────────
+# CPU-only build (smaller, works everywhere):
+torch==2.3.0
+torchvision==0.18.0
+#
+# GPU build (faster — replace the two lines above with):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#
+# The detector auto-detects GPU via torch.cuda.is_available().
+
+# ── ArcFace recognition (KEPT from v3.1, detection head NOT used) ─────────────
+# InsightFace is kept solely for the ArcFace w600k_r50 recognition backbone.
+# Its RetinaFace/SCRFD detection models are superseded by YOLOv8.
 insightface==0.7.3
-onnxruntime==1.19.2
+onnxruntime==1.19.2          # CPU ONNX runtime for ArcFace
+# onnxruntime-gpu==1.19.2    # Uncomment for GPU ONNX inference
+
+# ── Optional: faster NMS (already bundled in ultralytics, listed for clarity) ──
+# scipy>=1.11.0              # only needed if you write custom NMS logic
