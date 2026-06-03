@@ -2362,7 +2362,9 @@ async function _validateAndCapture(video, w, h) {
     });
     if (!d || _captureComplete || !isAutoCaptureActive) return;
     currentQuality = d.quality;
-    currentPoseHint = d.pose || "front";
+    currentPoseHint = String(d.pose || "front")
+      .trim()
+      .toLowerCase();
     const q = d.quality?.overall ?? 0;
     const qFill = $("qualityFill");
     if (qFill) {
