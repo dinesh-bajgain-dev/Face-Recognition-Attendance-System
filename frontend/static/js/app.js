@@ -1,32 +1,1487 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   वेदनेत्रम् · Smart Attendance System v3.1
-   Role-Based: Admin | Teacher | Student
-
-   CHANGES FROM v3.0:
-   ──────────────────
-   ISSUE 1  — Dashboard graph fixed max-height; SimpleChart scales dynamically
-   ISSUE 3  — Teacher modal: semester change triggers subject reload (filtered)
-   ISSUE 4  — Teacher assignments panel: add/remove multiple subjects
-   ISSUE 5  — Schedule conflict shown as clear error in teacher modal
-   ISSUE 6  — api() intercepts 401 SESSION_EXPIRED, clears stale token, shows
-               session-expired message instead of silent failure
-   ═══════════════════════════════════════════════════════════════════════════ */
+   वेदनेत्रम् · app.js  –  Frontend application logic
+   Architecture:
+     • All server communication through api() helper (adds auth token)
+     • navigate() switches pages and fires load functions
+     • Each page has its own loader (loadDashboard, loadStudents, etc.)
+     • Webcam: getUserMedia for enroll, MJPEG <img src> for live recognition
+═══════════════════════════════════════════════════════════════════════════ */
 
 const API = "http://localhost:5050/api";
+let authToken = localStorage.getItem("frs_token") || "";
+let authRole = localStorage.getItem("frs_role") || "";
+let selectedFiles = [];
+let webcamFiles = [];
+let webcamStream = null;
+let cameraActive = false;
+let charts = {};
+let pollTimer = null;
+let dashRecords = []; // for client-side filter
+let attRecords = [];
 
-/* ── Global state ─────────────────────────────────────────────────────────── */
-let token = localStorage.getItem("frs_token") || "";
-let userRole = localStorage.getItem("frs_role") || "";
-let userInfo = JSON.parse(localStorage.getItem("frs_user") || "null");
-let currentPage = "";
+/* ── Boot ────────────────────────────────────────────────────────────── */
+window.onload = () => {
+  updateClock();
+  setInterval(updateClock, 1000);
+  setInterval(checkAPI, 15000);
+  initUploadZone();
+  document.getElementById("attDate").value = todayStr();
+  document.getElementById("repFrom").value = todayStr();
+  document.getElementById("repTo").value = todayStr();
+  document.getElementById("dashDate").textContent =
+    new Date().toLocaleDateString("en-GB", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
 
-/* ── Enroll state ─────────────────────────────────────────────────────────── */
-let enrollStream = null;
-let enrollFrames = [];
+  if (authToken) {
+    showApp();
+  } else {
+    showLogin();
+  }
+};
+
+/* ── Utilities ───────────────────────────────────────────────────────── */
+const todayStr = () => new Date().toISOString().split("T")[0];
+
+function updateClock() {
+  const el = document.getElementById("clockDisplay");
+  if (el) el.textContent = new Date().toLocaleTimeString("en-GB");
+}
+
+async function api(path, opts = {}) {
+  const headers = {
+    ...(opts.headers || {}),
+    Authorization: `Bearer ${authToken}`,
+  };
+  if (opts.json) {
+    headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(opts.json);
+    delete opts.json;
+  }
+  const r = await fetch(API + path, { ...opts, headers });
+  if (r.status === 401) {
+    logout();
+    return null;
+  }
+  return r;
+}
+
+function toast(msg, type = "") {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.background = type === "err" ? "var(--red)" : "var(--text)";
+  el.style.color = type === "err" ? "#fff" : "var(--bg)";
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 2800);
+}
+
+function badge(status) {
+  return `<span class="${status === "Present" ? "badge-present" : "badge-absent"}">${status}</span>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getStudentName(record) {
+  return (record?.name || record?.full_name || "").trim();
+}
+
+/* ── Auth ────────────────────────────────────────────────────────────── */
+function showLogin() {
+  document.getElementById("loginOverlay").classList.remove("hidden");
+  document.getElementById("sidebar").style.display = "none";
+  document.querySelector(".main").style.display = "none";
+}
+function showApp() {
+  document.getElementById("loginOverlay").classList.add("hidden");
+  document.getElementById("sidebar").style.display = "flex";
+  document.querySelector(".main").style.display = "block";
+  checkAPI();
+  navigate("dashboard");
+}
+
+async function doLogin() {
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value;
+  const errEl = document.getElementById("loginErr");
+  errEl.textContent = "";
+  if (!username || !password) {
+    errEl.textContent = "Enter username and password";
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      errEl.textContent = d.error || "Login failed";
+      return;
+    }
+    authToken = d.token;
+    authRole = d.role;
+    localStorage.setItem("frs_token", authToken);
+    localStorage.setItem("frs_role", authRole);
+    showApp();
+  } catch {
+    errEl.textContent = "Cannot reach server";
+  }
+}
+
+function logout() {
+  authToken = "";
+  authRole = "";
+  localStorage.removeItem("frs_token");
+  localStorage.removeItem("frs_role");
+  if (cameraActive) stopCamera();
+  showLogin();
+}
+
+/* ── API health ──────────────────────────────────────────────────────── */
+async function checkAPI() {
+  const dot = document.getElementById("apiDot");
+  const lbl = document.getElementById("apiStatus");
+  try {
+    const r = await fetch(`${API}/health`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    const d = await r.json();
+    const ok = r.ok && d.db === "ok";
+    dot.className = `status-dot ${ok ? "ok" : "err"}`;
+    lbl.textContent = ok ? "Connected" : "DB Error";
+  } catch {
+    dot.className = "status-dot err";
+    lbl.textContent = "Offline";
+  }
+}
+
+/* ── Navigation ──────────────────────────────────────────────────────── */
+function navigate(page) {
+  document
+    .querySelectorAll(".page")
+    .forEach((p) => p.classList.remove("active"));
+  document
+    .querySelectorAll(".nav-item")
+    .forEach((n) => n.classList.remove("active"));
+  const pageEl = document.getElementById("page-" + page);
+  if (!pageEl) return;
+  pageEl.classList.add("active");
+  const navEl = document.querySelector(`[data-page="${page}"]`);
+  if (navEl) navEl.classList.add("active");
+
+  const loaders = {
+    dashboard: loadDashboard,
+    students: loadStudents,
+    attendance: loadAttendance,
+    reports: loadReports,
+    settings: loadSettings,
+    recognize: () => loadLiveLog(),
+  };
+  if (loaders[page]) loaders[page]();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════════════════════════════ */
+async function loadDashboard() {
+  try {
+    const [att, hist, persons, logs] = await Promise.all([
+      api(`/attendance?date=${todayStr()}`).then((r) => r.json()),
+      api(`/attendance/history`).then((r) => r.json()),
+      api(`/students`).then((r) => r.json()),
+      api(`/logs?limit=30`).then((r) => r.json()),
+    ]);
+    document.getElementById("statRegistered").textContent = persons.count;
+    document.getElementById("statPresent").textContent = att.present;
+    document.getElementById("statAbsent").textContent = att.absent;
+    const rate =
+      persons.count > 0
+        ? Math.round((att.present / persons.count) * 100) + "%"
+        : "—";
+    document.getElementById("statRate").textContent = rate;
+
+    renderHistoryChart(hist.history);
+    dashRecords = att.records;
+    renderDashTable(dashRecords);
+    renderRecentLogs(logs.logs);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderHistoryChart(history) {
+  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const ctx = document.getElementById("attendanceChart").getContext("2d");
+  if (charts.dash) charts.dash.destroy();
+  charts.dash = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: sorted.map((h) => h.date.slice(5)),
+      datasets: [
+        {
+          label: "Present",
+          data: sorted.map((h) => h.present),
+          backgroundColor: "rgba(34,197,94,0.65)",
+          borderRadius: 3,
+          borderSkipped: false,
+        },
+        {
+          label: "Absent",
+          data: sorted.map((h) => h.absent),
+          backgroundColor: "rgba(239,68,68,0.3)",
+          borderRadius: 3,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: chartOpts({ stacked: true }),
+  });
+}
+
+function renderRecentLogs(logs) {
+  const el = document.getElementById("recentLogs");
+  if (!el) return;
+  el.innerHTML =
+    logs
+      .slice(0, 15)
+      .map(
+        (l) => `
+    <div class="log-item ${l.recognized ? "ok" : "fail"}">
+      <span class="log-name">${l.full_name || "Unknown"}</span>
+      <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
+    </div>`,
+      )
+      .join("") || `<p class="muted">No events yet</p>`;
+}
+
+function renderDashTable(records) {
+  document.getElementById("dashTableBody").innerHTML = (records || [])
+    .map(
+      (r) => `
+    <tr>
+      <td style="font-family:var(--mono);font-size:12px">${r.student_id}</td>
+      <td><a onclick="viewProfile('${r.student_id}')">${escapeHtml(getStudentName(r))}</a></td>
+      <td style="color:var(--text3)">${r.department || "—"}</td>
+      <td style="font-family:var(--mono);font-size:12px">${r.time}</td>
+      <td>${badge(r.status)}</td>
+    </tr>`,
+    )
+    .join("");
+}
+
+function filterDashTable(q) {
+  const query = q.toLowerCase();
+  const filtered = dashRecords.filter((r) =>
+    getStudentName(r).toLowerCase().includes(query),
+  );
+  renderDashTable(filtered);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STUDENTS
+═══════════════════════════════════════════════════════════════════════ */
+async function loadStudents() {
+  await loadDepartments("deptFilter");
+  await searchStudents();
+}
+
+async function loadDepartments(selectId) {
+  try {
+    const r = await api("/departments");
+    const d = await r.json();
+    const sel = document.getElementById(selectId);
+    const val = sel.value;
+    // keep first option
+    while (sel.options.length > 1) sel.remove(1);
+    d.departments.forEach((dept) => {
+      const o = document.createElement("option");
+      o.value = dept;
+      o.text = dept;
+      sel.add(o);
+    });
+    sel.value = val;
+  } catch {}
+}
+
+async function searchStudents() {
+  const q = document.getElementById("studentSearch").value.trim();
+  const dept = document.getElementById("deptFilter").value;
+  let url = `/students?q=${encodeURIComponent(q)}`;
+  if (dept) url += `&department=${encodeURIComponent(dept)}`;
+  try {
+    const r = await api(url);
+    const d = await r.json();
+    const grid = document.getElementById("personsGrid");
+    grid.innerHTML =
+      d.students
+        .map((s) => {
+          const initials = s.full_name
+            .split(" ")
+            .map((w) => w[0]?.toUpperCase())
+            .slice(0, 2)
+            .join("");
+          return `
+        <div class="person-card" onclick="viewProfile('${s.student_id}')">
+          <button class="person-del" onclick="event.stopPropagation();deleteStudent('${s.student_id}')" title="Remove">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+          <div class="person-avatar">${initials || "?"}</div>
+          <div class="person-name">${s.full_name}</div>
+          <div class="person-dept">${s.department || "—"}</div>
+          <div class="person-dept" style="font-family:var(--mono);font-size:10px;color:var(--text3)">${s.image_count} images</div>
+        </div>`;
+        })
+        .join("") || `<p style="color:var(--text3)">No students found.</p>`;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function viewProfile(sid) {
+  navigate("profile");
+  document.getElementById("profileContent").innerHTML =
+    `<p class="muted">Loading…</p>`;
+  try {
+    const r = await api(`/students/${sid}`);
+    const s = await r.json();
+    const pct = s.stats?.percentage || 0;
+    const initials = s.full_name
+      .split(" ")
+      .map((w) => w[0]?.toUpperCase())
+      .slice(0, 2)
+      .join("");
+    document.getElementById("profileActions").innerHTML = `
+      <button class="btn-secondary" onclick="openEditModal('${sid}')">Edit Student</button>`;
+
+    document.getElementById("profileContent").innerHTML = `
+      <div class="profile-header">
+        <div class="profile-avatar-lg">${initials}</div>
+        <div class="profile-info">
+          <h2>${s.full_name}</h2>
+          <p>${s.email || ""} ${s.phone ? "· " + s.phone : ""}</p>
+          <div class="profile-meta">
+            <span class="meta-tag">ID: ${s.student_id}</span>
+            ${s.department ? `<span class="meta-tag">${s.department}</span>` : ""}
+            <span class="meta-tag">Enrolled ${s.enrolled_at?.slice(0, 10) || ""}</span>
+            <span class="meta-tag">${s.image_count} training images</span>
+          </div>
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div class="pstat">
+          <div class="pstat-label">Attendance %</div>
+          <div class="pstat-val" style="color:${pct >= 75 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)"}">${pct || 0}%</div>
+          <div class="pct-bar"><div class="pct-fill" style="width:${pct}%;background:${pct >= 75 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)"}"></div></div>
+        </div>
+        <div class="pstat"><div class="pstat-label">Present Days</div><div class="pstat-val" style="color:var(--green)">${s.stats?.total_present || 0}</div></div>
+        <div class="pstat"><div class="pstat-label">Total Days</div><div class="pstat-val">${s.stats?.total_days || 0}</div></div>
+      </div>
+      <div class="two-col">
+        <div>
+          <div class="section-title">Monthly Attendance</div>
+          <div class="card"><canvas id="profileChart" height="180"></canvas></div>
+        </div>
+        <div>
+          <div class="section-title">Recent Recognition Logs</div>
+          <div class="card">
+            ${
+              (s.logs || [])
+                .map(
+                  (l) => `
+              <div class="log-item ${l.recognized ? "ok" : "fail"}" style="margin-bottom:4px">
+                <span class="log-name">${l.recognized ? "✓ Recognized" : "✗ Failed"}</span>
+                <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
+              </div>`,
+                )
+                .join("") || '<p class="muted">No logs yet</p>'
+            }
+          </div>
+        </div>
+      </div>`;
+
+    // Monthly chart
+    const monthly = s.monthly || [];
+    if (monthly.length) {
+      const ctx = document.getElementById("profileChart").getContext("2d");
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: monthly.map((m) => m.month),
+          datasets: [
+            {
+              label: "Present",
+              data: monthly.map((m) => m.present),
+              backgroundColor: "rgba(34,197,94,0.65)",
+              borderRadius: 3,
+            },
+          ],
+        },
+        options: chartOpts({}),
+      });
+    }
+  } catch (e) {
+    console.error(e);
+    document.getElementById("profileContent").innerHTML =
+      `<p class="msg err">Failed to load profile.</p>`;
+  }
+}
+
+async function deleteStudent(sid) {
+  // now handled by the edit modal's confirmDeleteStudent()
+  openEditModal(sid);
+}
+
+async function openEditModal(sid) {
+  const r = await api(`/students/${sid}`);
+  const s = await r.json();
+  const val = prompt(`Edit name for ${s.full_name}:`, s.full_name);
+  if (!val) return;
+  await api(`/students/${sid}`, { method: "PUT", json: { full_name: val } });
+  toast("Updated");
+  viewProfile(sid);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENROLL
+═══════════════════════════════════════════════════════════════════════ */
+function initUploadZone() {
+  const zone = document.getElementById("uploadZone");
+  if (!zone) return;
+  zone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    zone.classList.add("drag-over");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("drag-over");
+    handleFiles(e.dataTransfer.files);
+  });
+  zone.addEventListener("click", () =>
+    document.getElementById("fileInput").click(),
+  );
+}
+
+function handleFiles(files) {
+  selectedFiles = Array.from(files);
+  renderFilePreviews(selectedFiles, "filePreview");
+}
+
+function renderFilePreviews(files, containerId) {
+  const preview = document.getElementById(containerId);
+  if (!preview) return;
+  preview.innerHTML = "";
+  files.slice(0, 8).forEach((f) => {
+    const img = document.createElement("img");
+    img.src = URL.createObjectURL(f);
+    img.className = "file-thumb";
+    preview.appendChild(img);
+  });
+  if (files.length > 8) {
+    const badge = document.createElement("div");
+    badge.className = "file-count";
+    badge.textContent = `+${files.length - 8}`;
+    preview.appendChild(badge);
+  }
+}
+
+async function startWebcam() {
+  try {
+    const section = document.getElementById("webcamSection");
+    section.style.display = "block";
+    webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    document.getElementById("enrollCam").srcObject = webcamStream;
+    webcamFiles = [];
+    updateWebcamCount();
+  } catch (e) {
+    toast("Camera access denied", "err");
+  }
+}
+
+function stopWebcam() {
+  if (webcamStream) {
+    webcamStream.getTracks().forEach((t) => t.stop());
+    webcamStream = null;
+  }
+  document.getElementById("webcamSection").style.display = "none";
+}
+
+function captureWebcamFrame() {
+  const video = document.getElementById("enrollCam");
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  canvas.toBlob(
+    (blob) => {
+      const file = new File([blob], `webcam_${Date.now()}.jpg`, {
+        type: "image/jpeg",
+      });
+      webcamFiles.push(file);
+      updateWebcamCount();
+    },
+    "image/jpeg",
+    0.9,
+  );
+}
+
+function updateWebcamCount() {
+  document.getElementById("webcamCount").textContent =
+    `${webcamFiles.length} frames captured`;
+}
+
+async function enrollStudent() {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  const dept = document.getElementById("eDept").value.trim();
+  const email = document.getElementById("eEmail").value.trim();
+  const phone = document.getElementById("ePhone").value.trim();
+  const msg = document.getElementById("enrollMsg");
+
+  if (!sid || !name) {
+    setMsg("enrollMsg", "Student ID and full name are required.", "err");
+    return;
+  }
+
+  const allFiles = [...selectedFiles, ...webcamFiles];
+  if (!allFiles.length) {
+    setMsg("enrollMsg", "Upload images or capture via webcam.", "err");
+    return;
+  }
+
+  const progress = document.getElementById("enrollProgress");
+  const bar = document.getElementById("enrollBar");
+  progress.style.display = "block";
+  bar.style.width = "5%";
+  setMsg("enrollMsg", "Uploading and generating embeddings…", "");
+
+  const form = new FormData();
+  form.append("student_id", sid);
+  form.append("full_name", name);
+  if (dept) form.append("department", dept);
+  if (email) form.append("email", email);
+  if (phone) form.append("phone", phone);
+  allFiles.forEach((f) => form.append("images", f));
+
+  try {
+    bar.style.width = "40%";
+    const r = await api("/enroll", { method: "POST", body: form });
+    const d = await r.json();
+    bar.style.width = "100%";
+    setTimeout(() => {
+      progress.style.display = "none";
+      bar.style.width = "0%";
+    }, 600);
+
+    if (!r.ok) {
+      setMsg("enrollMsg", d.error || "Enrollment failed.", "err");
+      return;
+    }
+    setMsg(
+      "enrollMsg",
+      `✓ Enrolled ${name}. ${d.embeddings_generated} embeddings generated. ${d.images_failed} images failed.`,
+      "ok",
+    );
+    toast(`${name} enrolled successfully`);
+    stopWebcam();
+    selectedFiles = [];
+    webcamFiles = [];
+    const filePreview = document.getElementById("filePreview");
+    if (filePreview) filePreview.innerHTML = "";
+    ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
+      (id) => (document.getElementById(id).value = ""),
+    );
+  } catch (e) {
+    setMsg("enrollMsg", "Error: " + e.message, "err");
+    progress.style.display = "none";
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RECOGNIZE
+═══════════════════════════════════════════════════════════════════════ */
+async function toggleCamera() {
+  const btn = document.getElementById("camToggle");
+  if (!cameraActive) {
+    await api("/camera/start", { method: "POST" });
+    cameraActive = true;
+    btn.textContent = "■ Stop Camera";
+    document.getElementById("liveStream").style.display = "block";
+    document.getElementById("cameraPlaceholder").style.display = "none";
+    document.getElementById("recognizeCanvas").style.display = "none";
+    document.getElementById("liveStream").src = `${API}/stream`;
+    startPollLiveLog();
+  } else {
+    stopCamera();
+  }
+}
+
+async function stopCamera() {
+  await api("/camera/stop", { method: "POST" });
+  cameraActive = false;
+  const btn = document.getElementById("camToggle");
+  if (btn) btn.textContent = "▶ Start Camera";
+  const stream = document.getElementById("liveStream");
+  if (stream) {
+    stream.src = "";
+    stream.style.display = "none";
+  }
+  const ph = document.getElementById("cameraPlaceholder");
+  if (ph) ph.style.display = "flex";
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startPollLiveLog() {
+  if (pollTimer) clearTimeout(pollTimer);
+  async function poll() {
+    if (!cameraActive) return;
+    await loadLiveLog();
+    pollTimer = setTimeout(poll, 3000);
+  }
+  poll();
+}
+
+async function loadLiveLog() {
+  try {
+    const r = await api("/logs?limit=20");
+    const d = await r.json();
+    const el = document.getElementById("liveLog");
+    if (!el) return;
+    el.innerHTML =
+      d.logs
+        .map(
+          (l) => `
+      <div class="log-item ${l.recognized ? "ok" : "fail"}">
+        <span class="log-name">${l.full_name || "Unknown"}</span>
+        <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
+      </div>`,
+        )
+        .join("") ||
+      `<p class="muted" style="font-size:12px">No events yet</p>`;
+
+    // Update result card with the most recent recognized
+    const latest = d.logs.find((l) => l.recognized);
+    if (latest) {
+      setRecogResult(
+        latest.full_name,
+        `${latest.confidence}% confidence`,
+        "present",
+      );
+    }
+  } catch {}
+}
+
+async function recognizeImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const b64 = e.target.result.split(",")[1];
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.getElementById("recognizeCanvas");
+      const ctx = canvas.getContext("2d");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      canvas.style.display = "block";
+      document.getElementById("cameraPlaceholder").style.display = "none";
+      document.getElementById("liveStream").style.display = "none";
+    };
+    img.src = e.target.result;
+
+    setRecogResult("Analyzing…", "", "");
+    try {
+      const r = await api("/recognize", {
+        method: "POST",
+        json: { image: b64 },
+      });
+      const d = await r.json();
+      if (d.recognized) {
+        setRecogResult(d.name, `${d.confidence}% match`, "present");
+        if (d.attendance_marked) toast(`✓ ${d.name} marked present`);
+        loadLiveLog();
+      } else {
+        setRecogResult(
+          "Unknown",
+          d.confidence ? `${d.confidence}% best match` : "No face detected",
+          "unknown",
+        );
+      }
+    } catch (err) {
+      setRecogResult("Error", err.message, "unknown");
+    }
+  };
+  reader.readAsDataURL(file);
+  input.value = "";
+}
+
+function setRecogResult(name, conf, badgeType) {
+  document.getElementById("recogName").textContent = name;
+  document.getElementById("recogConf").textContent = conf;
+  const icon = document.getElementById("recogIcon");
+  const badge = document.getElementById("recogBadge");
+  icon.className =
+    "recog-icon" +
+    (badgeType === "present" ? " ok" : badgeType === "unknown" ? " fail" : "");
+  badge.className = "recog-badge";
+  if (badgeType === "present") {
+    badge.classList.add("present");
+    badge.textContent = "PRESENT";
+  } else if (badgeType === "unknown") {
+    badge.classList.add("unknown");
+    badge.textContent = "UNKNOWN";
+  } else badge.textContent = "";
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ATTENDANCE — Faculty-tabbed view
+   State:
+     activeFaculty  = "" (All) | "BCA" | "BBM" | ...
+     facultyData    = full response from /api/attendance/faculty-summary
+     filteredStudents = current filtered list for the active faculty
+═══════════════════════════════════════════════════════════════════════ */
+let activeFaculty = ""; // "" = All
+let facultyData = null;
+let filteredStudents = [];
+
+async function loadAttendancePage() {
+  const dateVal = document.getElementById("attDate").value || todayStr();
+  try {
+    const r = await api(`/attendance/faculty-summary?date=${dateVal}`);
+    if (!r || !r.ok) {
+      console.error("faculty-summary failed");
+      return;
+    }
+    facultyData = await r.json();
+    renderFacultyTabs();
+    showFaculty(activeFaculty);
+  } catch (e) {
+    console.error("loadAttendancePage:", e);
+  }
+}
+
+// Keep backward-compat alias so navigate() still works
+const loadAttendance = loadAttendancePage;
+
+function renderFacultyTabs() {
+  if (!facultyData) return;
+  const container = document.getElementById("facultyTabs");
+  const faculties = facultyData.faculties || [];
+
+  const tabs = [
+    { key: "", label: `All  (${facultyData.overall?.total || 0})` },
+    ...faculties.map((f) => ({
+      key: f.name,
+      label: `${f.name}  (${f.total})`,
+    })),
+  ];
+
+  container.innerHTML = tabs
+    .map(
+      (t) => `
+    <div class="faculty-tab ${activeFaculty === t.key ? "active" : ""}"
+         onclick="showFaculty('${t.key}')">
+      ${t.label}
+    </div>`,
+    )
+    .join("");
+}
+
+function showFaculty(key) {
+  activeFaculty = key;
+  // Update active tab highlight
+  document.querySelectorAll(".faculty-tab").forEach((el) => {
+    const isActive = el.textContent.trim().startsWith(key || "All");
+    el.classList.toggle("active", isActive);
+  });
+  document.getElementById("attSearch").value = "";
+
+  if (key === "") {
+    showAllFaculties();
+  } else {
+    const fac = (facultyData?.faculties || []).find((f) => f.name === key);
+    showSingleFaculty(fac);
+  }
+}
+
+function showAllFaculties() {
+  const faculties = facultyData?.faculties || [];
+  const overall = facultyData?.overall || {};
+  const dateVal = document.getElementById("attDate").value || todayStr();
+
+  // Hide single-faculty header card
+  document.getElementById("facultyHeaderCard").style.display = "none";
+
+  // Render summary cards
+  const summaryRow = document.getElementById("facultySummaryRow");
+  summaryRow.innerHTML = [
+    // Overall card first
+    renderSummaryCard(
+      {
+        name: "All Faculties",
+        total: overall.total,
+        present: overall.present,
+        absent: overall.absent,
+        rate: overall.rate,
+      },
+      true,
+    ),
+    ...faculties.map((f) => renderSummaryCard(f, false)),
+  ].join("");
+
+  // Render all faculties as sections in one table container
+  filteredStudents = faculties.flatMap((f) =>
+    f.students.map((s) => ({ ...s, faculty: f.name })),
+  );
+  const container = document.getElementById("attTableContainer");
+  container.innerHTML =
+    faculties
+      .map(
+        (f) => `
+    <div class="faculty-section" id="fac-section-${f.name.replace(/\s+/g, "_")}">
+      <div class="faculty-section-header">
+        <span class="fsh-name">${f.name}</span>
+        <div class="fsh-pills">
+          <span class="fsc-pill green">Present: ${f.present}</span>
+          <span class="fsc-pill red">Absent: ${f.absent}</span>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--text2)">${f.rate}%</span>
+        </div>
+      </div>
+      ${buildStudentTable(f.students, dateVal, false)}
+    </div>`,
+      )
+      .join("") ||
+    `<p class="muted" style="margin-top:1rem">No faculty data for this date.</p>`;
+}
+
+function showSingleFaculty(fac) {
+  if (!fac) return;
+  const dateVal = document.getElementById("attDate").value || todayStr();
+
+  // Hide summary cards
+  document.getElementById("facultySummaryRow").innerHTML = "";
+
+  // Show header card
+  const card = document.getElementById("facultyHeaderCard");
+  card.style.display = "flex";
+  document.getElementById("fhcName").textContent = fac.name;
+  document.getElementById("fhcDate").textContent = new Date(
+    dateVal,
+  ).toLocaleDateString("en-GB", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  document.getElementById("fhcPresent").textContent = fac.present;
+  document.getElementById("fhcAbsent").textContent = fac.absent;
+  document.getElementById("fhcTotal").textContent = fac.total;
+  const rateEl = document.getElementById("fhcRate");
+  rateEl.textContent = fac.rate + "%";
+  rateEl.className =
+    "fhc-val " + (fac.rate >= 75 ? "green" : fac.rate >= 50 ? "amber" : "red");
+
+  // Render student table for this faculty
+  filteredStudents = fac.students;
+  document.getElementById("attTableContainer").innerHTML = buildStudentTable(
+    fac.students,
+    dateVal,
+    true,
+  );
+}
+
+function renderSummaryCard(f, isOverall) {
+  const rate = f.rate || 0;
+  const color =
+    rate >= 75 ? "var(--green)" : rate >= 50 ? "var(--amber)" : "var(--red)";
+  const click = isOverall ? "" : `onclick="showFaculty('${f.name}')"`;
+  return `
+    <div class="faculty-summary-card" ${click}>
+      <div class="fsc-name">${f.name}</div>
+      <div class="fsc-row">
+        <div class="fsc-pills">
+          <span class="fsc-pill green">${f.present} present</span>
+          <span class="fsc-pill red">${f.absent} absent</span>
+        </div>
+        <span class="fsc-rate" style="color:${color}">${rate}%</span>
+      </div>
+      <div class="fsc-bar">
+        <div class="fsc-fill" style="width:${rate}%;background:${color}"></div>
+      </div>
+    </div>`;
+}
+
+function buildStudentTable(students, dateVal, showFacultyCol) {
+  if (!students || !students.length) {
+    return `<p class="muted" style="padding:.75rem 0">No students in this faculty.</p>`;
+  }
+  const rows = students
+    .map(
+      (s) => `
+    <tr>
+      <td style="font-family:var(--mono);font-size:11px">${s.student_id}</td>
+      <td><a onclick="viewProfile('${s.student_id}')">${s.name}</a></td>
+      ${showFacultyCol ? "" : ""}
+      <td style="font-family:var(--mono);font-size:11px">${dateVal}</td>
+      <td style="font-family:var(--mono);font-size:11px">${s.time}</td>
+      <td>${badge(s.status)}</td>
+    </tr>`,
+    )
+    .join("");
+
+  return `
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Student ID</th>
+          <th>Name</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function filterActiveTable(q) {
+  if (!facultyData) return;
+  q = q.toLowerCase();
+
+  if (activeFaculty === "") {
+    // Filter across all faculties, rebuild sections
+    const dateVal = document.getElementById("attDate").value || todayStr();
+    const container = document.getElementById("attTableContainer");
+    container.innerHTML =
+      (facultyData.faculties || [])
+        .map((f) => {
+          const filtered = f.students.filter(
+            (s) =>
+              s.name.toLowerCase().includes(q) ||
+              s.student_id.toLowerCase().includes(q),
+          );
+          if (!filtered.length) return "";
+          return `
+        <div class="faculty-section">
+          <div class="faculty-section-header">
+            <span class="fsh-name">${f.name}</span>
+            <div class="fsh-pills">
+              <span class="fsc-pill green">${filtered.filter((s) => s.status === "Present").length} present</span>
+              <span class="fsc-pill red">${filtered.filter((s) => s.status !== "Present").length} absent</span>
+            </div>
+          </div>
+          ${buildStudentTable(filtered, dateVal, false)}
+        </div>`;
+        })
+        .join("") ||
+      `<p class="muted" style="margin-top:1rem">No results for "${q}"</p>`;
+  } else {
+    // Filter within single faculty
+    const fac = (facultyData.faculties || []).find(
+      (f) => f.name === activeFaculty,
+    );
+    const dateVal = document.getElementById("attDate").value || todayStr();
+    if (!fac) return;
+    const filtered = q
+      ? fac.students.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.student_id.toLowerCase().includes(q),
+        )
+      : fac.students;
+    document.getElementById("attTableContainer").innerHTML = buildStudentTable(
+      filtered,
+      dateVal,
+      true,
+    );
+  }
+}
+
+function exportFacultyCSV() {
+  const dateVal = document.getElementById("attDate").value || todayStr();
+  const dept = activeFaculty;
+  let url = `/attendance/export?from=${dateVal}&to=${dateVal}`;
+  if (dept) url += `&department=${encodeURIComponent(dept)}`;
+  window.open(`${API}${url}`, "_blank");
+  toast(dept ? `Exporting ${dept} CSV` : "Exporting all faculties CSV");
+}
+
+// Backward-compat stubs so existing calls don't break
+function exportCSV() {
+  exportFacultyCSV();
+}
+function filterAttTable(q) {
+  filterActiveTable(q);
+}
+function renderAttTable(records) {
+  /* no-op — replaced by buildStudentTable */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REPORTS
+═══════════════════════════════════════════════════════════════════════ */
+async function loadReports() {
+  try {
+    const [stats, hist] = await Promise.all([
+      api("/attendance/stats").then((r) => r.json()),
+      api("/attendance/history").then((r) => r.json()),
+    ]);
+
+    const rows = stats.stats || [];
+    const pcts = rows
+      .map((r) => parseFloat(r.pct || 0))
+      .filter((p) => !isNaN(p));
+    const avg = pcts.length
+      ? (pcts.reduce((a, b) => a + b, 0) / pcts.length).toFixed(1) + "%"
+      : "—";
+    const high = pcts.length ? Math.max(...pcts).toFixed(1) + "%" : "—";
+    const low = pcts.filter((p) => p < 75).length;
+
+    document.getElementById("repAvg").textContent = avg;
+    document.getElementById("repHigh").textContent = high;
+    document.getElementById("repLow").textContent = low;
+
+    // Total recognition events
+    const logsR = await api("/logs?limit=1000");
+    const logsD = await logsR.json();
+    document.getElementById("repTotal").textContent = logsD.logs.length;
+
+    // Per-student table
+    document.getElementById("repTableBody").innerHTML = rows
+      .map((r) => {
+        const pct = parseFloat(r.pct || 0);
+        const color =
+          pct >= 75
+            ? "var(--green)"
+            : pct >= 50
+              ? "var(--amber)"
+              : "var(--red)";
+        const statusLabel =
+          pct >= 75 ? "On Track" : pct >= 50 ? "At Risk" : "Critical";
+        return `<tr>
+        <td style="font-family:var(--mono);font-size:11px">${r.student_id}</td>
+        <td><a onclick="viewProfile('${r.student_id}')">${r.full_name}</a></td>
+        <td style="color:var(--text3)">${r.department || "—"}</td>
+        <td style="font-family:var(--mono)">${r.present_days || 0}</td>
+        <td>
+          <div class="inline-bar">
+            <div class="mini-bar"><div class="mini-fill" style="width:${pct}%;background:${color}"></div></div>
+            <span style="font-family:var(--mono);font-size:11px;color:${color}">${pct}%</span>
+          </div>
+        </td>
+        <td><span style="font-size:11px;font-family:var(--mono);color:${color}">${statusLabel}</span></td>
+      </tr>`;
+      })
+      .join("");
+
+    // Monthly trend chart
+    renderMonthlyChart(hist.history);
+    // Dept chart
+    renderDeptChart(rows);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function renderMonthlyChart(history) {
+  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const ctx = document.getElementById("monthlyChart").getContext("2d");
+  if (charts.monthly) charts.monthly.destroy();
+  charts.monthly = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: sorted.map((h) => h.date.slice(5)),
+      datasets: [
+        {
+          label: "Present",
+          data: sorted.map((h) => h.present),
+          borderColor: "rgba(34,197,94,0.8)",
+          backgroundColor: "rgba(34,197,94,0.1)",
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        },
+        {
+          label: "Absent",
+          data: sorted.map((h) => h.absent),
+          borderColor: "rgba(239,68,68,0.6)",
+          backgroundColor: "rgba(239,68,68,0.05)",
+          tension: 0.3,
+          fill: true,
+          pointRadius: 3,
+        },
+      ],
+    },
+    options: chartOpts({}),
+  });
+}
+
+function renderDeptChart(rows) {
+  const deptMap = {};
+  rows.forEach((r) => {
+    const d = r.department || "Unassigned";
+    if (!deptMap[d]) deptMap[d] = { total: 0, present: 0 };
+    deptMap[d].total++;
+    deptMap[d].present += parseFloat(r.pct || 0) / 100;
+  });
+  const labels = Object.keys(deptMap);
+  const data = labels.map((d) =>
+    deptMap[d].total > 0
+      ? ((deptMap[d].present / deptMap[d].total) * 100).toFixed(1)
+      : 0,
+  );
+  const ctx = document.getElementById("deptChart").getContext("2d");
+  if (charts.dept) charts.dept.destroy();
+  charts.dept = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Avg %",
+          data,
+          backgroundColor: "rgba(59,130,246,0.6)",
+          borderRadius: 4,
+        },
+      ],
+    },
+    options: chartOpts({}),
+  });
+}
+
+function exportRange() {
+  const from = document.getElementById("repFrom").value || todayStr();
+  const to = document.getElementById("repTo").value || todayStr();
+  window.open(`${API}/attendance/export?from=${from}&to=${to}`, "_blank");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SETTINGS
+═══════════════════════════════════════════════════════════════════════ */
+async function loadSettings() {
+  try {
+    const r = await api("/settings");
+    const d = await r.json();
+    document.getElementById("setThreshold").value = Math.round(
+      d.recognition_threshold * 100,
+    );
+    document.getElementById("setFrameSkip").value = d.frame_skip;
+    document.getElementById("setDataDir").textContent = d.data_dir;
+  } catch {}
+}
+
+async function saveSettings() {
+  const threshold =
+    parseFloat(document.getElementById("setThreshold").value) / 100;
+  const frameSkip = parseInt(document.getElementById("setFrameSkip").value);
+  try {
+    const r = await api("/settings", {
+      method: "PUT",
+      json: { recognition_threshold: threshold, frame_skip: frameSkip },
+    });
+    if (r.ok) {
+      setMsg("settingsMsg", "Settings saved.", "ok");
+      toast("Saved");
+    } else setMsg("settingsMsg", "Failed to save.", "err");
+  } catch {
+    setMsg("settingsMsg", "Error.", "err");
+  }
+}
+
+async function changePw() {
+  const oldPw = document.getElementById("oldPw")?.value || "";
+  const newPw = document.getElementById("newPw").value;
+  if (!newPw || newPw.length < 6) {
+    setMsg("pwMsg", "New password must be at least 6 characters.", "err");
+    return;
+  }
+  const r = await api("/auth/change-password", {
+    method: "POST",
+    json: { old_password: oldPw, new_password: newPw },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    setMsg("pwMsg", "✓ Password updated. Please log in again.", "ok");
+    toast("Password changed");
+    // Token changes — log out after 2s
+    setTimeout(() => logout(), 2000);
+  } else {
+    setMsg("pwMsg", d.error || "Update failed.", "err");
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHARED HELPERS
+═══════════════════════════════════════════════════════════════════════ */
+function setMsg(id, text, type) {
+  const el = document.getElementById(id);
+  if (el) {
+    el.textContent = text;
+    el.className = "msg " + (type || "");
+  }
+}
+
+function dlBlob(content, mime, filename) {
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+function chartOpts({ stacked = false } = {}) {
+  return {
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: "#1a1a1e",
+        borderColor: "rgba(255,255,255,0.1)",
+        borderWidth: 1,
+        titleColor: "#e8e8ec",
+        bodyColor: "#8a8a96",
+        titleFont: { family: "'Space Mono',monospace", size: 11 },
+        bodyFont: { family: "'DM Sans',sans-serif", size: 12 },
+      },
+    },
+    scales: {
+      x: {
+        stacked,
+        grid: { color: "rgba(255,255,255,0.04)" },
+        ticks: {
+          color: "#555560",
+          font: { family: "'Space Mono',monospace", size: 10 },
+        },
+      },
+      y: {
+        stacked,
+        grid: { color: "rgba(255,255,255,0.04)" },
+        ticks: {
+          color: "#555560",
+          font: { family: "'Space Mono',monospace", size: 10 },
+        },
+      },
+    },
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SERVER-SENT EVENTS — replaces all polling
+   One persistent connection. Backend pushes attendance events instantly.
+═══════════════════════════════════════════════════════════════════════ */
+let _sse = null;
+
+function connectSSE() {
+  if (_sse) _sse.close();
+
+  _sse = new EventSource(`${API}/events`);
+
+  _sse.onmessage = (e) => {
+    try {
+      const event = JSON.parse(e.data);
+      if (event.type === "attendance") {
+        handleAttendanceEvent(event);
+      }
+    } catch {}
+  };
+
+  _sse.onerror = () => {
+    // Auto-reconnect after 5s if connection drops
+    setTimeout(connectSSE, 5000);
+  };
+}
+
+function handleAttendanceEvent(event) {
+  // 1. Update the live log panel on Recognize page
+  const liveLog = document.getElementById("liveLog");
+  if (liveLog) {
+    const item = document.createElement("div");
+    item.className = "log-item ok";
+    item.innerHTML = `<span class="log-name">${event.name}</span>
+                      <span class="log-conf">${event.confidence}% · ${event.time}</span>`;
+    liveLog.prepend(item);
+    // Keep log tidy — max 20 items
+    while (liveLog.children.length > 20) liveLog.removeChild(liveLog.lastChild);
+  }
+
+  // 2. Update recognize result card
+  setRecogResult(event.name, `${event.confidence}% confidence`, "present");
+
+  // 3. Show toast notification
+  toast(`✓ ${event.name} marked present`);
+
+  // 4. If dashboard is visible, refresh its table live
+  const dashPage = document.getElementById("page-dashboard");
+  if (dashPage && dashPage.classList.contains("active")) {
+    loadDashboard();
+  }
+
+  // 5. If attendance page is visible, refresh it live
+  const attPage = document.getElementById("page-attendance");
+  if (attPage && attPage.classList.contains("active")) {
+    loadAttendance();
+  }
+}
+
+// Start SSE as soon as user logs in (called from showApp)
+const _originalShowApp = showApp;
+// Override showApp to also start SSE
+window.showApp = function () {
+  _originalShowApp();
+  connectSSE();
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   WEBCAM ENROLL — capture frames and send as JSON (no files, no disk)
+   The browser captures frames from getUserMedia, converts each to
+   base64, then POSTs them all as a JSON array to /api/enroll.
+   Backend processes everything in memory — nothing written to disk.
+═══════════════════════════════════════════════════════════════════════ */
+
+// Override the original enrollStudent to support JSON mode (webcam)
+window.enrollStudent = async function () {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  const dept = document.getElementById("eDept").value.trim();
+  const email = document.getElementById("eEmail").value.trim();
+  const phone = document.getElementById("ePhone").value.trim();
+
+  if (!sid || !name) {
+    setMsg("enrollMsg", "Student ID and full name are required.", "err");
+    return;
+  }
+
+  const hasFiles = selectedFiles.length > 0;
+  const hasWebcam = webcamFiles.length > 0;
+  if (!hasFiles && !hasWebcam) {
+    setMsg("enrollMsg", "Upload images or capture via webcam.", "err");
+    return;
+  }
+
+  const progress = document.getElementById("enrollProgress");
+  const bar = document.getElementById("enrollBar");
+  progress.style.display = "block";
+  bar.style.width = "5%";
+  setMsg("enrollMsg", "Processing faces…", "");
+
+  try {
+    let response, data;
+
+    if (hasWebcam && !hasFiles) {
+      // ── JSON mode: webcam frames as base64 array ──────────────────────
+      bar.style.width = "30%";
+      setMsg("enrollMsg", "Encoding webcam frames…", "");
+
+      // Convert File objects (webcam blobs) to base64 strings
+      const frames = await Promise.all(
+        webcamFiles.map(
+          (f) =>
+            new Promise((res) => {
+              const reader = new FileReader();
+              reader.onload = (e) => res(e.target.result.split(",")[1]);
+              reader.readAsDataURL(f);
+            }),
+        ),
+      );
+
+      bar.style.width = "60%";
+      setMsg("enrollMsg", "Sending to server for embedding…", "");
+
+      response = await api("/enroll", {
+        method: "POST",
+        json: {
+          student_id: sid,
+          full_name: name,
+          department: dept || null,
+          email: email || null,
+          phone: phone || null,
+          frames,
+        },
+      });
+    } else {
+      // ── FormData mode: uploaded image files ───────────────────────────
+      bar.style.width = "40%";
+      setMsg("enrollMsg", "Uploading images and generating embeddings…", "");
+
+      const form = new FormData();
+      form.append("student_id", sid);
+      form.append("full_name", name);
+      if (dept) form.append("department", dept);
+      if (email) form.append("email", email);
+      if (phone) form.append("phone", phone);
+      selectedFiles.forEach((f) => form.append("images", f));
+
+      response = await api("/enroll", { method: "POST", body: form });
+    }
+
+    data = await response.json();
+    bar.style.width = "100%";
+    setTimeout(() => {
+      progress.style.display = "none";
+      bar.style.width = "0%";
+    }, 600);
+
+    if (!response.ok) {
+      setMsg("enrollMsg", data.error || "Enrollment failed.", "err");
+      return;
+    }
+
+    setMsg(
+      "enrollMsg",
+      `✓ ${name} enrolled. ${data.samples} samples processed.` +
+        (data.is_update ? " (Embeddings updated)" : ""),
+      "ok",
+    );
+    toast(`${name} enrolled successfully`);
+
+    // Clean up
+    stopWebcam();
+    selectedFiles = [];
+    webcamFiles = [];
+    const filePreview = document.getElementById("filePreview");
+    if (filePreview) filePreview.innerHTML = "";
+    ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
+      (id) => (document.getElementById(id).value = ""),
+    );
+  } catch (e) {
+    setMsg("enrollMsg", "Error: " + e.message, "err");
+    progress.style.display = "none";
+    bar.style.width = "0%";
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO CAPTURE ENGINE
+   Architecture:
+   - getUserMedia() opens webcam into <video id="captureCam">
+   - A requestAnimationFrame loop reads frames from video into a hidden canvas
+   - Every 400ms it POSTs the frame to /api/capture/validate-frame
+   - Backend returns { face_detected, quality{blur,brightness,overall,passed}, pose }
+   - If quality passes AND the current required pose matches → capture the frame
+   - Pose sequence: front(20) → left(10) → right(10) → up(10) → down(10) = 60 total
+   - Canvas overlay draws: face oval guide, alignment reticle, quality ring
+═══════════════════════════════════════════════════════════════════════ */
+
 const POSE_SEQUENCE = [
   {
     pose: "front",
-    target: 10,
+    target: 20,
     instruction: "Look straight at the camera",
     voiceInstruction: "Look straight at the camera",
   },
@@ -55,2365 +1510,254 @@ const POSE_SEQUENCE = [
     voiceInstruction: "Lower your chin toward your chest",
   },
 ];
-const TOTAL_FRAMES = 50;
-let enrollStep = 1;
-let isAutoCaptureActive = false;
-let captureAF = null;
+const TOTAL_TARGET = 60;
+
+let captureStream = null;
+let captureAF = null; // requestAnimationFrame handle
+let captureFrames = []; // collected base64 frames
 let poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
-let _captureComplete = false;
-let _validateInFlight = false;
+let captureActive = false;
+let _captureComplete = false; // guard: blocks frames after all 60 collected
+let _validateInFlight = false; // prevents concurrent validate calls
 let lastValidateTime = 0;
 let currentQuality = null;
 let currentPoseHint = "front";
+let captureMethod = "auto"; // "auto" | "upload"
+let _lastRequiredPose = null; // tracks pose step changes for smoothing reset
 
-/* ── Webcam / recognition state ───────────────────────────────────────────── */
-let recogStream = null;
-let teacherRecogStream = null;
-let teacherAutoLoop = null;
-let teacherAutoRunning = false;
-let sessionActive = false;
-
-/* ── Manual attendance ────────────────────────────────────────────────────── */
-let manualAttMap = {};
-
-/* ── Charts ───────────────────────────────────────────────────────────────── */
-let dashboardChart = null,
-  monthlyChart = null,
-  deptChart = null;
-
-/* ── Health polling ───────────────────────────────────────────────────────── */
-let _healthInterval = null;
-let _sseSource = null;
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   UTILITIES
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-/**
- * ISSUE 6 FIX: api() now intercepts SESSION_EXPIRED errors.
- * When the backend returns {error, code:"SESSION_EXPIRED"} the frontend
- * clears localStorage and redirects to login instead of leaving the user
- * on a broken page with silent 401 errors in the console.
- */
-function api(path, opts = {}) {
-  return fetch(API + path, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(opts.headers || {}),
-    },
-    ...opts,
-  }).then(async (r) => {
-    const data = await r.json().catch(() => ({}));
-
-    // ── ISSUE 6: Handle expired/invalid session gracefully ──
-    if (r.status === 401) {
-      const isSessionExpired = data.code === "SESSION_EXPIRED";
-      if (isSessionExpired) {
-        // Clear stale token and redirect to login with user-friendly message
-        ["frs_token", "frs_role", "frs_user"].forEach((k) =>
-          localStorage.removeItem(k),
-        );
-        token = "";
-        userRole = "";
-        userInfo = null;
-        // Show login overlay with message
-        const overlay = document.getElementById("loginOverlay");
-        if (overlay) overlay.classList.remove("hidden");
-        const errEl = document.getElementById("loginErr");
-        if (errEl) {
-          errEl.textContent = "Your session has expired. Please sign in again.";
-          errEl.className = "msg err";
-        }
-        // Hide app content
-        const student = document.getElementById("student-panel");
-        if (student) student.classList.remove("active");
-        selectLoginRole("admin");
-        throw new Error("Session expired — please sign in again.");
-      }
-    }
-
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    return data;
-  });
-}
-
-function toast(msg, type = "ok") {
-  const el = document.getElementById("toast");
-  if (!el) return;
-  el.textContent = msg;
-  el.className = `toast ${type} show`;
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove("show"), 3500);
-}
-
-function $(id) {
-  return document.getElementById(id);
-}
-
-function hide(el) {
-  if (el) el.classList.add("hidden");
-}
-function show(el, displayType = "block") {
-  if (!el) return;
-  el.classList.remove("hidden");
-}
-
-function badge(text, type = "blue") {
-  return `<span class="pill pill-${type}">${text}</span>`;
-}
-function statusBadge(status) {
-  const map = {
-    Present: "green",
-    Absent: "red",
-    active: "green",
-    inactive: "amber",
-    graduated: "blue",
-    suspended: "red",
-  };
-  return badge(status, map[status] || "blue");
-}
-function fmtDate(d) {
-  if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-function setErr(id, msg) {
-  const el = $(id);
-  if (!el) return;
-  el.textContent = msg;
-  el.className = msg ? "msg err" : "msg";
-}
-function closeModal(id) {
-  $(id).classList.remove("open");
-}
-function openModal(id) {
-  $(id).classList.add("open");
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   HEALTH CHECK
-   ═══════════════════════════════════════════════════════════════════════════ */
-function setApiStatus(online) {
-  const dot = $("apiDot"),
-    label = $("apiStatus");
-  if (!dot || !label) return;
-  if (online) {
-    dot.className = "status-dot ok";
-    label.textContent = "Online";
-  } else {
-    dot.className = "status-dot err";
-    label.textContent = "Offline";
-  }
-}
-async function checkHealth() {
-  try {
-    await api("/health");
-    setApiStatus(true);
-  } catch {
-    setApiStatus(false);
-  }
-}
-function startHealthPolling() {
-  clearInterval(_healthInterval);
-  checkHealth();
-  _healthInterval = setInterval(checkHealth, 15000);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   SSE
-   ═══════════════════════════════════════════════════════════════════════════ */
-function startSSE() {
-  if (_sseSource) {
-    try {
-      _sseSource.close();
-    } catch {}
-  }
-  _sseSource = new EventSource(`${API}/events`);
-  _sseSource.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d.type === "attendance") {
-        addLiveLog(d);
-        if (currentPage === "dashboard") loadDashboard();
-        if (currentPage === "attendance") loadAttendancePage();
-        if (currentPage === "t-dashboard") loadTeacherDashboard();
-        if (currentPage === "t-recognize") refreshSessionLog();
-      }
-    } catch {}
-  };
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   CLOCK
-   ═══════════════════════════════════════════════════════════════════════════ */
-function startClock() {
-  const tick = () => {
-    const el = $("clockDisplay");
-    if (el) el.textContent = new Date().toLocaleTimeString();
-  };
-  tick();
-  setInterval(tick, 1000);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   AUTH
-   ═══════════════════════════════════════════════════════════════════════════ */
-let loginRole = "admin";
-
-function selectLoginRole(role) {
-  loginRole = role;
-  ["admin", "teacher", "student"].forEach((r) =>
-    $(`roleBtn-${r}`)?.classList.remove("active"),
-  );
-  $(`roleBtn-${role}`)?.classList.add("active");
-  $("field-username").classList.toggle("hidden", role === "student");
-  $("field-email").classList.toggle("hidden", role !== "student");
-  const userLabel = $("usernameLabel"),
-    userInput = $("loginUser");
-  if (userLabel && userInput) {
-    if (role === "teacher") {
-      userLabel.textContent = "Teacher Email";
-      userInput.type = "email";
-      userInput.placeholder = "teacher@college.edu";
-    } else {
-      userLabel.textContent = "Username";
-      userInput.type = "text";
-      userInput.placeholder = "admin";
-    }
-  }
-  const hints = {
-    admin: "Default: admin / admin123",
-    teacher: "Use your registered email and password",
-    student: "Enter your registered email address",
-  };
-  $("loginHint").textContent = hints[role];
-  $("loginErr").textContent = "";
-}
-
-async function doLogin() {
-  $("loginErr").textContent = "";
-  let body;
-  if (loginRole === "student") {
-    const email = $("loginEmail").value.trim();
-    if (!email) {
-      $("loginErr").textContent = "Email required";
-      return;
-    }
-    body = { role: "student", email };
-  } else if (loginRole === "teacher") {
-    const email = $("loginUser").value.trim(),
-      password = $("loginPass").value;
-    if (!email || !password) {
-      $("loginErr").textContent = "Email and password required";
-      return;
-    }
-    body = { role: "teacher", email, password };
-  } else {
-    const username = $("loginUser").value.trim(),
-      password = $("loginPass").value;
-    if (!username || !password) {
-      $("loginErr").textContent = "Username and password required";
-      return;
-    }
-    body = { role: loginRole, username, password };
-  }
-  try {
-    const data = await api("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    token = data.token;
-    userRole = data.role;
-    userInfo = data;
-    localStorage.setItem("frs_token", token);
-    localStorage.setItem("frs_role", userRole);
-    localStorage.setItem("frs_user", JSON.stringify(data));
-    afterLogin();
-  } catch (e) {
-    $("loginErr").textContent = e.message;
-  }
-}
-
-function afterLogin() {
-  $("loginOverlay").classList.add("hidden");
-  if (userRole === "student") {
-    showStudentPanel();
-    return;
-  }
-  if (userRole === "admin") {
-    show($("adminNav"));
-    hide($("teacherNav"));
-  } else if (userRole === "teacher") {
-    show($("teacherNav"));
-    hide($("adminNav"));
-  }
-  const label =
-    userRole === "teacher"
-      ? userInfo.full_name || userInfo.teacher_id
-      : userInfo.username || "admin";
-  const roleLabel = userRole === "teacher" ? "Teacher" : "Admin";
-  const ui = $("sidebarUserInfo");
-  if (ui)
-    ui.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:1px;padding:0 0.5rem 0.25rem;">
-      <span style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;">${roleLabel}</span>
-      <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label}</span>
-    </div>`;
-  if (userRole === "admin") navigate("dashboard");
-  else navigate("t-dashboard");
-  startClock();
-  startSSE();
-  startHealthPolling();
-}
-
-function logout() {
-  api("/auth/logout", { method: "POST" }).catch(() => {});
-  ["frs_token", "frs_role", "frs_user"].forEach((k) =>
-    localStorage.removeItem(k),
-  );
-  token = "";
-  userRole = "";
-  userInfo = null;
-  clearInterval(_healthInterval);
-  if (_sseSource) {
-    try {
-      _sseSource.close();
-    } catch {}
-    _sseSource = null;
-  }
-  try {
-    if (typeof stopTeacherWebcam === "function") stopTeacherWebcam();
-  } catch {}
-  try {
-    if (teacherRecogStream) {
-      teacherRecogStream.getTracks().forEach((t) => t.stop());
-      teacherRecogStream = null;
-    }
-  } catch {}
-  sessionActive = false;
-  $("student-panel").classList.remove("active");
-  $("loginOverlay").classList.remove("hidden");
-  setApiStatus(false);
-  $("loginErr").textContent = "";
-  ["loginUser", "loginPass", "loginEmail"].forEach((id) => {
-    if ($(id)) $(id).value = "";
-  });
-  selectLoginRole("admin");
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   NAVIGATION
-   ═══════════════════════════════════════════════════════════════════════════ */
-function navigate(page) {
-  if (page !== "enroll") {
-    try {
-      stopAutoCapture();
-      if (enrollStream) {
-        enrollStream.getTracks().forEach((t) => t.stop());
-        enrollStream = null;
-      }
-    } catch {}
-  }
-  if (page !== "t-recognize" && page !== "t-dashboard") {
-    try {
-      if (typeof stopTeacherWebcam === "function") stopTeacherWebcam();
-    } catch {}
-  }
-  currentPage = page;
+function setCaptureMethod(method, btn) {
+  captureMethod = method;
   document
-    .querySelectorAll(".page")
-    .forEach((p) => p.classList.remove("active"));
-  document
-    .querySelectorAll(".nav-item")
-    .forEach((n) => n.classList.remove("active"));
-  const pageEl = $(`page-${page}`);
-  if (pageEl) pageEl.classList.add("active");
-  const navEl = document.querySelector(`.nav-item[data-page="${page}"]`);
-  if (navEl) navEl.classList.add("active");
-  $("mainContent")?.scrollTo(0, 0);
-  const loaders = {
-    dashboard: loadDashboard,
-    students: loadStudents,
-    teachers: loadTeachers,
-    attendance: loadAttendancePage,
-    reports: loadReports,
-    settings: loadSettings,
-    manage: loadManage,
-    enroll: populateEnrollFaculty,
-    "t-dashboard": loadTeacherDashboard,
-    "t-recognize": initTeacherRecognize,
-    "t-manual": loadManualAttendance,
-    "t-logs": loadTeacherLogs,
-  };
-  if (loaders[page]) loaders[page]();
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   LIVE LOG HELPER
-   ═══════════════════════════════════════════════════════════════════════════ */
-function addLiveLog(d) {
-  const container = $("liveLog") || $("tSessionLog");
-  if (!container) return;
-  const div = document.createElement("div");
-  div.className = "log-entry";
-  div.innerHTML = `
-    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-      <span class="pill pill-green">✓ Present</span>
-      <span style="font-weight:600;">${d.name}</span>
-      <span style="color:var(--text3);font-size:11px;font-family:var(--mono);">${d.student_id}</span>
-    </div>
-    <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono);">
-      ${d.time}${d.subject ? " · " + d.subject : ""}
-    </div>`;
-  container.prepend(div);
-  if (container.children.length > 60) container.lastElementChild.remove();
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   STUDENT PANEL
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function showStudentPanel() {
-  $("student-panel").classList.add("active");
-  const name = userInfo.full_name || "Student";
-  $("studentHeaderName").textContent = userInfo.student_id || "";
-  $("studentWelcomeName").textContent = `Welcome, ${name}`;
-  $("studentWelcomeSub").textContent =
-    `${userInfo.department || ""}${userInfo.semester ? " · Semester " + userInfo.semester : ""}`;
-  try {
-    const data = await api("/student/attendance");
-    const st = data.stats || {};
-    $("sStat-present").textContent = st.total_present ?? "—";
-    $("sStat-total").textContent = st.total_days ?? "—";
-    const pct = st.percentage ?? null;
-    $("sStat-pct").textContent = pct != null ? `${pct}%` : "—";
-    $("sStat-pct").className =
-      `student-stat-val ${pct != null && pct < 75 ? "amber" : "green"}`;
-    const subjectMap = {};
-    (data.records || []).forEach((r) => {
-      const k = r.subject_name || "General";
-      subjectMap[k] = subjectMap[k] || { present: 0, total: 0 };
-      subjectMap[k].total++;
-      if (r.status === "Present") subjectMap[k].present++;
-    });
-    const subjHtml =
-      Object.entries(subjectMap)
-        .map(([sub, v]) => {
-          const p = Math.round((v.present / v.total) * 100);
-          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;">
-        <span>${sub}</span>
-        <div style="display:flex;align-items:center;gap:0.75rem;">
-          <span style="color:var(--text2);font-size:12px;">${v.present}/${v.total}</span>
-          <span style="font-weight:600;font-family:var(--mono);color:${p >= 75 ? "var(--green)" : "var(--red)"};">${p}%</span>
-        </div>
-      </div>`;
-        })
-        .join("") ||
-      `<div style="color:var(--text3);padding:1rem 0;font-size:13px;">No records yet</div>`;
-    const subjEl = $("studentSubjectSummary");
-    if (subjEl) subjEl.innerHTML = subjHtml;
-    const tbody = $("studentAttBody");
-    if (!data.records || !data.records.length) {
-      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = data.records
-      .map(
-        (r) => `
-      <tr>
-        <td>${fmtDate(r.date)}</td>
-        <td>${r.subject_name || "—"}</td>
-        <td>${r.teacher_name || "—"}</td>
-        <td>${statusBadge(r.status)}</td>
-      </tr>`,
-      )
-      .join("");
-  } catch (e) {
-    const b = $("studentAttBody");
-    if (b)
-      b.innerHTML = `<tr><td colspan="4" style="color:var(--red);text-align:center;padding:1rem;">${e.message}</td></tr>`;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — DASHBOARD
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadDashboard() {
-  const today = new Date().toISOString().slice(0, 10);
-  const dept = $("dashDeptFilter")?.value || "";
-  $("dashDate").textContent = new Date().toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-  try {
-    const [summ, students, hist] = await Promise.all([
-      api(`/attendance/faculty-summary?date=${today}`),
-      api("/students"),
-      api(
-        `/attendance/history${dept ? "?department=" + encodeURIComponent(dept) : ""}`,
-      ),
-    ]);
-    const df = $("dashDeptFilter");
-    if (df && df.options.length <= 1) {
-      summ.faculties.forEach((f) => {
-        const o = document.createElement("option");
-        o.value = o.textContent = f.name;
-        df.appendChild(o);
-      });
-    }
-    const facs = dept
-      ? summ.faculties.filter((f) => f.name === dept)
-      : summ.faculties;
-    const overall = dept
-      ? facs[0] || { total: 0, present: 0, absent: 0, rate: 0 }
-      : summ.overall;
-    $("dashMetrics").innerHTML = `
-      <div class="metric-card"><div class="metric-label">Total Students</div><div class="metric-val">${students.count}</div></div>
-      <div class="metric-card"><div class="metric-label">Present Today</div><div class="metric-val text-green">${overall.present}</div></div>
-      <div class="metric-card"><div class="metric-label">Absent Today</div><div class="metric-val text-red">${overall.absent}</div></div>
-      <div class="metric-card"><div class="metric-label">Attendance Rate</div><div class="metric-val text-blue">${overall.rate ?? 0}%</div></div>`;
-    drawDashboardChart((hist.history || []).slice().reverse());
-    let html = "";
-    for (const f of facs) {
-      html += `<div class="card mb-1rem">
-        <div class="split-row mb-0-75rem">
-          <span class="section-title">${f.name}</span>
-          <div class="inline-kpis">
-            <span class="text-green">${f.present} present</span><span class="text-muted">·</span>
-            <span class="text-red">${f.absent} absent</span><span class="text-muted">·</span>
-            <span class="text-blue">${f.rate}%</span>
-          </div>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
-          <tbody>${f.students.map((s) => `<tr><td>${s.name}</td><td class="mono-muted">${s.student_id}</td><td class="mono-cell">${s.time}</td><td>${statusBadge(s.status)}</td></tr>`).join("")}</tbody></table>
-        </div>
-      </div>`;
-    }
-    $("dashAttTable").innerHTML =
-      html || `<div class="card empty-state">No student data yet.</div>`;
-  } catch (e) {
-    $("dashMetrics").innerHTML = `<div class="text-red">${e.message}</div>`;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   ISSUE 1 FIX: SimpleChart — fixed container height, dynamic Y scaling.
-   The canvas is sized to its container width but capped at a fixed height.
-   Y-axis gridlines are computed from the actual data range, not from a
-   hardcoded step, so the chart always fills the container cleanly regardless
-   of how many students (or how large the numbers) are in the dataset.
-   ───────────────────────────────────────────────────────────────────────── */
-function drawDashboardChart(history) {
-  const canvas = $("dashboardChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (dashboardChart) dashboardChart.destroy();
-  dashboardChart = new SimpleChart(ctx, {
-    type: "bar",
-    labels: history.map((h) => (h.date || "").slice(5)),
-    datasets: [
-      {
-        label: "Present",
-        data: history.map((h) => h.present),
-        color: "#22c55e",
-      },
-      { label: "Absent", data: history.map((h) => h.absent), color: "#ef4444" },
-    ],
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — STUDENTS
-   ═══════════════════════════════════════════════════════════════════════════ */
-let allStudents = [],
-  studentDept = "";
-
-async function loadStudents() {
-  try {
-    const [data, depts] = await Promise.all([
-      api("/students"),
-      api("/departments"),
-    ]);
-    allStudents = data.students;
-    const tabs = $("studentFacultyTabs");
-    tabs.innerHTML = `<button class="filter-btn active" onclick="filterStudentDept('',this)">All (${allStudents.length})</button>`;
-    depts.departments.forEach((d) => {
-      const cnt = allStudents.filter((s) => s.department === d).length;
-      tabs.innerHTML += `<button class="filter-btn" onclick="filterStudentDept('${d}',this)">${d} (${cnt})</button>`;
-    });
-    const dl = $("editDeptList");
-    if (dl) {
-      dl.innerHTML = "";
-      depts.departments.forEach((d) => {
-        const o = document.createElement("option");
-        o.value = d;
-        dl.appendChild(o);
-      });
-    }
-    renderStudents(allStudents);
-  } catch (e) {
-    $("studentFacultyBar").innerHTML =
-      `<div class="card" style="color:var(--red);">${e.message}</div>`;
-  }
-}
-
-function filterStudentDept(dept, btn) {
-  studentDept = dept;
-  document
-    .querySelectorAll("#studentFacultyTabs .filter-btn")
+    .querySelectorAll(".cmtab")
     .forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
-  const q = $("studentSearch").value.toLowerCase();
-  renderStudents(
-    allStudents
-      .filter((s) => !dept || s.department === dept)
-      .filter(
-        (s) =>
-          !q ||
-          s.full_name.toLowerCase().includes(q) ||
-          s.student_id.toLowerCase().includes(q),
-      ),
-  );
-}
-function searchStudents() {
-  const q = $("studentSearch").value.toLowerCase();
-  renderStudents(
-    allStudents
-      .filter((s) => !studentDept || s.department === studentDept)
-      .filter(
-        (s) =>
-          !q ||
-          s.full_name.toLowerCase().includes(q) ||
-          s.student_id.toLowerCase().includes(q),
-      ),
-  );
-}
-function renderStudents(list) {
-  if (!list.length) {
-    $("studentFacultyBar").innerHTML =
-      `<div class="card empty-state">No students found</div>`;
-    return;
-  }
-  $("studentFacultyBar").innerHTML = `
-    <div class="card full-width-card">
-      <div class="teacher-table-wrap">
-        <table class="data-table students-table">
-          <thead><tr><th>Student</th><th>ID</th><th>Faculty</th><th>Semester</th><th>Samples</th><th>Status</th></tr></thead>
-          <tbody>
-            ${list
-              .map(
-                (
-                  s,
-                ) => `<tr onclick="navigate('profile');loadProfile('${s.student_id}')" class="click-row">
-              <td><div class="student-table-person">
-                <div class="student-avatar small">
-                  <img src="${API}/students/${s.student_id}/photo" onerror="this.classList.add('hidden');this.nextElementSibling.classList.remove('hidden')"/>
-                  <div class="avatar-placeholder hidden">${s.full_name.charAt(0).toUpperCase()}</div>
-                </div>
-                <span>${s.full_name}</span>
-              </div></td>
-              <td class="mono-muted">${s.student_id}</td>
-              <td>${s.department || "Unassigned"}</td>
-              <td class="mono-cell">${s.semester || "—"}</td>
-              <td class="mono-cell">${s.sample_count}</td>
-              <td>${statusBadge(s.status)}</td>
-            </tr>`,
-              )
-              .join("")}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
-async function loadProfile(sid) {
-  $("profileContent").innerHTML =
-    `<div class="card" style="padding:2rem;text-align:center;color:var(--text3);">Loading…</div>`;
-  try {
-    const s = await api(`/students/${sid}`);
-    const pct = s.stats?.percentage ?? null;
-    $("profileContent").innerHTML = `
-      <div class="profile-header card" style="display:flex;gap:1.5rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:1rem;">
-        <div style="width:90px;height:90px;border-radius:50%;overflow:hidden;background:var(--bg4);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:var(--text2);">
-          <img src="${API}/students/${sid}/photo" onerror="this.style.display='none';this.parentElement.textContent='${s.full_name.charAt(0)}'" style="width:100%;height:100%;object-fit:cover;"/>
-        </div>
-        <div style="flex:1;min-width:200px;">
-          <h2 style="font-size:20px;margin-bottom:4px;">${s.full_name}</h2>
-          <div style="font-family:var(--mono);color:var(--text3);font-size:12px;margin-bottom:0.5rem;">${s.student_id}</div>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center;">${statusBadge(s.status)}${s.department ? badge(s.department, "blue") : ""}${s.semester ? badge("Sem " + s.semester, "amber") : ""}</div>
-          <div style="margin-top:0.75rem;display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;font-size:12px;color:var(--text2);">
-            <div>📧 ${s.email || "—"}</div><div>📱 ${s.phone || "—"}</div>
-            <div>👁 ${s.sample_count} face samples</div><div>📅 Enrolled ${fmtDate(s.enrolled_at)}</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
-          ${
-            userRole === "admin"
-              ? `
-            <button class="btn-secondary" onclick="openEditModal('${s.student_id}','${s.full_name}','${s.department || ""}','${s.semester || ""}','${s.email || ""}','${s.phone || ""}','${s.status}')">Edit</button>
-            <button class="btn-secondary" style="color:var(--red);border-color:var(--red-dim);" onclick="deleteStudent('${s.student_id}','${s.full_name}')">Delete</button>`
-              : ""
-          }
-        </div>
-      </div>
-      <div class="metrics-grid" style="margin-bottom:1rem;">
-        <div class="metric-card"><div class="metric-label">Present</div><div class="metric-val" style="color:var(--green)">${s.stats?.total_present ?? 0}</div></div>
-        <div class="metric-card"><div class="metric-label">Total Days</div><div class="metric-val">${s.stats?.total_days ?? 0}</div></div>
-        <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:${pct != null && pct < 75 ? "var(--red)" : "var(--green)"}">${pct != null ? pct + "%" : "—"}</div></div>
-      </div>
-      <div class="card">
-        <div class="section-title" style="margin-bottom:0.75rem;">Attendance History</div>
-        <div style="overflow-x:auto;">
-          <table class="student-att-table">
-            <thead><tr><th>Date</th><th>Subject</th><th>Teacher</th><th>Status</th>${userRole === "admin" ? "<th>Action</th>" : ""}</tr></thead>
-            <tbody>
-              ${
-                (s.attendance || []).length
-                  ? (s.attendance || [])
-                      .map(
-                        (r) => `<tr>
-                <td>${fmtDate(r.date)}</td>
-                <td>${r.subject_name || "—"}</td>
-                <td>${r.teacher_name || "—"}</td>
-                <td>${statusBadge(r.status)}</td>
-                ${userRole === "admin" ? `<td><button class="btn-secondary" style="font-size:11px;padding:2px 8px;" onclick="toggleAttendance('${sid}','${r.date}','${r.status}')">Toggle</button></td>` : ""}
-              </tr>`,
-                      )
-                      .join("")
-                  : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No records</td></tr>`
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>`;
-  } catch (e) {
-    $("profileContent").innerHTML =
-      `<div class="card" style="color:var(--red);">${e.message}</div>`;
+  document.getElementById("uploadMode").style.display =
+    method === "upload" ? "block" : "none";
+  document.getElementById("capturePanel").style.display =
+    method === "auto" ? "flex" : "none";
+  if (method === "upload") {
+    stopAutoCapture();
   }
 }
 
-async function toggleAttendance(sid, date, currentStatus) {
-  const newStatus = currentStatus === "Present" ? "Absent" : "Present";
-  try {
-    await api(`/attendance/${sid}/${date}`, {
-      method: "PUT",
-      body: JSON.stringify({ status: newStatus }),
-    });
-    toast(`Marked ${newStatus}`);
-    loadProfile(sid);
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-function openEditModal(sid, name, dept, sem, email, phone, status) {
-  $("editSid").value = sid;
-  $("editName").value = name;
-  $("editDept").value = dept;
-  $("editSem").value = sem;
-  $("editEmail").value = email;
-  $("editPhone").value = phone;
-  $("editStatus").value = status;
-  setErr("editModalErr", "");
-  openModal("editModal");
-}
-async function saveStudentEdit() {
-  const sid = $("editSid").value;
-  const body = {
-    full_name: $("editName").value.trim(),
-    department: $("editDept").value.trim(),
-    semester: $("editSem").value.trim(),
-    email: $("editEmail").value.trim(),
-    phone: $("editPhone").value.trim(),
-    status: $("editStatus").value,
-  };
-  try {
-    await api(`/students/${sid}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
-    toast("Student updated");
-    closeModal("editModal");
-    loadProfile(sid);
-  } catch (e) {
-    setErr("editModalErr", e.message);
-  }
-}
-async function deleteStudent(sid, name) {
-  if (!confirm(`Delete ${name} (${sid})?`)) return;
-  try {
-    await api(`/students/${sid}`, { method: "DELETE" });
-    toast("Student deleted");
-    navigate("students");
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — TEACHERS  (Issues 3, 4, 5, 6)
-   ═══════════════════════════════════════════════════════════════════════════ */
-let faculties = [],
-  allSubjects = [],
-  timeSlots = [];
-
-async function loadTeachers() {
-  try {
-    const [tData, fData, tsData] = await Promise.all([
-      api("/teachers"),
-      api("/faculties"),
-      api("/time-slots"),
-    ]);
-    faculties = fData.faculties;
-    timeSlots = tsData.time_slots;
-    renderTeacherTable(tData.teachers);
-  } catch (e) {
-    $("teacherTableBody").innerHTML =
-      `<tr><td colspan="9" style="color:var(--red);padding:1rem;">${e.message}</td></tr>`;
-  }
-}
-
-function renderTeacherTable(teachers) {
-  if (!teachers.length) {
-    $("teacherTableBody").innerHTML =
-      `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem;">No teachers yet. Click "+ Add Teacher" to create one.</td></tr>`;
-    return;
-  }
-  $("teacherTableBody").innerHTML = teachers
-    .map((t) => {
-      // Show all assignments as pills if multiple exist
-      const assignmentPills =
-        (t.assignments || []).length > 1
-          ? (t.assignments || [])
-              .map(
-                (a) =>
-                  `<span class="pill pill-blue" style="font-size:10px;margin:1px;">${a.subject_name} (Sem ${a.semester})</span>`,
-              )
-              .join("")
-          : t.subject_name || "—";
-      return `<tr>
-      <td style="font-family:var(--mono);font-size:11px;">${t.teacher_id}</td>
-      <td style="font-weight:500;">${t.full_name}</td>
-      <td>${t.faculty_name || "—"}</td>
-      <td style="font-family:var(--mono);">${t.semester || "—"}</td>
-      <td style="font-size:12px;">${assignmentPills}</td>
-      <td style="font-size:12px;color:var(--text2);">${t.time_slot_label || "—"}</td>
-      <td style="font-size:12px;color:var(--text2);">${t.email || "—"}</td>
-      <td>${statusBadge(t.status)}</td>
-      <td>
-        <div class="action-btns">
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openTeacherModal(${t.id})">Edit</button>
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openAssignmentsModal(${t.id},'${t.full_name}')">Assign</button>
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteTeacher(${t.id},'${t.full_name}')">Del</button>
-        </div>
-      </td>
-    </tr>`;
-    })
-    .join("");
-}
-
-async function openTeacherModal(tId) {
-  try {
-    const [fData, tsData] = await Promise.all([
-      api("/faculties"),
-      api("/time-slots"),
-    ]);
-    faculties = fData.faculties;
-    timeSlots = tsData.time_slots;
-  } catch {}
-
-  $("tmFaculty").innerHTML =
-    `<option value="">Select faculty</option>` +
-    faculties.map((f) => `<option value="${f.id}">${f.name}</option>`).join("");
-  $("tmTimeSlot").innerHTML =
-    `<option value="">Select time slot</option>` +
-    timeSlots
-      .map((ts) => `<option value="${ts.id}">${ts.label}</option>`)
-      .join("");
-  $("tmSubject").innerHTML = `<option value="">Select subject</option>`;
-  setErr("teacherModalErr", "");
-
-  if (tId) {
-    let t = null;
-    try {
-      t = await api(`/teachers/${tId}`);
-    } catch (e) {
-      setErr("teacherModalErr", e.message);
-      return;
-    }
-    if (t) {
-      $("teacherModalTitle").textContent = "Edit Teacher";
-      $("tmId").value = t.id;
-      $("tmTeacherId").value = t.teacher_id;
-      $("tmFullName").value = t.full_name;
-      $("tmPassword").value = "";
-      $("tmPassword").placeholder = "Leave blank to keep current";
-      $("tmEmail").value = t.email || "";
-      $("tmPhone").value = t.phone || "";
-      $("tmStatus").value = t.status;
-      $("tmFaculty").value = t.faculty_id || "";
-      $("tmSemester").value = t.semester || "";
-      $("tmTimeSlot").value = t.time_slot_id || "";
-      // ISSUE 3: load subjects filtered by both faculty AND semester
-      if (t.faculty_id && t.semester) {
-        await loadSubjectsForModal();
-        $("tmSubject").value = t.subject_id || "";
-      }
-    }
-  } else {
-    $("teacherModalTitle").textContent = "Add Teacher";
-    $("tmId").value = "";
-    [
-      "tmTeacherId",
-      "tmFullName",
-      "tmPassword",
-      "tmEmail",
-      "tmPhone",
-      "tmSemester",
-    ].forEach((id) => ($(id).value = ""));
-    $("tmStatus").value = "active";
-    $("tmFaculty").value = "";
-    $("tmPassword").placeholder = "Min 6 characters";
-  }
-  openModal("teacherModal");
-}
-
-/**
- * ISSUE 3 FIX: loadSubjectsForModal now requires BOTH faculty AND semester
- * before fetching. Subject dropdown stays empty (with clear message) until
- * semester is also selected.
- */
-async function loadSubjectsForModal() {
-  const fid = $("tmFaculty").value;
-  const sem = $("tmSemester").value;
-
-  // Clear subject dropdown with a helpful message
-  if (!fid) {
-    $("tmSubject").innerHTML = `<option value="">Select faculty first</option>`;
-    return;
-  }
-  if (!sem) {
-    $("tmSubject").innerHTML =
-      `<option value="">Select semester first</option>`;
-    return;
-  }
-
-  $("tmSubject").innerHTML = `<option value="">Loading subjects…</option>`;
-  try {
-    // ISSUE 3: Filter by BOTH faculty_id AND semester
-    const data = await api(`/subjects?faculty_id=${fid}&semester=${sem}`);
-    if (!data.subjects || data.subjects.length === 0) {
-      $("tmSubject").innerHTML =
-        `<option value="">No subjects in Semester ${sem} for this faculty</option>`;
-      return;
-    }
-    $("tmSubject").innerHTML =
-      `<option value="">Select subject</option>` +
-      data.subjects
-        .map(
-          (s) =>
-            `<option value="${s.id}">${s.name}${s.code ? " · " + s.code : ""}</option>`,
-        )
-        .join("");
-  } catch (e) {
-    $("tmSubject").innerHTML =
-      `<option value="">Error loading subjects</option>`;
-  }
-}
-
-async function saveTeacher() {
-  const id = $("tmId").value;
-  const body = {
-    teacher_id: $("tmTeacherId").value.trim(),
-    full_name: $("tmFullName").value.trim(),
-    email: $("tmEmail").value.trim() || null,
-    phone: $("tmPhone").value.trim() || null,
-    faculty_id: $("tmFaculty").value || null,
-    semester: $("tmSemester").value || null,
-    subject_id: $("tmSubject").value || null,
-    time_slot_id: $("tmTimeSlot").value || null,
-    status: $("tmStatus").value,
-  };
-  const pw = $("tmPassword").value.trim();
-  if (pw) body.password = pw;
-  if (!body.teacher_id || !body.full_name) {
-    setErr("teacherModalErr", "Teacher ID and Full Name are required");
-    return;
-  }
-  if (!id && !pw) {
-    setErr("teacherModalErr", "Password is required for new teachers");
-    return;
-  }
-
-  // ISSUE 3: Frontend guard — if faculty and semester set, subject must also be set
-  if (body.faculty_id && body.semester && !body.subject_id) {
-    setErr(
-      "teacherModalErr",
-      "Please select a subject for the chosen faculty and semester.",
-    );
-    return;
-  }
-
-  try {
-    if (id)
-      await api(`/teachers/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
-    else await api("/teachers", { method: "POST", body: JSON.stringify(body) });
-    toast(id ? "Teacher updated" : "Teacher created");
-    closeModal("teacherModal");
-    loadTeachers();
-  } catch (e) {
-    // ISSUE 5: Show schedule conflict clearly
-    if (e.message && e.message.includes("conflict")) {
-      setErr("teacherModalErr", `⚠ Schedule conflict: ${e.message}`);
-    } else {
-      setErr("teacherModalErr", e.message);
-    }
-  }
-}
-
-/* ── ISSUE 4: Teacher Assignments Modal ──────────────────────────────────
-   Admin can add/remove multiple subject assignments for one teacher.
-   Each assignment = faculty + semester + subject + optional time slot.
-   ──────────────────────────────────────────────────────────────────────── */
-let _assignTeacherId = null;
-let _assignTeacherName = "";
-
-async function openAssignmentsModal(tid, name) {
-  _assignTeacherId = tid;
-  _assignTeacherName = name;
-
-  // Dynamically inject the assignments modal if it doesn't exist
-  if (!$("assignmentsModal")) {
-    const div = document.createElement("div");
-    div.className = "modal-overlay";
-    div.id = "assignmentsModal";
-    div.innerHTML = `
-      <div class="modal-box" style="width:680px;max-width:95%;">
-        <div class="modal-title" id="assignmentsModalTitle">Assignments</div>
-        <div id="assignmentsList" style="margin:0.75rem 0;max-height:260px;overflow-y:auto;"></div>
-        <div style="border-top:1px solid var(--border);padding-top:0.75rem;margin-top:0.5rem;">
-          <div style="font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);margin-bottom:0.5rem;">Add New Assignment</div>
-          <div class="modal-form-grid">
-            <div class="form-group">
-              <label>Faculty *</label>
-              <select id="asgFaculty" onchange="loadAsgSemesters()"><option value="">Select faculty</option></select>
-            </div>
-            <div class="form-group">
-              <label>Semester *</label>
-              <select id="asgSemester" onchange="loadAsgSubjects()"><option value="">Select semester</option></select>
-            </div>
-            <div class="form-group">
-              <label>Subject *</label>
-              <select id="asgSubject"><option value="">Select subject</option></select>
-            </div>
-            <div class="form-group">
-              <label>Time Slot</label>
-              <select id="asgTimeSlot"><option value="">No time slot</option></select>
-            </div>
-          </div>
-          <div id="asgErr" class="msg err"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('assignmentsModal')">Close</button>
-          <button class="btn-primary" onclick="addAssignment()">+ Add Assignment</button>
-        </div>
-      </div>`;
-    div.addEventListener("click", (e) => {
-      if (e.target === div) div.classList.remove("open");
-    });
-    document.body.appendChild(div);
-  }
-
-  $("assignmentsModalTitle").textContent = `Assignments — ${name}`;
-  setErr("asgErr", "");
-
-  // Populate faculty and time slot dropdowns
-  try {
-    const [fData, tsData] = await Promise.all([
-      api("/faculties"),
-      api("/time-slots"),
-    ]);
-    $("asgFaculty").innerHTML =
-      `<option value="">Select faculty</option>` +
-      fData.faculties
-        .map((f) => `<option value="${f.id}">${f.name}</option>`)
-        .join("");
-    $("asgTimeSlot").innerHTML =
-      `<option value="">No time slot</option>` +
-      tsData.time_slots
-        .map((ts) => `<option value="${ts.id}">${ts.label}</option>`)
-        .join("");
-    $("asgSemester").innerHTML =
-      `<option value="">Select faculty first</option>`;
-    $("asgSubject").innerHTML =
-      `<option value="">Select semester first</option>`;
-  } catch {}
-
-  await refreshAssignmentsList();
-  openModal("assignmentsModal");
-}
-
-async function refreshAssignmentsList() {
-  const container = $("assignmentsList");
-  if (!container || !_assignTeacherId) return;
-  try {
-    const data = await api(`/teachers/${_assignTeacherId}/assignments`);
-    const assignments = data.assignments || [];
-    if (!assignments.length) {
-      container.innerHTML = `<div style="color:var(--text3);font-size:13px;padding:1rem 0;">No assignments yet. Add one below.</div>`;
-      return;
-    }
-    container.innerHTML = assignments
-      .map(
-        (a) => `
-      <div style="display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;border-bottom:1px solid var(--border);flex-wrap:wrap;">
-        ${a.is_primary ? `<span class="pill pill-blue" style="font-size:10px;">Primary</span>` : ""}
-        <div style="flex:1;min-width:200px;">
-          <div style="font-weight:600;font-size:13px;">${a.subject_name || "—"}</div>
-          <div style="font-size:11px;color:var(--text3);font-family:var(--mono);">
-            ${a.faculty_name || "—"} · Semester ${a.semester}${a.time_slot_label ? " · " + a.time_slot_label : ""}
-          </div>
-        </div>
-        <button class="btn-secondary" style="font-size:11px;padding:2px 8px;color:var(--red);"
-          onclick="removeAssignment(${a.id})">Remove</button>
-      </div>`,
-      )
-      .join("");
-  } catch (e) {
-    container.innerHTML = `<div style="color:var(--red);font-size:13px;">${e.message}</div>`;
-  }
-}
-
-async function loadAsgSemesters() {
-  const fid = $("asgFaculty").value;
-  $("asgSemester").innerHTML = `<option value="">Select semester</option>`;
-  $("asgSubject").innerHTML = `<option value="">Select semester first</option>`;
-  if (!fid) return;
-  // All 8 semesters
-  $("asgSemester").innerHTML =
-    `<option value="">Select semester</option>` +
-    Array.from(
-      { length: 8 },
-      (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`,
-    ).join("");
-}
-
-// ISSUE 3: loads subjects filtered by faculty + semester
-async function loadAsgSubjects() {
-  const fid = $("asgFaculty").value;
-  const sem = $("asgSemester").value;
-  $("asgSubject").innerHTML = `<option value="">Loading…</option>`;
-  if (!fid || !sem) {
-    $("asgSubject").innerHTML =
-      `<option value="">Select faculty and semester first</option>`;
-    return;
-  }
-  try {
-    const data = await api(`/subjects?faculty_id=${fid}&semester=${sem}`);
-    $("asgSubject").innerHTML = data.subjects.length
-      ? `<option value="">Select subject</option>` +
-        data.subjects
-          .map((s) => `<option value="${s.id}">${s.name}</option>`)
-          .join("")
-      : `<option value="">No subjects in Semester ${sem}</option>`;
-  } catch {
-    $("asgSubject").innerHTML = `<option value="">Error loading</option>`;
-  }
-}
-
-async function addAssignment() {
-  const fid = $("asgFaculty").value;
-  const sem = $("asgSemester").value;
-  const sid = $("asgSubject").value;
-  const tsid = $("asgTimeSlot").value || null;
-  setErr("asgErr", "");
-  if (!fid || !sem || !sid) {
-    setErr("asgErr", "Faculty, semester, and subject are required.");
-    return;
-  }
-  try {
-    await api(`/teachers/${_assignTeacherId}/assignments`, {
-      method: "POST",
-      body: JSON.stringify({
-        faculty_id: fid,
-        semester: parseInt(sem),
-        subject_id: sid,
-        time_slot_id: tsid,
-      }),
-    });
-    toast("Assignment added");
-    // Reset selects
-    $("asgFaculty").value = "";
-    $("asgSemester").value = "";
-    $("asgSubject").value = "";
-    await refreshAssignmentsList();
-    loadTeachers(); // refresh main table
-  } catch (e) {
-    // ISSUE 5: Surface schedule conflict clearly
-    if (
-      e.message &&
-      (e.message.includes("conflict") ||
-        e.message.includes("SCHEDULE_CONFLICT"))
-    ) {
-      setErr("asgErr", `⚠ Schedule conflict: ${e.message}`);
-    } else {
-      setErr("asgErr", e.message);
-    }
-  }
-}
-
-async function removeAssignment(aid) {
-  if (!confirm("Remove this assignment?")) return;
-  try {
-    await api(`/teachers/${_assignTeacherId}/assignments/${aid}`, {
-      method: "DELETE",
-    });
-    toast("Assignment removed");
-    await refreshAssignmentsList();
-    loadTeachers();
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-
-/* ── Teacher delete (unchanged logic, improved UX) ───────────────────────── */
-let _currentTeacherRefsId = null;
-
-async function deleteTeacher(id, name) {
-  openTeacherRefsModal(id, name);
-}
-
-async function openTeacherRefsModal(id, name, errMsg) {
-  _currentTeacherRefsId = id;
-  $("teacherRefsTitle").textContent = `References for ${name}`;
-  $("teacherRefsMsg").textContent = errMsg || "";
-  $("teacherRefsBody").innerHTML =
-    `<div style="padding:1rem;color:var(--text3);">Loading…</div>`;
-  openModal("teacherRefsModal");
-  try {
-    const [attData, recData, tdata] = await Promise.all([
-      api(`/teachers/${id}/references`),
-      api(`/teachers/${id}/recognition-logs`),
-      api("/teachers"),
-    ]);
-    const attCount = (attData.rows || []).length,
-      recCount = (recData.rows || []).length;
-    const totalCount = attCount + recCount;
-    const countEl = $("teacherRefsCount");
-    if (countEl)
-      countEl.textContent = `${attCount} attendance, ${recCount} recognition records`;
-    const sel = $("teacherReassignSelect");
-    if (sel)
-      sel.innerHTML =
-        `<option value="">Select teacher</option>` +
-        (tdata.teachers || [])
-          .filter((t) => t.id !== id)
-          .map((t) => `<option value="${t.id}">${t.full_name}</option>`)
-          .join("");
-    if (totalCount === 0) {
-      $("teacherRefsBody").innerHTML =
-        `<div style="padding:1rem;color:var(--text3);">No references found. You can safely delete this teacher.</div>`;
-      const delBtn = $("btnConfirmDelete");
-      if (delBtn) delBtn.disabled = false;
-      return;
-    }
-    $("teacherRefsBody").innerHTML = (attData.rows || [])
-      .map(
-        (r) => `
-      <div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.03);">
-        <div style="font-weight:600">${r.full_name} · <span style="font-family:var(--mono)">${r.student_id}</span></div>
-        <div style="color:var(--text3);font-size:13px;">Date: ${r.date} · Status: ${r.status || "—"}</div>
-      </div>`,
-      )
-      .join("");
-    const delBtn = $("btnConfirmDelete");
-    if (delBtn) delBtn.disabled = true;
-  } catch (err) {
-    $("teacherRefsBody").innerHTML =
-      `<div style="padding:1rem;color:var(--red);">${err.message}</div>`;
-  }
-}
-
-async function clearTeacherReferences() {
-  const id = _currentTeacherRefsId;
-  if (!id) return;
-  $("btnClearRefs").disabled = true;
-  try {
-    const [r1, r2] = await Promise.all([
-      api(`/teachers/${id}/clear-attendance`, { method: "POST" }),
-      api(`/teachers/${id}/clear-recognition-logs`, { method: "POST" }),
-    ]);
-    const cleared = (r1.cleared || 0) + (r2.cleared || 0);
-    toast(`${cleared} references cleared`);
-    openTeacherRefsModal(
-      id,
-      $("teacherRefsTitle").textContent.replace("References for ", ""),
-    );
-    $("btnConfirmDelete").disabled = false;
-    if ($("chkAutoDelete").checked) await deleteTeacherConfirmed();
-  } catch (e) {
-    setErr("teacherRefsMsg", e.message);
-  } finally {
-    $("btnClearRefs").disabled = false;
-  }
-}
-
-async function reassignTeacherReferences() {
-  const id = _currentTeacherRefsId;
-  if (!id) return;
-  const to = $("teacherReassignSelect")?.value;
-  if (!to) {
-    setErr("teacherRefsMsg", "Select a teacher to reassign to");
-    return;
-  }
-  $("btnReassign").disabled = true;
-  try {
-    const [r1, r2] = await Promise.all([
-      api(`/teachers/${id}/reassign-attendance`, {
-        method: "POST",
-        body: JSON.stringify({ to }),
-      }),
-      api(`/teachers/${id}/reassign-recognition-logs`, {
-        method: "POST",
-        body: JSON.stringify({ to }),
-      }),
-    ]);
-    const moved = (r1.reassigned || 0) + (r2.reassigned || 0);
-    toast(`${moved} references reassigned`);
-    $("btnConfirmDelete").disabled = false;
-    if ($("chkAutoDelete").checked) await deleteTeacherConfirmed();
-  } catch (e) {
-    setErr("teacherRefsMsg", e.message);
-  } finally {
-    $("btnReassign").disabled = false;
-  }
-}
-
-async function deleteTeacherConfirmed() {
-  const id = _currentTeacherRefsId;
-  if (!id) return;
-  $("btnConfirmDelete").disabled = true;
-  try {
-    await api(`/teachers/${id}`, { method: "DELETE" });
-    toast("Teacher deleted");
-    closeModal("teacherRefsModal");
-    loadTeachers();
-  } catch (e) {
-    setErr("teacherRefsMsg", e.message);
-    $("btnConfirmDelete").disabled = false;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — MANAGE (Faculties, Subjects, Time Slots)
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadManage() {
-  await Promise.all([loadFaculties(), loadSubjects(), loadTimeslots()]);
-  populateSubjectFacultyFilter();
-}
-function switchManageTab(tab, el) {
-  document
-    .querySelectorAll(".sub-tab")
-    .forEach((t) => t.classList.remove("active"));
-  document
-    .querySelectorAll(".sub-tab-panel")
-    .forEach((p) => p.classList.remove("active"));
-  el.classList.add("active");
-  $(`mtab-${tab}`).classList.add("active");
-}
-async function loadFaculties() {
-  try {
-    const data = await api("/faculties");
-    faculties = data.faculties;
-    $("facultyTableBody").innerHTML = faculties.length
-      ? faculties
-          .map(
-            (f) => `
-      <tr>
-        <td style="font-weight:500;">${f.name}</td>
-        <td style="font-family:var(--mono);font-size:12px;">${f.code || "—"}</td>
-        <td><div class="action-btns">
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;" onclick="openFacultyModal(${f.id},'${f.name}','${f.code || ""}')">Edit</button>
-          <button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteFaculty(${f.id},'${f.name}')">Del</button>
-        </div></td>
-      </tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:1.5rem;">No faculties yet</td></tr>`;
-  } catch (e) {
-    $("facultyTableBody").innerHTML =
-      `<tr><td colspan="3" style="color:var(--red);">${e.message}</td></tr>`;
-  }
-}
-
-async function populateEnrollFaculty() {
-  try {
-    if (!faculties || faculties.length === 0) {
-      const data = await api("/faculties");
-      faculties = data.faculties || [];
-    }
-    const sel = $("eFaculty");
-    if (!sel) return;
-    sel.innerHTML =
-      `<option value="">Select faculty</option>` +
-      faculties
-        .map((f) => `<option value="${f.id}">${f.name}</option>`)
-        .join("");
-  } catch (e) {
-    // ignore silently
-  }
-}
-async function populateSubjectFacultyFilter() {
-  const sel = $("subjFacultyFilter"),
-    semSel = $("subjSemesterFilter");
-  if (sel)
-    sel.innerHTML =
-      `<option value="">All Faculties</option>` +
-      faculties
-        .map((f) => `<option value="${f.id}">${f.name}</option>`)
-        .join("");
-  if (semSel && semSel.options.length <= 1) {
-    semSel.innerHTML =
-      `<option value="">All Semesters</option>` +
-      Array.from(
-        { length: 8 },
-        (_, i) => `<option value="${i + 1}">Semester ${i + 1}</option>`,
-      ).join("");
-  }
-}
-async function loadSubjects() {
-  const fid = $("subjFacultyFilter")?.value || "",
-    sem = $("subjSemesterFilter")?.value || "";
-  try {
-    const qs = new URLSearchParams();
-    if (fid) qs.set("faculty_id", fid);
-    if (sem) qs.set("semester", sem);
-    const data = await api(
-      `/subjects${qs.toString() ? "?" + qs.toString() : ""}`,
-    );
-    allSubjects = data.subjects;
-    $("subjectTableBody").innerHTML = allSubjects.length
-      ? allSubjects
-          .map(
-            (s) => `
-      <tr>
-        <td class="font-500">${s.name}</td>
-        <td class="mono-cell">${s.code || "—"}</td>
-        <td>${s.faculty_name || "—"}</td>
-        <td class="mono-cell">Semester ${s.semester}</td>
-        <td><div class="action-btns">
-          <button class="btn-secondary btn-xs" onclick="openSubjectModalById(${s.id})">Edit</button>
-          <button class="btn-secondary btn-xs text-red" onclick="deleteSubject(${s.id},'${s.name}')">Del</button>
-        </div></td>
-      </tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No subjects yet</td></tr>`;
-  } catch (e) {
-    $("subjectTableBody").innerHTML =
-      `<tr><td colspan="5" style="color:var(--red);">${e.message}</td></tr>`;
-  }
-}
-async function loadTimeslots() {
-  try {
-    const data = await api("/time-slots");
-    timeSlots = data.time_slots;
-    $("timeslotTableBody").innerHTML = timeSlots.length
-      ? timeSlots
-          .map(
-            (ts) => `
-      <tr>
-        <td style="font-weight:500;">${ts.label}</td>
-        <td style="font-family:var(--mono);">${ts.start_time}</td>
-        <td style="font-family:var(--mono);">${ts.end_time}</td>
-        <td>${
-          ts.assigned_teacher
-            ? `<span class="pill pill-green" style="font-size:10px;">${ts.assigned_teacher} — ${ts.assigned_faculty} Sem ${ts.semester}</span>`
-            : `<span style="color:var(--text3);font-size:11px;">Unassigned</span>`
-        }
-        </td>
-        <td><button class="btn-secondary" style="font-size:11px;padding:3px 8px;color:var(--red);" onclick="deleteTimeSlot(${ts.id},'${ts.label}')">Del</button></td>
-      </tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:1.5rem;">No time slots</td></tr>`;
-  } catch (e) {
-    $("timeslotTableBody").innerHTML =
-      `<tr><td colspan="5" style="color:var(--red);">${e.message}</td></tr>`;
-  }
-}
-function openFacultyModal(id = "", name = "", code = "") {
-  $("fmId").value = id;
-  $("fmName").value = name;
-  $("fmCode").value = code;
-  $("facultyModalTitle").textContent = id ? "Edit Faculty" : "Add Faculty";
-  setErr("facultyModalErr", "");
-  openModal("facultyModal");
-}
-async function saveFaculty() {
-  const id = $("fmId").value,
-    body = { name: $("fmName").value.trim(), code: $("fmCode").value.trim() };
-  if (!body.name) {
-    setErr("facultyModalErr", "Name required");
-    return;
-  }
-  try {
-    if (id)
-      await api(`/faculties/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
-    else
-      await api("/faculties", { method: "POST", body: JSON.stringify(body) });
-    toast(id ? "Faculty updated" : "Faculty created");
-    closeModal("facultyModal");
-    await loadFaculties();
-    populateSubjectFacultyFilter();
-  } catch (e) {
-    setErr("facultyModalErr", e.message);
-  }
-}
-async function deleteFaculty(id, name) {
-  if (!confirm(`Delete faculty "${name}"?`)) return;
-  try {
-    await api(`/faculties/${id}`, { method: "DELETE" });
-    toast("Faculty deleted");
-    await loadFaculties();
-    populateSubjectFacultyFilter();
-    loadSubjects();
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-async function openSubjectModal(subject) {
-  await loadFaculties();
-  const selectedFaculty = $("subjFacultyFilter")?.value || "";
-  const selectedSemester = $("subjSemesterFilter")?.value || "";
-  const facultyId = subject?.faculty_id || selectedFaculty;
-  const semester = subject?.semester || selectedSemester;
-  if (!subject && (!facultyId || !semester)) {
-    toast("Select a faculty and semester first", "err");
-    return;
-  }
-  const facultyName =
-    faculties.find((f) => String(f.id) === String(facultyId))?.name || "—";
-  $("smId").value = subject?.id || "";
-  $("smName").value = subject?.name || "";
-  $("smCode").value = subject?.code || "";
-  $("subjectContext").innerHTML =
-    `<span>${facultyName}</span><span>Semester ${semester}</span>`;
-  $("subjectContext").dataset.facultyId = facultyId;
-  $("subjectContext").dataset.semester = semester;
-  $("subjectModalTitle").textContent = subject ? "Edit Subject" : "Add Subject";
-  setErr("subjectModalErr", "");
-  openModal("subjectModal");
-  setTimeout(() => $("smName")?.focus(), 0);
-}
-function openSubjectModalById(id) {
-  const s = allSubjects.find((s) => String(s.id) === String(id));
-  openSubjectModal(s || null);
-}
-async function saveSubject() {
-  const context = $("subjectContext");
-  const body = {
-    name: $("smName").value.trim(),
-    code: $("smCode").value.trim(),
-    faculty_id: context?.dataset.facultyId || "",
-    semester: context?.dataset.semester || "",
-  };
-  if (!body.name || !body.code) {
-    setErr("subjectModalErr", "Subject name and ID required");
-    return;
-  }
-  if (!body.faculty_id || !body.semester) {
-    setErr("subjectModalErr", "Select a faculty and semester first");
-    return;
-  }
-  try {
-    const id = $("smId").value;
-    await api(id ? `/subjects/${id}` : "/subjects", {
-      method: id ? "PUT" : "POST",
-      body: JSON.stringify(body),
-    });
-    toast(id ? "Subject updated" : "Subject created");
-    closeModal("subjectModal");
-    loadSubjects();
-  } catch (e) {
-    setErr("subjectModalErr", e.message);
-  }
-}
-async function deleteSubject(id, name) {
-  if (!confirm(`Delete subject "${name}"?`)) return;
-  try {
-    await api(`/subjects/${id}`, { method: "DELETE" });
-    toast("Subject deleted");
-    loadSubjects();
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-function openTimeSlotModal() {
-  $("tsmLabel").value = "";
-  $("tsmStart").value = "";
-  $("tsmEnd").value = "";
-  setErr("tsmErr", "");
-  openModal("timeSlotModal");
-}
-async function saveTimeSlot() {
-  const body = {
-    label: $("tsmLabel").value.trim(),
-    start_time: $("tsmStart").value,
-    end_time: $("tsmEnd").value,
-  };
-  if (!body.label || !body.start_time || !body.end_time) {
-    setErr("tsmErr", "All fields required");
-    return;
-  }
-  try {
-    await api("/time-slots", { method: "POST", body: JSON.stringify(body) });
-    toast("Time slot created");
-    closeModal("timeSlotModal");
-    loadTimeslots();
-  } catch (e) {
-    setErr("tsmErr", e.message);
-  }
-}
-async function deleteTimeSlot(id, label) {
-  if (!confirm(`Delete time slot "${label}"?`)) return;
-  try {
-    await api(`/time-slots/${id}`, { method: "DELETE" });
-    toast("Deleted");
-    loadTimeslots();
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — ATTENDANCE
-   ═══════════════════════════════════════════════════════════════════════════ */
-let attData = [];
-async function loadAttendancePage() {
-  const dateEl = $("attDate");
-  if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-  const date = dateEl.value,
-    dept = $("attDeptFilter").value;
-  try {
-    const [summ, depts] = await Promise.all([
-      api(`/attendance/faculty-summary?date=${date}`),
-      api("/departments"),
-    ]);
-    const df = $("attDeptFilter");
-    if (df.options.length <= 1) {
-      depts.departments.forEach((d) => {
-        const o = document.createElement("option");
-        o.value = o.textContent = d;
-        df.appendChild(o);
-      });
-    }
-    const facs = dept
-      ? summ.faculties.filter((f) => f.name === dept)
-      : summ.faculties;
-    $("attFacultySummary").innerHTML = `<div class="metrics-grid">${facs
-      .map(
-        (f) => `
-      <div class="metric-card">
-        <div class="metric-label">${f.name}</div>
-        <div style="display:flex;gap:0.5rem;align-items:baseline;margin-top:4px;">
-          <span class="metric-val" style="color:var(--green);font-size:20px;">${f.present}</span>
-          <span style="color:var(--text3);font-size:12px;">/ ${f.total} · ${f.rate}%</span>
-        </div>
-      </div>`,
-      )
-      .join("")}</div>`;
-    const data = await api(
-      `/attendance?date=${date}${dept ? "&department=" + encodeURIComponent(dept) : ""}`,
-    );
-    attData = data.records;
-    renderAttTable(attData);
-  } catch (e) {
-    $("attTableWrap").innerHTML =
-      `<div style="color:var(--red);">${e.message}</div>`;
-  }
-}
-function filterAttendance() {
-  const q = $("attSearch").value.toLowerCase();
-  renderAttTable(
-    q
-      ? attData.filter(
-          (r) =>
-            r.name?.toLowerCase().includes(q) ||
-            r.student_id?.toLowerCase().includes(q),
-        )
-      : attData,
-  );
-}
-function renderAttTable(records) {
-  if (!records.length) {
-    $("attTableWrap").innerHTML =
-      `<div style="text-align:center;color:var(--text3);padding:2rem;">No records for this date</div>`;
-    return;
-  }
-  $("attTableWrap").innerHTML =
-    `<div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Department</th><th>Time</th><th>Status</th></tr></thead>
-    <tbody>${records.map((r) => `<tr><td style="font-weight:500;">${r.name}</td><td style="font-family:var(--mono);font-size:11px;">${r.student_id}</td><td>${r.department || "—"}</td><td style="font-family:var(--mono);font-size:12px;">${r.time}</td><td>${statusBadge(r.status)}</td></tr>`).join("")}</tbody></table></div>`;
-}
-function exportAttCSV() {
-  const date = $("attDate").value,
-    dept = $("attDeptFilter").value;
-  window.open(
-    `${API}/attendance/export?from=${date}&to=${date}${dept ? "&department=" + encodeURIComponent(dept) : ""}`,
-  );
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — REPORTS
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadReports() {
-  const today = new Date().toISOString().slice(0, 10);
-  if (!$("repFrom").value) $("repFrom").value = today.slice(0, 7) + "-01";
-  if (!$("repTo").value) $("repTo").value = today;
-  const dept = $("repDept")?.value || "",
-    deptQuery = dept ? `?department=${encodeURIComponent(dept)}` : "";
-  try {
-    const [stats, depts, hist] = await Promise.all([
-      api(`/attendance/stats${deptQuery}`),
-      api("/departments"),
-      api(`/attendance/history${deptQuery}`),
-    ]);
-    const rd = $("repDept");
-    if (rd.options.length <= 1) {
-      depts.departments.forEach((d) => {
-        const o = document.createElement("option");
-        o.value = o.textContent = d;
-        rd.appendChild(o);
-      });
-    }
-    const total = stats.stats.length;
-    const avgPct = total
-      ? Math.round(
-          stats.stats.reduce((a, s) => a + (parseFloat(s.pct) || 0), 0) / total,
-        )
-      : 0;
-    const highest = total
-      ? Math.max(...stats.stats.map((s) => parseFloat(s.pct) || 0))
-      : 0;
-    const below75 = stats.stats.filter(
-      (s) => (parseFloat(s.pct) || 0) < 75,
-    ).length;
-    const totalRecog = stats.stats.reduce(
-      (sum, s) => sum + (parseInt(s.present_days) || 0),
-      0,
-    );
-    $("repAvgAtt").textContent = avgPct + "%";
-    $("repHighest").textContent = highest + "%";
-    $("repBelowCount").textContent = below75;
-    $("repTotalRecog").textContent = totalRecog;
-    drawMonthlyChart(hist.history.slice().reverse());
-    drawDeptChart(stats.stats);
-    $("statsTableWrap").innerHTML =
-      `<div style="overflow-x:auto;"><table class="data-table">
-      <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Present</th><th>Percentage</th><th>Status</th></tr></thead>
-      <tbody>${
-        stats.stats
-          .map((s) => {
-            const pctNum = parseFloat(s.pct) || 0,
-              col = pctNum < 75 ? "var(--red)" : "var(--green)";
-            return `<tr><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${s.student_id}</td>
-          <td style="font-weight:500;">${s.full_name}</td><td>${s.department || "—"}</td>
-          <td style="text-align:center;">${s.present_days}</td>
-          <td><div style="display:flex;align-items:center;gap:8px;"><div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${Math.min(pctNum, 100)}%;background:${col};border-radius:3px;"></div></div><span style="color:${col};font-weight:600;font-family:var(--mono);font-size:12px;">${pctNum}%</span></div></td>
-          <td><span style="color:${col};font-weight:600;font-size:11px;">${pctNum < 75 ? "Critical" : "On Track"}</span></td></tr>`;
-          })
-          .join("") ||
-        `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:1.5rem;">No data</td></tr>`
-      }</tbody></table></div>`;
-  } catch (e) {
-    $("repAvgAtt").textContent = "Error";
-    toast(e.message, "err");
-  }
-}
-function drawMonthlyChart(history) {
-  const canvas = $("monthlyChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (monthlyChart) monthlyChart.destroy();
-  monthlyChart = new SimpleChart(ctx, {
-    labels: history.map((h) => h.date),
-    datasets: [
-      {
-        label: "Present",
-        data: history.map((h) => h.present),
-        color: "#22c55e",
-      },
-      { label: "Absent", data: history.map((h) => h.absent), color: "#ef4444" },
-    ],
-  });
-}
-function drawDeptChart(stats) {
-  const canvas = $("deptChart");
-  if (!canvas) return;
-  const ctx = canvas.getContext("2d");
-  if (deptChart) deptChart.destroy();
-  const byDept = {};
-  stats.forEach((s) => {
-    const d = s.department || "Unassigned";
-    byDept[d] = byDept[d] || { present: 0 };
-    byDept[d].present += parseInt(s.present_days) || 0;
-  });
-  const labels = Object.keys(byDept).sort();
-  deptChart = new SimpleChart(ctx, {
-    type: "bar",
-    labels,
-    datasets: [
-      {
-        label: "Attendance",
-        data: labels.map((d) => byDept[d].present),
-        color: "#3b82f6",
-      },
-    ],
-  });
-}
-function exportReport() {
-  const f = $("repFrom").value,
-    t = $("repTo").value,
-    d = $("repDept").value;
-  window.open(
-    `${API}/attendance/export?from=${f}&to=${t}${d ? "&department=" + encodeURIComponent(d) : ""}`,
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   ISSUE 1 FIX: SimpleChart — always scales to container, never grows taller.
-   Key changes vs original:
-   1. Canvas height is driven by the HTML/CSS attribute, not computed from data.
-   2. Y-axis max is rounded to a "nice" number so gridlines don't crowd.
-   3. Bar width scales with the number of bars, so many bars = thin bars,
-      never overflow the fixed container.
-   ───────────────────────────────────────────────────────────────────────── */
-class SimpleChart {
-  constructor(ctx, config) {
-    this.ctx = ctx;
-    this.config = config;
-    this.draw();
-  }
-  destroy() {
-    this.ctx.setTransform?.(1, 0, 0, 1, 0, 0);
-    this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
-  }
-
-  draw() {
-    const { ctx, config } = this;
-    const { type = "line", labels, datasets } = config;
-    const dpr = window.devicePixelRatio || 1;
-
-    // ── ISSUE 1: respect CSS max-height; do NOT let data expand the canvas ──
-    const container = ctx.canvas.parentElement;
-    const cssW = container ? container.clientWidth : 500;
-    // Clamp height to 420 px — matches the CSS height:"420" attribute on the canvas
-    const cssH = Math.min(ctx.canvas.getAttribute("height") || 420, 420);
-
-    ctx.canvas.width = cssW * dpr;
-    ctx.canvas.height = cssH * dpr;
-    ctx.canvas.style.width = cssW + "px";
-    ctx.canvas.style.height = cssH + "px";
-    ctx.setTransform?.(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    if (!labels?.length) return;
-
-    const pad = { top: 18, right: 16, bottom: 40, left: 46 };
-    const cW = cssW - pad.left - pad.right;
-    const cH = cssH - pad.top - pad.bottom;
-
-    // ── Nice Y max so grid lines are round numbers ──
-    const allVals = datasets.flatMap((d) => d.data).filter((v) => v != null);
-    const rawMax = Math.max(...allVals, 1);
-    const niceMax = this._niceMax(rawMax);
-    const GRID_LINES = 4;
-
-    // Grid lines + Y labels
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
-    ctx.lineWidth = 1;
-    ctx.fillStyle = "#888895";
-    ctx.font = `11px monospace`;
-    ctx.textAlign = "right";
-    for (let i = 0; i <= GRID_LINES; i++) {
-      const val = Math.round((niceMax * i) / GRID_LINES);
-      const y = pad.top + cH - (cH * i) / GRID_LINES;
-      ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(pad.left + cW, y);
-      ctx.stroke();
-      ctx.fillText(val, pad.left - 6, y + 4);
-    }
-
-    if (type === "bar") {
-      const n = labels.length;
-      const gW = cW / Math.max(n, 1); // group width per label
-      const bCnt = datasets.length;
-      const gap = 0; // NO GAP between bars for same day
-      const inner = gW * 0.85; // 85% of group width for bars (more space used)
-      const bW = Math.max(2, (inner - gap * Math.max(0, bCnt - 1)) / bCnt);
-
-      datasets.forEach((ds, di) => {
-        ds.data.forEach((v, i) => {
-          if (v == null) return;
-          const bH = (cH * v) / niceMax;
-          const gX = pad.left + i * gW + (gW - inner) / 2;
-          const bX = gX + di * bW; // NO gap between bars
-          const bY = pad.top + cH - bH;
-          ctx.fillStyle = ds.color;
-          // Use crisp pixels for clear bars
-          ctx.fillRect(
-            Math.round(bX),
-            Math.round(bY),
-            Math.round(bW),
-            Math.round(bH),
-          );
-          // Value label only if bar is wide enough
-          if (bW > 16 && bH > 2) {
-            ctx.fillStyle = "rgba(200,200,208,0.95)";
-            ctx.font = "11px monospace";
-            ctx.fontWeight = "bold";
-            ctx.textAlign = "center";
-            ctx.fillText(
-              Math.round(v),
-              Math.round(bX + bW / 2),
-              Math.round(bY - 5),
-            );
-          }
-        });
-      });
-
-      // X labels — skip every Nth if crowded
-      ctx.fillStyle = "#888895";
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      const skipEvery = Math.ceil(n / Math.floor(cW / 32));
-      labels.forEach((l, i) => {
-        if (i % skipEvery !== 0 && i !== n - 1) return;
-        ctx.fillText(
-          String(l).slice(0, 8),
-          pad.left + (i + 0.5) * gW,
-          cssH - 10,
-        );
-      });
-    } else {
-      // Smooth line (Catmull-Rom)
-      const step = cW / Math.max(labels.length - 1, 1);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(pad.left, pad.top, cW, cH);
-      ctx.clip();
-
-      datasets.forEach((ds) => {
-        const pts = ds.data.map((v, i) => ({
-          x: pad.left + i * step,
-          y: pad.top + cH - (cH * (v || 0)) / niceMax,
-        }));
-        if (pts.length < 2) return;
-        const segs = this._catmullSegs(pts);
-
-        const buildPath = () => {
-          ctx.beginPath();
-          ctx.moveTo(pts[0].x, pts[0].y);
-          segs.forEach(({ cp1x, cp1y, cp2x, cp2y, ex, ey }) =>
-            ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey),
-          );
-        };
-        buildPath();
-        ctx.lineTo(pts[pts.length - 1].x, pad.top + cH);
-        ctx.lineTo(pts[0].x, pad.top + cH);
-        ctx.closePath();
-        const g = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
-        g.addColorStop(0, ds.color + "42");
-        g.addColorStop(1, ds.color + "04");
-        ctx.fillStyle = g;
-        ctx.fill();
-        buildPath();
-        ctx.strokeStyle = ds.color;
-        ctx.lineWidth = 2.5;
-        ctx.lineJoin = "round";
-        ctx.stroke();
-      });
-      ctx.restore();
-
-      // Endpoint dots
-      datasets.forEach((ds) => {
-        const pts = ds.data.map((v, i) => ({
-          x: pad.left + i * step,
-          y: pad.top + cH - (cH * (v || 0)) / niceMax,
-        }));
-        if (pts.length < 2) return;
-        [pts[0], pts[pts.length - 1]].forEach((p) => {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-          ctx.fillStyle = ds.color;
-          ctx.fill();
-          ctx.strokeStyle = "rgba(13,13,15,0.9)";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        });
-      });
-
-      // X labels
-      const skip = Math.ceil(labels.length / 6);
-      ctx.fillStyle = "#888895";
-      ctx.font = "10px monospace";
-      ctx.textAlign = "center";
-      labels.forEach((l, i) => {
-        if (i % skip !== 0 && i !== labels.length - 1) return;
-        ctx.fillText(
-          String(l).slice(5),
-          pad.left + i * (cW / (labels.length - 1 || 1)),
-          cssH - 10,
-        );
-      });
-    }
-  }
-
-  /** Round up to a "nice" max for Y axis */
-  _niceMax(raw) {
-    if (raw <= 0) return 10;
-    const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
-    const normalized = raw / magnitude;
-    let nice =
-      normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-    return nice * magnitude;
-  }
-
-  _catmullSegs(pts) {
-    const segs = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const p0 = pts[Math.max(i - 1, 0)],
-        p1 = pts[i],
-        p2 = pts[i + 1],
-        p3 = pts[Math.min(i + 2, pts.length - 1)];
-      segs.push({
-        cp1x: p1.x + (p2.x - p0.x) / 6,
-        cp1y: p1.y + (p2.y - p0.y) / 6,
-        cp2x: p2.x - (p3.x - p1.x) / 6,
-        cp2y: p2.y - (p3.y - p1.y) / 6,
-        ex: p2.x,
-        ey: p2.y,
-      });
-    }
-    return segs;
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ADMIN — SETTINGS
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadSettings() {
-  try {
-    const s = await api("/settings");
-    $("threshSlider").value = s.recognition_threshold;
-    $("threshVal").textContent =
-      Math.round(s.recognition_threshold * 100) + "%";
-    $("skipSlider").value = s.frame_skip;
-    $("skipVal").textContent = s.frame_skip;
-    $("sysInfo").innerHTML = `
-      <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);">
-        <span style="color:var(--text2);">Email</span><span>${s.email_enabled ? badge("Enabled", "green") : badge("Disabled", "red")}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;padding:6px 0;">
-        <span style="color:var(--text2);">System Version</span><span style="font-family:var(--mono);font-size:11px;">v3.1</span>
-      </div>`;
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-async function saveSettings() {
-  try {
-    await api("/settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        recognition_threshold: parseFloat($("threshSlider").value),
-        frame_skip: parseInt($("skipSlider").value),
-      }),
-    });
-    toast("Settings saved");
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-async function changeAdminPw() {
-  const old_pw = $("oldPw").value,
-    new_pw = $("newPw").value;
-  if (!old_pw || !new_pw) {
-    toast("Both fields required", "err");
-    return;
-  }
-  try {
-    await api("/auth/change-password", {
-      method: "POST",
-      body: JSON.stringify({ old_password: old_pw, new_password: new_pw }),
-    });
-    toast("Password updated");
-    $("oldPw").value = "";
-    $("newPw").value = "";
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-async function sendTestEmail() {
-  const addr = $("testEmailAddr")?.value.trim();
-  if (!addr) {
-    toast("Enter an email address", "err");
-    return;
-  }
-  try {
-    await api("/email/test", {
-      method: "POST",
-      body: JSON.stringify({ email: addr }),
-    });
-    toast("Test email queued");
-  } catch (e) {
-    toast(e.message, "err");
-  }
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   ENROLL — Automatic Face Capture (unchanged from v3.0)
-   ═══════════════════════════════════════════════════════════════════════════ */
-function showEnrollStep(n) {
-  [1, 2, 3].forEach((i) => {
-    $(`epanel-${i}`).style.display = i === n ? "block" : "none";
-    $(`estep-${i}`).classList.toggle("active", i === n);
-    $(`estep-${i}`).classList.toggle("done", i < n);
-  });
-  enrollStep = n;
-}
-function goToStep1() {
-  stopAutoCapture();
-  showEnrollStep(1);
-}
-function goToStep2() {
-  const sid = $("eId").value.trim(),
-    name = $("eName").value.trim();
+// ── Start guided capture ──────────────────────────────────────────────
+async function startAutoCapture() {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
   if (!sid || !name) {
-    toast("Student ID and name are required", "err");
+    toast("Fill in Student ID and Full Name first", "err");
+    document.getElementById("eId").focus();
     return;
   }
-  enrollFrames = [];
-  poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
-  isAutoCaptureActive = false;
-  _captureComplete = false;
-  _validateInFlight = false;
-  renderCaptureProgress();
-  showEnrollStep(2);
-}
-function goToStep3() {
-  if (enrollFrames.length < TOTAL_FRAMES) {
-    toast(
-      `Capture at least ${TOTAL_FRAMES} frames (${enrollFrames.length}/${TOTAL_FRAMES})`,
-      "err",
-    );
-    return;
+
+  try {
+    captureStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 480 },
+        facingMode: "user",
+      },
+    });
+    const video = document.getElementById("captureCam");
+    video.srcObject = captureStream;
+    await new Promise((res) => (video.onloadedmetadata = res));
+    video.play();
+
+    document.getElementById("capturePlaceholder").style.display = "none";
+    document.getElementById("startCaptureBtn").style.display = "none";
+    document.getElementById("stopCaptureBtn").style.display = "inline-flex";
+    document.getElementById("resetCaptureBtn").style.display = "inline-flex";
+
+    captureFrames = [];
+    poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
+    captureActive = true;
+    _captureComplete = false;
+    _validateInFlight = false;
+    _lastRequiredPose = null;
+
+    _updatePosePips();
+    _runCaptureLoop();
+  } catch (e) {
+    toast("Camera access denied — check browser permissions", "err");
+    console.error(e);
   }
-  stopAutoCapture();
-  buildReviewPanel();
-  showEnrollStep(3);
 }
-async function startCamera() {
-  return new Promise((resolve, reject) => {
-    if (enrollStream) enrollStream.getTracks().forEach((t) => t.stop());
-    navigator.mediaDevices
-      .getUserMedia({
-        video: {
-          facingMode: "user",
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
-        audio: false,
-      })
-      .then((stream) => {
-        enrollStream = stream;
-        const vid = $("captureCam");
-        vid.srcObject = enrollStream;
-        vid.onloadedmetadata = () => {
-          hide($("capturePlaceholder"));
-          resolve();
-        };
-      })
-      .catch((e) => {
-        toast("Camera error: " + e.message, "err");
-        reject(e);
-      });
-  });
-}
+
 function stopAutoCapture() {
-  isAutoCaptureActive = false;
+  captureActive = false;
   if (captureAF) {
     cancelAnimationFrame(captureAF);
     captureAF = null;
   }
-  if (enrollStream) {
-    enrollStream.getTracks().forEach((t) => t.stop());
-    enrollStream = null;
+  if (captureStream) {
+    captureStream.getTracks().forEach((t) => t.stop());
+    captureStream = null;
   }
-  const vid = $("captureCam");
-  if (vid) vid.srcObject = null;
-  hide($("stopCaptureBtn"));
-  hide($("resetCaptureBtn"));
-  show($("startCaptureBtn"));
-  $("startCaptureBtn").disabled = false;
+  document.getElementById("captureCam").srcObject = null;
+  document.getElementById("startCaptureBtn").style.display = "inline-flex";
+  document.getElementById("stopCaptureBtn").style.display = "none";
 }
+
 function resetCapture() {
   stopAutoCapture();
-  enrollFrames = [];
+  captureFrames = [];
   poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
   _captureComplete = false;
   _validateInFlight = false;
-  $("captureCount").textContent = "0";
-  $("captureInstruction").textContent =
-    "Click Start Capture to begin guided face collection";
-  $("poseLabel").textContent = "—";
-  $("qualityVal").textContent = "—";
-  $("qualityFill").style.width = "0%";
-  $("startCaptureBtn").style.display = "inline-block";
-  $("stopCaptureBtn").style.display = "none";
-  $("resetCaptureBtn").style.display = "none";
-  renderCaptureProgress();
-  updatePosePips();
+  _lastRequiredPose = null;
+  document.getElementById("captureCount").textContent = "0";
+  document.getElementById("captureInstruction").textContent =
+    "Fill in student info, then click Start Capture";
+  document.getElementById("qualityFill").style.width = "0%";
+  document.getElementById("qualityVal").textContent = "—";
+  document.getElementById("poseLabel").textContent = "—";
+  document.getElementById("capturePlaceholder").style.display = "flex";
+  document.getElementById("resetCaptureBtn").style.display = "none";
+  _updatePosePips();
+  setMsg("enrollMsg", "", "");
 }
-function updatePosePips() {
-  for (const step of POSE_SEQUENCE) {
-    const pip = $(`pip-${step.pose}`);
-    if (!pip) continue;
-    const count = poseCaptureCounts[step.pose] || 0,
-      isDone = count >= step.target,
-      isCurrent = _getCurrentPoseStep()?.pose === step.pose;
-    pip.classList.toggle("done", isDone);
-    pip.classList.toggle("active", isCurrent && !isDone);
-  }
-}
-async function startAutoCapture() {
-  if (!enrollStream) {
-    try {
-      await startCamera();
-    } catch (e) {
-      toast("Failed to start camera: " + e.message, "err");
-      return;
-    }
-  }
-  $("startCaptureBtn").style.display = "none";
-  $("stopCaptureBtn").style.display = "inline-block";
-  $("resetCaptureBtn").style.display = "inline-block";
-  enrollFrames = [];
-  poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
-  isAutoCaptureActive = true;
-  _captureComplete = false;
-  _validateInFlight = false;
-  renderCaptureProgress();
-  updatePosePips();
-  const firstStep = _getCurrentPoseStep();
-  if (firstStep) {
-    _speakInstruction(
-      "Face capture started. " + firstStep.voiceInstruction,
-      true,
-    );
-    $("poseLabel").textContent =
-      firstStep.pose.charAt(0).toUpperCase() + firstStep.pose.slice(1);
-    $("captureInstruction").textContent = firstStep.instruction;
-  }
-  _runCaptureLoop();
-}
+
+// ── Frame loop ────────────────────────────────────────────────────────
 function _runCaptureLoop() {
-  const video = $("captureCam"),
-    overlay = $("captureOverlay"),
-    ctx = overlay.getContext("2d");
+  const video = document.getElementById("captureCam");
+  const overlay = document.getElementById("captureOverlay");
+  const ctx = overlay.getContext("2d");
+
   function loop(ts) {
-    if (!isAutoCaptureActive || !enrollStream) return;
+    if (!captureActive) return;
+
+    // Match overlay size to video
     overlay.width = video.videoWidth || 640;
     overlay.height = video.videoHeight || 480;
+
     _drawOverlay(ctx, overlay.width, overlay.height);
+
+    // Validate at most every 400ms (avoid hammering backend)
     if (ts - lastValidateTime >= 400) {
       lastValidateTime = ts;
       _validateAndCapture(video, overlay.width, overlay.height);
     }
+
     captureAF = requestAnimationFrame(loop);
   }
   captureAF = requestAnimationFrame(loop);
 }
+
+// ── Capture one frame, send to backend for quality check ─────────────
 async function _validateAndCapture(video, w, h) {
-  if (_validateInFlight || _captureComplete || !isAutoCaptureActive) return;
+  // Guard 1: don't start a new validation while one is in flight
+  if (_validateInFlight || _captureComplete) return;
   _validateInFlight = true;
+
   try {
+    // Grab frame from video into a temporary canvas
     const tmp = document.createElement("canvas");
     tmp.width = w;
     tmp.height = h;
     tmp.getContext("2d").drawImage(video, 0, 0, w, h);
     const b64 = tmp.toDataURL("image/jpeg", 0.85).split(",")[1];
-    const d = await api("/capture/validate-frame", {
+
+    // Detect pose step change → tell backend to reset its smoothing buffer
+    const currentStepNow = _getCurrentPoseStep();
+    const resetPose =
+      currentStepNow && currentStepNow.pose !== _lastRequiredPose;
+    if (resetPose)
+      _lastRequiredPose = currentStepNow ? currentStepNow.pose : null;
+
+    const r = await api("/capture/validate-frame", {
       method: "POST",
-      body: JSON.stringify({ image: b64 }),
+      json: { image: b64, reset_pose: resetPose },
     });
-    if (!d || _captureComplete || !isAutoCaptureActive) return;
+    if (!r || _captureComplete) return;
+    const d = await r.json();
+
     currentQuality = d.quality;
-    currentPoseHint = String(d.pose || "front")
-      .trim()
-      .toLowerCase();
+    currentPoseHint = d.pose || "front";
+
+    // Update quality bar
     const q = d.quality?.overall ?? 0;
-    const qFill = $("qualityFill");
+    const qFill = document.getElementById("qualityFill");
     if (qFill) {
       qFill.style.width = q + "%";
       qFill.style.background =
         q >= 70 ? "var(--green)" : q >= 45 ? "var(--amber)" : "var(--red)";
     }
-    const qualityValEl = $("qualityVal");
+    const qualityValEl = document.getElementById("qualityVal");
     if (qualityValEl) qualityValEl.textContent = q + "%";
-    const poseLabelEl = $("poseLabel");
-    if (poseLabelEl)
+    const poseLabelEl = document.getElementById("poseLabel");
+    if (poseLabelEl) {
+      // Show debug info (raw pose before smoothing) if backend sends it
+      const debugSuffix =
+        d.debug && d.debug.raw_pose && d.debug.raw_pose !== currentPoseHint
+          ? ` (raw:${d.debug.raw_pose})`
+          : "";
       poseLabelEl.textContent = d.face_detected
-        ? currentPoseHint.charAt(0).toUpperCase() + currentPoseHint.slice(1)
+        ? currentPoseHint + debugSuffix
         : "No face";
+    }
+
     if (!d.face_detected || !d.quality?.passed) {
-      $("captureInstruction").textContent = !d.face_detected
-        ? "⚠ No face detected — move into frame"
-        : "⚠ Quality too low — adjust position";
+      _setInstruction(
+        !d.face_detected
+          ? "⚠ No face detected — move into frame"
+          : d.quality.blur_score < 30
+            ? "⚠ Image is blurry — hold still"
+            : d.quality.brightness < 40
+              ? "⚠ Too dark — improve lighting"
+              : "⚠ Quality too low — adjust position",
+      );
       return;
     }
-    if (_captureComplete || !isAutoCaptureActive) return;
+
+    // Guard 2: re-check complete flag after async wait
+    if (_captureComplete) return;
+
     const currentStep = _getCurrentPoseStep();
     if (!currentStep) {
+      // Shouldn't happen, but if all steps done just trigger complete
       if (!_captureComplete) _onCaptureComplete();
       return;
     }
-    const requiredPose = currentStep.pose,
-      poseMatches = currentPoseHint === requiredPose;
+
+    const requiredPose = currentStep.pose;
+    // User-perspective pose matching — "front" also accepts slight angles
+    const poseMatches =
+      currentPoseHint === requiredPose ||
+      (requiredPose === "front" && currentPoseHint === "front");
+
     if (poseMatches) {
+      // Guard 3: don't exceed per-step target (prevents overshoot)
       const alreadyCount = poseCaptureCounts[requiredPose] || 0;
       if (alreadyCount >= currentStep.target) return;
-      enrollFrames.push(b64);
+
+      // ✓ Good frame — accept it
+      captureFrames.push(b64);
       poseCaptureCounts[requiredPose] = alreadyCount + 1;
+
       const total = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0);
-      const countEl = $("captureCount");
-      if (countEl) countEl.textContent = total;
-      $("captureInstruction").textContent =
-        `✓ ${total} frames — ${currentStep.instruction}`;
-      _soundTick();
-      renderCaptureProgress();
-      updatePosePips();
-      if (poseCaptureCounts[requiredPose] >= currentStep.target) {
-        if (total >= TOTAL_FRAMES) {
-          _captureComplete = true;
+      const countEl = document.getElementById("captureCount");
+      if (countEl) countEl.textContent = total; // new design: shows just number, sep and total are sibling spans
+
+      _setInstruction(`✓ ${total} frames — ${currentStep.instruction}`);
+      _updatePosePips();
+
+      const justFinishedPose =
+        poseCaptureCounts[requiredPose] >= currentStep.target;
+      if (justFinishedPose) {
+        // Guard 4: check total AFTER this addition
+        if (total >= TOTAL_TARGET) {
+          _captureComplete = true; // set BEFORE calling complete to block concurrent calls
           _onCaptureComplete();
         } else {
+          // Use _getCurrentPoseStep() — it returns the FIRST step still incomplete.
+          // After incrementing requiredPose to its target, this is correctly the
+          // NEXT pose to collect (e.g. after front→left, it returns left).
+          // _getNextPoseStep() was wrong here: it returned the step AFTER left (right)
+          // because left had just become the "current" incomplete step.
           const nextStep = _getCurrentPoseStep();
           if (nextStep) {
             _soundDing();
+            // Speak the next instruction with a short delay so the ding plays first
             setTimeout(
               () =>
                 _speakInstruction(
@@ -2422,56 +1766,99 @@ async function _validateAndCapture(video, w, h) {
                 ),
               300,
             );
-            $("captureInstruction").textContent =
-              `✓ ${requiredPose.toUpperCase()} done! Now: ${nextStep.instruction}`;
-            $("poseLabel").textContent =
-              nextStep.pose.charAt(0).toUpperCase() + nextStep.pose.slice(1);
+            _setInstruction(
+              `✓ ${requiredPose.toUpperCase()} done!  Now: ${nextStep.instruction}`,
+            );
+          } else if (total >= TOTAL_TARGET) {
+            _captureComplete = true;
+            _onCaptureComplete();
           }
         }
       }
     } else {
-      $("captureInstruction").textContent =
-        currentStep.instruction +
-        (currentPoseHint && currentPoseHint !== requiredPose
+      // Wrong pose — show direction hint WITH what the system currently sees
+      // so the user knows the camera is working and what to adjust
+      const seenLabel =
+        currentPoseHint && currentPoseHint !== requiredPose
           ? ` (seeing: ${currentPoseHint})`
-          : "");
+          : "";
+      _setInstruction(currentStep.instruction + seenLabel);
     }
-  } catch {
+  } catch (e) {
+    // Network hiccup — silently continue
   } finally {
-    _validateInFlight = false;
+    _validateInFlight = false; // always release lock
   }
 }
+
+// Helper: safe instruction setter (null-checked)
+function _setInstruction(text) {
+  const el = document.getElementById("captureInstruction");
+  if (el) el.textContent = text;
+}
+
 function _getCurrentPoseStep() {
   for (const step of POSE_SEQUENCE) {
     if ((poseCaptureCounts[step.pose] || 0) < step.target) return step;
   }
-  return null;
+  return null; // all complete
 }
+
+function _getNextPoseStep() {
+  // Return the first step that still needs frames, AFTER the current one.
+  // "current" = the first step not yet complete.
+  let foundCurrent = false;
+  for (const step of POSE_SEQUENCE) {
+    const done = (poseCaptureCounts[step.pose] || 0) >= step.target;
+    if (!foundCurrent && !done) {
+      // This IS the current incomplete step — skip it, look for the next
+      foundCurrent = true;
+      continue;
+    }
+    if (foundCurrent && !done) {
+      return step;
+    }
+  }
+  return null; // no more steps after current
+}
+
+function _updatePosePips() {
+  for (const step of POSE_SEQUENCE) {
+    const pip = document.getElementById(`pip-${step.pose}`);
+    if (!pip) continue;
+    const count = poseCaptureCounts[step.pose] || 0;
+    const isDone = count >= step.target;
+    const isCurrent = _getCurrentPoseStep()?.pose === step.pose;
+    pip.classList.toggle("done", isDone);
+    pip.classList.toggle("active", isCurrent && !isDone);
+  }
+}
+
 function _onCaptureComplete() {
   stopAutoCapture();
-  _soundChime();
-  setTimeout(
-    () =>
-      _speakInstruction(
-        "Face capture complete! You may now proceed to enroll.",
-        true,
-      ),
-    400,
+  _setInstruction(
+    `✅ ${captureFrames.length} frames collected! Click "Review & Enroll" to continue.`,
   );
-  $("captureInstruction").textContent =
-    `✅ ${enrollFrames.length} frames collected! Click "Review & Enroll" to continue.`;
-  $("resetCaptureBtn").style.display = "inline-block";
-  toast(`${enrollFrames.length} frames captured`);
+  document.getElementById("resetCaptureBtn").style.display = "inline-flex";
+  toast(`${captureFrames.length} frames captured — ready to enroll`);
 }
+
+// ── Canvas overlay renderer ───────────────────────────────────────────
 function _drawOverlay(ctx, w, h) {
   ctx.clearRect(0, 0, w, h);
+
   const cx = w / 2,
-    cy = h / 2,
-    rx = w * 0.18,
+    cy = h / 2;
+  const rx = w * 0.18,
     ry = h * 0.26;
-  const currentStep = _getCurrentPoseStep(),
-    totalCaptured = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0),
-    pct = totalCaptured / TOTAL_FRAMES;
+  const currentStep = _getCurrentPoseStep();
+  const totalCaptured = Object.values(poseCaptureCounts).reduce(
+    (a, b) => a + b,
+    0,
+  );
+  const pct = totalCaptured / TOTAL_TARGET;
+
+  // Semi-transparent dark vignette outside the oval
   ctx.save();
   ctx.fillStyle = "rgba(0,0,0,0.40)";
   ctx.fillRect(0, 0, w, h);
@@ -2480,16 +1867,22 @@ function _drawOverlay(ctx, w, h) {
   ctx.ellipse(cx, cy, rx + 8, ry + 8, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
-  const ovalColor = !currentPoseHint
-    ? "#555"
-    : currentQuality?.passed
-      ? `hsl(${120 * pct},80%,55%)`
-      : "#EF4444";
+
+  // Oval border — colour depends on quality
+  const ovalColor =
+    !currentPoseHint || currentPoseHint === ""
+      ? "#555"
+      : currentQuality?.passed
+        ? `hsl(${120 * pct}, 80%, 55%)`
+        : "#EF4444";
+
   ctx.beginPath();
   ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
   ctx.strokeStyle = ovalColor;
   ctx.lineWidth = 3;
   ctx.stroke();
+
+  // Progress arc around the oval (green ring)
   if (totalCaptured > 0) {
     ctx.beginPath();
     ctx.ellipse(cx, cy, rx + 6, ry + 6, -Math.PI / 2, 0, Math.PI * 2 * pct);
@@ -2497,539 +1890,707 @@ function _drawOverlay(ctx, w, h) {
     ctx.lineWidth = 4;
     ctx.stroke();
   }
+
+  // Crosshair / alignment guide — 4 small ticks at cardinal points of oval
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = 1.5;
+  [
+    [cx, cy - ry - 4, cx, cy - ry + 12],
+    [cx, cy + ry - 12, cx, cy + ry + 4],
+    [cx - rx - 4, cy, cx - rx + 12, cy],
+    [cx + rx - 12, cy, cx + rx + 4, cy],
+  ].forEach(([x1, y1, x2, y2]) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  });
+
+  // Pose direction arrow — drawn in USER perspective space
+  // The video element is CSS-mirrored (scaleX(-1)), so canvas left = user's right.
+  // We flip horizontal arrows so they point correctly from the user's viewpoint.
+  if (currentStep && captureStream) {
+    // User's left = canvas right; user's right = canvas left (mirrored feed)
+    const arrows = {
+      left: "←", // user turns left → arrow points left in their view
+      right: "→", // user turns right → arrow points right in their view
+      up: "↑",
+      down: "↓",
+      front: "",
+    };
+    const arrow = arrows[currentStep.pose] || "";
+    if (arrow) {
+      // Position arrows OUTSIDE the oval, at the edge toward which user should turn
+      // Because canvas is mirrored: user's left edge = canvas RIGHT side
+      const ax =
+        currentStep.pose === "left"
+          ? cx + rx + 24 // user's left = canvas right
+          : currentStep.pose === "right"
+            ? cx - rx - 24 // user's right = canvas left
+            : cx;
+      const ay =
+        currentStep.pose === "up"
+          ? cy - ry - 22
+          : currentStep.pose === "down"
+            ? cy + ry + 26
+            : cy;
+
+      // Draw a rounded pill behind the arrow for readability
+      ctx.save();
+      ctx.fillStyle = "rgba(245,158,11,0.18)";
+      ctx.beginPath();
+      ctx.roundRect
+        ? ctx.roundRect(ax - 20, ay - 16, 40, 32, 8)
+        : ctx.rect(ax - 20, ay - 16, 40, 32);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.font = "bold 26px Arial";
+      ctx.fillStyle = "rgba(245,158,11,0.95)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(arrow, ax, ay);
+    }
+  }
 }
-function renderCaptureProgress() {
-  const container = $("poseProgress");
-  if (!container) return;
-  container.innerHTML = POSE_SEQUENCE.map((step) => {
-    const pose = step.pose,
-      label = pose.charAt(0).toUpperCase() + pose.slice(1),
-      count = poseCaptureCounts[pose] || 0,
-      isDone = count >= step.target,
-      isActive = _getCurrentPoseStep()?.pose === pose && isAutoCaptureActive,
-      pct = Math.round((count / step.target) * 100);
-    return `<div style="margin-bottom:0.75rem;">
-      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:4px;">
-        <div style="width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:${isDone ? "var(--green)" : isActive ? "var(--blue)" : "var(--bg4)"};color:${isDone || isActive ? "#fff" : "var(--text3)"};">${isDone ? "✓" : POSE_SEQUENCE.indexOf(step) + 1}</div>
-        <span style="font-size:13px;font-weight:600;color:${isDone || isActive ? "var(--text)" : "var(--text3)"};">${label}</span>
-        <span style="font-size:11px;color:var(--text3);margin-left:auto;">${count}/${step.target}</span>
-      </div>
-      <div style="width:100%;height:4px;background:var(--bg3);border-radius:2px;overflow:hidden;">
-        <div style="width:${pct}%;height:100%;background:${isDone ? "var(--green)" : isActive ? "var(--blue)" : "var(--text3)"};transition:width 0.2s ease;"></div>
-      </div>
-    </div>`;
-  }).join("");
-}
-function buildReviewPanel() {
-  const sid = $("eId").value.trim(),
-    name = $("eName").value.trim(),
-    faculty = $("eFaculty")?.options[$("eFaculty")?.selectedIndex]?.text || "",
-    sem = $("eSem")?.value.trim() || "",
-    email = $("eEmail").value.trim();
-  $("reviewGrid").innerHTML = `
-    <div><span style="color:var(--text3);font-size:12px;">Student ID</span><div style="font-family:var(--mono);font-weight:600;">${sid}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Full Name</span><div style="font-weight:600;">${name}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Faculty</span><div>${faculty || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Semester</span><div>${sem || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Email</span><div>${email || "—"}</div></div>
-    <div><span style="color:var(--text3);font-size:12px;">Face Samples</span><div style="color:var(--green);font-weight:600;">${enrollFrames.length} frames ✓</div></div>`;
-  const badge2 = $("reviewCaptureBadge");
-  badge2.textContent = `${enrollFrames.length}/${TOTAL_FRAMES} frames captured`;
-  badge2.style.color =
-    enrollFrames.length >= TOTAL_FRAMES ? "var(--green)" : "var(--amber)";
-}
-async function enrollStudent() {
-  if (enrollFrames.length < TOTAL_FRAMES) {
-    toast(`Need at least ${TOTAL_FRAMES} frames`, "err");
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENROLL OVERRIDE
+   Replaces the previous enrollStudent() — now handles both auto-capture
+   frames and uploaded files.
+═══════════════════════════════════════════════════════════════════════ */
+window.enrollStudent = async function () {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  const dept = document.getElementById("eDept").value.trim();
+  const sem = document.getElementById("eSem")?.value.trim() || "";
+  const email = document.getElementById("eEmail").value.trim();
+  const phone = document.getElementById("ePhone").value.trim();
+
+  if (!sid || !name) {
+    setMsg("enrollMsg", "Student ID and Full Name are required.", "err");
     return;
   }
-  const body = {
-    student_id: $("eId").value.trim(),
-    full_name: $("eName").value.trim(),
-    faculty_id: $("eFaculty")?.value || null,
-    semester: $("eSem")?.value.trim() || null,
-    email: $("eEmail").value.trim() || null,
-    phone: $("ePhone").value.trim() || null,
-    frames: enrollFrames,
-  };
-  $("enrollBtn").disabled = true;
-  $("enrollProgress").style.display = "block";
-  $("enrollMsg").textContent = "Processing enrollment…";
-  $("enrollMsg").className = "msg";
-  try {
-    const res = await api("/enroll", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    $("enrollMsg").textContent = res.is_update
-      ? "Student re-enrolled successfully!"
-      : "Student enrolled successfully!";
-    $("enrollMsg").className = "msg ok";
-    toast(res.is_update ? "Student re-enrolled!" : "Student enrolled!");
-    setTimeout(() => {
-      resetEnroll();
-      navigate("students");
-    }, 2000);
-  } catch (e) {
-    $("enrollMsg").textContent = e.message;
-    $("enrollMsg").className = "msg err";
-    $("enrollBtn").disabled = false;
-  }
-}
-function resetEnroll() {
-  enrollFrames = [];
-  poseCaptureCounts = { front: 0, left: 0, right: 0, up: 0, down: 0 };
-  isAutoCaptureActive = false;
-  _captureComplete = false;
-  _validateInFlight = false;
-  if (captureAF) {
-    cancelAnimationFrame(captureAF);
-    captureAF = null;
-  }
-  ["eId", "eName", "eEmail", "ePhone", "eFaculty"].forEach((id) => {
-    if ($(id)) $(id).value = "";
-  });
-  if ($("eSem")) $("eSem").value = "";
-  if (enrollStream) {
-    enrollStream.getTracks().forEach((t) => t.stop());
-    enrollStream = null;
-  }
-  $("captureInstruction").textContent =
-    "Click Start Capture to begin guided face collection";
-  $("poseLabel").textContent = "—";
-  $("qualityVal").textContent = "—";
-  $("qualityFill").style.width = "0%";
-  $("captureCount").textContent = "0";
-  $("startCaptureBtn").style.display = "inline-block";
-  $("stopCaptureBtn").style.display = "none";
-  $("resetCaptureBtn").style.display = "none";
-  $("capturePlaceholder").style.display = "flex";
-  $("enrollMsg").textContent = "";
-  $("enrollMsg").className = "msg";
-  $("enrollProgress").style.display = "none";
-  $("enrollBtn").disabled = false;
-  renderCaptureProgress();
-  updatePosePips();
-  showEnrollStep(1);
-}
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — DASHBOARD
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadTeacherDashboard() {
-  if (!userInfo) return;
-  renderTeacherClassBar("teacherClassBar");
-  const today = new Date().toISOString().slice(0, 10);
-  try {
-    const att = await api(`/teacher/attendance?date=${today}`);
-    const rate = att.records?.length
-      ? Math.round((att.present / att.records.length) * 100)
-      : 0;
-    $("tDashMetrics").innerHTML = `
-      <div class="metric-card"><div class="metric-label">Your Students</div><div class="metric-val">${att.records?.length || 0}</div></div>
-      <div class="metric-card"><div class="metric-label">Present Today</div><div class="metric-val" style="color:var(--green)">${att.present}</div></div>
-      <div class="metric-card"><div class="metric-label">Absent Today</div><div class="metric-val" style="color:var(--red)">${att.absent}</div></div>
-      <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:var(--blue)">${rate ? rate + "%" : "—"}</div></div>`;
-    $("tDashTable").innerHTML = `<div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
-        <div class="section-title">Today · ${today}</div>
-        <button class="btn-primary btn-sm" onclick="quickStartSession()">▶ Start Attendance Session</button>
-      </div>
-      <div style="overflow-x:auto;"><table class="data-table"><thead><tr><th>Student</th><th>ID</th><th>Time</th><th>Status</th></tr></thead>
-      <tbody>${(att.records || []).map((r) => `<tr><td style="font-weight:500;">${r.full_name}</td><td style="font-family:var(--mono);font-size:11px;color:var(--text3);">${r.student_id}</td><td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td><td>${statusBadge(r.status)}</td></tr>`).join() || `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:1.5rem;">No students in your class yet</td></tr>`}
-      </tbody></table></div>
-    </div>`;
-  } catch (e) {
-    $("tDashMetrics").innerHTML =
-      `<div style="color:var(--red);">${e.message}</div>`;
-  }
-}
+  const isAuto = captureMethod === "auto";
+  const frames = isAuto ? captureFrames : [];
+  const files = isAuto ? [] : selectedFiles;
 
-function renderTeacherClassBar(targetId) {
-  const el = $(targetId);
-  if (!el || !userInfo) return;
-  el.style.display = "";
-  el.innerHTML = `
-    <div class="class-info-item"><div class="class-info-label">Faculty</div><div class="class-info-value">${userInfo.faculty || "—"}</div></div>
-    <div class="class-info-item"><div class="class-info-label">Semester</div><div class="class-info-value">${userInfo.semester || "—"}</div></div>
-    <div class="class-info-item"><div class="class-info-label">Subject</div><div class="class-info-value">${userInfo.subject || "—"}</div></div>
-    <div class="class-info-item"><div class="class-info-label">Time Slot</div><div class="class-info-value">${userInfo.time_slot || "—"}</div></div>
-    <div class="class-info-item"><div class="class-info-label">Teacher</div><div class="class-info-value">${userInfo.full_name || "—"}</div></div>`;
-}
-async function quickStartSession() {
-  navigate("t-recognize");
-  setTimeout(async () => {
-    await startTeacherWebcam();
-    startTeacherAuto();
-    toast("Attendance session started!");
-  }, 300);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — FACE RECOGNITION
-   ═══════════════════════════════════════════════════════════════════════════ */
-function initTeacherRecognize() {
-  renderTeacherClassBar("teacherClassBar2");
-  const log = $("tSessionLog");
-  if (log && !log.innerHTML.trim())
-    log.innerHTML = `<div style="color:var(--text3);font-size:12px;text-align:center;padding:1rem;">Session log will appear here</div>`;
-  updateSessionUI();
-}
-function updateSessionUI() {
-  const overlay = $("tRecogOverlay"),
-    stopBtn = $("btnTRecogStop"),
-    autoBtn = $("btnTRecogAuto"),
-    bar = $("sessionStatusBar");
-  if (sessionActive) {
-    if (overlay) overlay.style.display = "none";
-    if (stopBtn) stopBtn.style.display = "";
-    if (autoBtn) {
-      autoBtn.textContent = "⏸ Pause Auto";
-      autoBtn.style.background = "var(--amber)";
-      autoBtn.style.color = "#000";
-    }
-    if (bar) {
-      bar.style.display = "";
-      bar.innerHTML = `<span style="color:var(--green);font-weight:600;">● Auto-Recognition Active</span><span style="color:var(--text2);margin-left:0.5rem;">Scanning every 2 seconds</span>`;
-    }
-  } else {
-    if (stopBtn) stopBtn.style.display = "none";
-    if (autoBtn) {
-      autoBtn.textContent = "▶ Start Auto";
-      autoBtn.style.background = "";
-      autoBtn.style.color = "";
-    }
-    if (bar) bar.style.display = "none";
-  }
-}
-async function startTeacherWebcam() {
-  try {
-    teacherRecogStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: 640, height: 480 },
-      audio: false,
-    });
-    $("tRecogVideo").srcObject = teacherRecogStream;
-    const overlay = $("tRecogOverlay");
-    if (overlay) overlay.style.display = "none";
-    const stopBtn = $("btnTRecogStop");
-    if (stopBtn) stopBtn.style.display = "";
-    const floatBtn = $("tRecogStopFloat");
-    if (floatBtn) floatBtn.classList.remove("hidden");
-  } catch (e) {
-    toast("Camera error: " + e.message, "err");
-  }
-}
-function stopTeacherWebcam() {
-  stopTeacherAuto();
-  if (teacherRecogStream) {
-    teacherRecogStream.getTracks().forEach((t) => t.stop());
-    teacherRecogStream = null;
-  }
-  const overlay = $("tRecogOverlay");
-  if (overlay) overlay.style.display = "";
-  const stopBtn = $("btnTRecogStop");
-  if (stopBtn) stopBtn.style.display = "none";
-  const floatBtn = $("tRecogStopFloat");
-  if (floatBtn) floatBtn.classList.add("hidden");
-}
-function startTeacherAuto() {
-  if (teacherAutoRunning) return;
-  if (!teacherRecogStream) {
-    toast("Start camera first", "err");
+  if (isAuto && frames.length < 5) {
+    setMsg(
+      "enrollMsg",
+      "Not enough frames captured. Minimum 5 required.",
+      "err",
+    );
     return;
   }
-  teacherAutoRunning = true;
-  sessionActive = true;
-  updateSessionUI();
-  teacherAutoLoop = setInterval(runTeacherRecognitionFrame, 2000);
-  toast("Auto-recognition started");
-}
-function stopTeacherAuto() {
-  teacherAutoRunning = false;
-  sessionActive = false;
-  clearInterval(teacherAutoLoop);
-  teacherAutoLoop = null;
-  updateSessionUI();
-}
-function toggleTeacherAuto() {
-  if (teacherAutoRunning) stopTeacherAuto();
-  else startTeacherAuto();
-}
-async function runTeacherRecognitionFrame() {
-  if (!teacherRecogStream || !teacherAutoRunning) return;
-  const vid = $("tRecogVideo");
-  if (!vid || !vid.videoWidth) return;
-  const can = $("tRecogCanvas");
-  can.width = vid.videoWidth;
-  can.height = vid.videoHeight;
-  can.getContext("2d").drawImage(vid, 0, 0);
-  const b64 = can.toDataURL("image/jpeg", 0.8).split(",")[1];
-  try {
-    const r = await api("/teacher/recognize", {
-      method: "POST",
-      body: JSON.stringify({ image: b64 }),
-    });
-    const resultEl = $("tRecogResult");
-    if (r.recognized) {
-      if (resultEl)
-        resultEl.innerHTML = `<div class="msg ok" style="font-size:12px;">✓ ${r.name} — ${r.confidence}%${r.attendance_marked ? " · <strong>Marked Present</strong>" : " · (already marked)"}</div>`;
-      if (r.attendance_marked) {
-        appendSessionLog(r);
-        refreshSessionCount();
-      }
-    } else {
-      if (resultEl)
-        resultEl.innerHTML = `<div style="font-size:12px;color:var(--text3);">Scanning… (${r.confidence}%)</div>`;
-    }
-  } catch {}
-}
-async function doTeacherRecognize() {
-  const vid = $("tRecogVideo"),
-    can = $("tRecogCanvas");
-  can.width = vid.videoWidth || 640;
-  can.height = vid.videoHeight || 480;
-  can.getContext("2d").drawImage(vid, 0, 0);
-  const b64 = can.toDataURL("image/jpeg", 0.85).split(",")[1];
-  const resultEl = $("tRecogResult");
-  if (resultEl)
-    resultEl.innerHTML = `<div class="msg" style="color:var(--text2);">Recognizing…</div>`;
-  try {
-    const r = await api("/teacher/recognize", {
-      method: "POST",
-      body: JSON.stringify({ image: b64 }),
-    });
-    if (r.recognized) {
-      if (resultEl)
-        resultEl.innerHTML = `<div class="msg ok">✓ ${r.name} (${r.student_id}) — ${r.confidence}%${r.attendance_marked ? " · Marked Present" : " · Already marked"}</div>`;
-      if (r.attendance_marked) {
-        appendSessionLog(r);
-        refreshSessionCount();
-      }
-    } else {
-      if (resultEl)
-        resultEl.innerHTML = `<div class="msg err">Unknown face — ${r.confidence}%</div>`;
-    }
-  } catch (e) {
-    if (resultEl)
-      resultEl.innerHTML = `<div class="msg err">${e.message}</div>`;
-  }
-}
-function appendSessionLog(r) {
-  const log = $("tSessionLog");
-  if (!log) return;
-  const ph = log.querySelector(".session-placeholder");
-  if (ph) ph.remove();
-  const div = document.createElement("div");
-  div.className = "log-entry";
-  div.innerHTML = `<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;"><span class="pill pill-green">✓</span><span style="font-weight:600;">${r.name}</span><span style="color:var(--text3);font-size:11px;font-family:var(--mono);">${r.student_id}</span><span style="color:var(--text3);font-size:11px;margin-left:auto;font-family:var(--mono);">${new Date().toLocaleTimeString()}</span></div>`;
-  log.prepend(div);
-  if (log.children.length > 50) log.lastElementChild.remove();
-}
-let _sessionCount = 0;
-function refreshSessionCount() {
-  _sessionCount++;
-  const el = $("sessionMarkedCount"),
-    label = $("sessionMarkedLabel"),
-    pill = $("sessionCountPill");
-  if (el) el.textContent = _sessionCount;
-  if (label)
-    label.textContent =
-      _sessionCount === 1 ? "student marked" : "students marked";
-  if (pill) {
-    pill.textContent = `${_sessionCount} marked`;
-    pill.className = "pill pill-green";
-  }
-}
-async function refreshSessionLog() {
-  if (currentPage === "t-recognize") refreshSessionCount();
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — MANUAL ATTENDANCE
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadManualAttendance() {
-  renderTeacherClassBar("teacherClassBar3");
-  const dateEl = $("tManualDate");
-  if (!dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-  const date = dateEl.value;
-  try {
-    const data = await api(`/teacher/attendance?date=${date}`);
-    manualAttMap = {};
-    data.records.forEach((r) => {
-      manualAttMap[r.student_id] = r.status || "Absent";
-    });
-    if (!data.records.length) {
-      $("manualAttGrid").innerHTML =
-        `<div style="text-align:center;color:var(--text3);padding:2rem;">No students in your class yet</div>`;
-      return;
-    }
-    $("manualAttGrid").innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
-        <div style="font-size:13px;color:var(--text2);">${data.records.length} students · ${date}</div>
-        <div style="display:flex;gap:0.5rem;">
-          <button class="btn-secondary btn-sm" onclick="markAllPresent()">Mark All Present</button>
-          <button class="btn-secondary btn-sm" onclick="markAllAbsent()">Mark All Absent</button>
-        </div>
-      </div>
-      <div class="manual-att-grid" id="manualRows">
-        ${data.records
-          .map(
-            (r) => `
-          <div class="manual-att-row" id="row-${r.student_id}">
-            <div><div class="manual-att-name">${r.full_name}</div><div class="manual-att-id">${r.student_id}</div></div>
-            <button class="toggle-btn ${manualAttMap[r.student_id] === "Present" ? "present" : "absent"}" id="togbtn-${r.student_id}" onclick="toggleManualStatus('${r.student_id}')">${manualAttMap[r.student_id] || "Absent"}</button>
-          </div>`,
-          )
-          .join("")}
-      </div>`;
-  } catch (e) {
-    $("manualAttGrid").innerHTML =
-      `<div style="color:var(--red);">${e.message}</div>`;
-  }
-}
-function toggleManualStatus(sid) {
-  manualAttMap[sid] = manualAttMap[sid] === "Present" ? "Absent" : "Present";
-  const btn = $(`togbtn-${sid}`);
-  btn.textContent = manualAttMap[sid];
-  btn.className = `toggle-btn ${manualAttMap[sid] === "Present" ? "present" : "absent"}`;
-}
-function markAllPresent() {
-  Object.keys(manualAttMap).forEach((sid) => {
-    manualAttMap[sid] = "Present";
-    const btn = $(`togbtn-${sid}`);
-    if (btn) {
-      btn.textContent = "Present";
-      btn.className = "toggle-btn present";
-    }
-  });
-}
-function markAllAbsent() {
-  Object.keys(manualAttMap).forEach((sid) => {
-    manualAttMap[sid] = "Absent";
-    const btn = $(`togbtn-${sid}`);
-    if (btn) {
-      btn.textContent = "Absent";
-      btn.className = "toggle-btn absent";
-    }
-  });
-}
-async function saveAllManualAttendance() {
-  const date = $("tManualDate").value,
-    entries = Object.entries(manualAttMap);
-  if (!entries.length) {
-    toast("No students to mark", "err");
+  if (!isAuto && files.length === 0) {
+    setMsg("enrollMsg", "Please upload at least one image.", "err");
     return;
   }
-  let saved = 0,
-    errors = 0;
-  for (const [sid, status] of entries) {
-    try {
-      await api("/teacher/attendance/mark", {
+
+  const progress = document.getElementById("enrollProgress");
+  const bar = document.getElementById("enrollBar");
+  progress.style.display = "block";
+  bar.style.width = "5%";
+  setMsg("enrollMsg", "Processing faces and generating embeddings…", "");
+
+  try {
+    let response;
+    if (isAuto) {
+      bar.style.width = "40%";
+      response = await api("/enroll", {
         method: "POST",
-        body: JSON.stringify({ student_id: sid, date, status }),
+        json: {
+          student_id: sid,
+          full_name: name,
+          department: dept || null,
+          email: email || null,
+          phone: phone || null,
+          semester: sem || null,
+          frames,
+        },
       });
-      saved++;
-    } catch {
-      errors++;
+    } else {
+      bar.style.width = "40%";
+      const form = new FormData();
+      form.append("student_id", sid);
+      form.append("full_name", name);
+      if (dept) form.append("department", dept);
+      if (sem) form.append("semester", sem);
+      if (email) form.append("email", email);
+      if (phone) form.append("phone", phone);
+      files.forEach((f) => form.append("images", f));
+      response = await api("/enroll", { method: "POST", body: form });
     }
-  }
-  toast(errors ? `Saved ${saved}, ${errors} errors` : `Saved ${saved} records`);
-  if (!errors) loadManualAttendance();
-}
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   TEACHER — LOGS
-   ═══════════════════════════════════════════════════════════════════════════ */
-async function loadTeacherLogs() {
-  renderTeacherClassBar("teacherClassBar4");
-  const days = $("tLogDays").value;
-  try {
-    const data = await api(`/teacher/attendance/logs?days=${days}`);
-    const tbody = $("tLogsBody");
-    if (!data.logs.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem;">No attendance records yet</td></tr>`;
+    const d = await response.json();
+    bar.style.width = "100%";
+    setTimeout(() => {
+      progress.style.display = "none";
+      bar.style.width = "0%";
+    }, 600);
+
+    if (!response.ok) {
+      setMsg("enrollMsg", d.error || "Enrollment failed.", "err");
       return;
     }
-    tbody.innerHTML = data.logs
-      .map(
-        (r) =>
-          `<tr><td>${fmtDate(r.date)}</td><td style="font-family:var(--mono);font-size:11px;">${r.student_id}</td><td style="font-weight:500;">${r.full_name}</td><td style="font-family:var(--mono);font-size:12px;">${r.time || "—"}</td><td>${statusBadge(r.status)}</td><td style="font-size:12px;color:var(--text2);">${r.note || "—"}</td></tr>`,
-      )
-      .join("");
-  } catch (e) {
-    $("tLogsBody").innerHTML =
-      `<tr><td colspan="6" style="color:var(--red);">${e.message}</td></tr>`;
-  }
-}
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   BOOT — ISSUE 6: validate token on startup before showing app
-   ═══════════════════════════════════════════════════════════════════════════ */
-window.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll(".modal-overlay").forEach((m) => {
-    m.addEventListener("click", (e) => {
-      if (e.target === m) m.classList.remove("open");
+    setMsg(
+      "enrollMsg",
+      `✓ ${name} enrolled. ${d.samples} samples processed.` +
+        (d.is_update ? " (Embeddings updated)" : ""),
+      "ok",
+    );
+    toast(`${name} enrolled successfully`);
+
+    // Reset
+    captureFrames = [];
+    selectedFiles = [];
+    webcamFiles = [];
+    document.getElementById("filePreview") &&
+      (document.getElementById("filePreview").innerHTML = "");
+    resetCapture();
+    ["eId", "eName", "eDept", "eSem", "eEmail", "ePhone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
     });
-  });
-  const attDate = $("attDate");
-  if (attDate && !attDate.value)
-    attDate.value = new Date().toISOString().slice(0, 10);
-  setApiStatus(false);
-  const label = $("apiStatus");
-  if (label) label.textContent = "Connecting…";
-  startHealthPolling();
-
-  if (token && userRole) {
-    // ── ISSUE 6: Validate the stored token before restoring the session ──
-    // Avoids the 401 cascade when the server was restarted and sessions cleared.
-    fetch(`${API}/auth/validate`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.valid) {
-          $("loginOverlay").classList.add("hidden");
-          afterLogin();
-        } else {
-          // Token is stale — clear it and show login with a message
-          ["frs_token", "frs_role", "frs_user"].forEach((k) =>
-            localStorage.removeItem(k),
-          );
-          token = "";
-          userRole = "";
-          userInfo = null;
-          $("loginOverlay").classList.remove("hidden");
-          selectLoginRole("admin");
-          const errEl = $("loginErr");
-          if (errEl && data.reason === "session_expired") {
-            errEl.textContent =
-              "Your previous session has expired. Please sign in again.";
-            errEl.className = "msg err";
-          }
-        }
-      })
-      .catch(() => {
-        // Network error — show login anyway
-        $("loginOverlay").classList.remove("hidden");
-        selectLoginRole("admin");
-      });
-  } else {
-    $("loginOverlay").classList.remove("hidden");
-    selectLoginRole("admin");
-    checkHealth();
+  } catch (e) {
+    setMsg("enrollMsg", "Error: " + e.message, "err");
+    progress.style.display = "none";
+    bar.style.width = "0%";
   }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FULL STUDENT EDIT MODAL
+═══════════════════════════════════════════════════════════════════════ */
+let _editingSid = null;
+
+window.openEditModal = async function (sid) {
+  _editingSid = sid;
+  document.getElementById("editModal").style.display = "flex";
+  document.body.style.overflow = "hidden";
+
+  // Load student data
+  const r = await api(`/students/${sid}`);
+  if (!r) return;
+  const s = await r.json();
+
+  document.getElementById("modalTitle").textContent = `Edit — ${s.full_name}`;
+  document.getElementById("mSid").value = s.student_id;
+  document.getElementById("mName").value = s.full_name;
+  document.getElementById("mDept").value = s.department || "";
+  document.getElementById("mSem").value = s.semester || "";
+  document.getElementById("mEmail").value = s.email || "";
+  document.getElementById("mPhone").value = s.phone || "";
+  document.getElementById("mStatus").value = s.status || "active";
+
+  setMsg("editMsg", "", "");
+  setMsg("attEditMsg", "", "");
+  document.getElementById("attEditDate").value = todayStr();
+
+  // Load attendance records for the attendance tab
+  _renderAttEditList(s.attendance || []);
+  // Reset to profile tab
+  switchModalTab("profile", document.querySelector(".mtab"));
+};
+
+function closeEditModal(event) {
+  if (event && event.target !== document.getElementById("editModal")) return;
+  _closeEditModal();
+}
+function _closeEditModal() {
+  document.getElementById("editModal").style.display = "none";
+  document.body.style.overflow = "";
+  _editingSid = null;
+}
+// Also close on Escape
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") _closeEditModal();
 });
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   VOICE GUIDANCE & AUDIO EFFECTS (unchanged from v3.0)
-   ═══════════════════════════════════════════════════════════════════════════ */
-let _voiceEnabled = true,
-  _lastSpokenText = "",
-  _lastSpokenTime = 0;
-const VOICE_COOLDOWN_MS = 1800;
+function switchModalTab(tab, btn) {
+  document
+    .querySelectorAll(".mtab")
+    .forEach((b) => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  else
+    document
+      .querySelectorAll(".mtab")
+      [
+        ["profile", "attendance", "actlog"].indexOf(tab)
+      ]?.classList.add("active");
+  ["profile", "attendance", "actlog"].forEach((t) => {
+    const el = document.getElementById(`mtab-${t}`);
+    if (el) el.style.display = t === tab ? "block" : "none";
+  });
+  if (tab === "actlog" && _editingSid) _loadActLog(_editingSid);
+}
+
+async function saveStudentEdit() {
+  if (!_editingSid) return;
+  const fields = {
+    full_name: document.getElementById("mName").value.trim(),
+    department: document.getElementById("mDept").value.trim() || null,
+    semester: document.getElementById("mSem").value.trim() || null,
+    email: document.getElementById("mEmail").value.trim() || null,
+    phone: document.getElementById("mPhone").value.trim() || null,
+    status: document.getElementById("mStatus").value,
+  };
+  if (!fields.full_name) {
+    setMsg("editMsg", "Name is required.", "err");
+    return;
+  }
+
+  const r = await api(`/students/${_editingSid}`, {
+    method: "PUT",
+    json: fields,
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) {
+    setMsg("editMsg", d.error || "Update failed.", "err");
+    return;
+  }
+
+  setMsg("editMsg", "✓ Profile updated successfully.", "ok");
+  toast("Student updated");
+  // Refresh whichever page is visible
+  const activePage = document.querySelector(".page.active")?.id;
+  if (activePage === "page-students") searchStudents();
+  if (activePage === "page-dashboard") loadDashboard();
+  if (activePage === "page-profile") viewProfile(_editingSid);
+}
+
+async function confirmDeleteStudent() {
+  if (!_editingSid) return;
+  if (
+    !confirm(
+      `Permanently delete student ${_editingSid}? This cannot be undone.`,
+    )
+  )
+    return;
+  const r = await api(`/students/${_editingSid}`, { method: "DELETE" });
+  if (!r) return;
+  _closeEditModal();
+  toast("Student deleted");
+  navigate("students");
+}
+
+// ── Attendance override in modal ──────────────────────────────────────
+function _renderAttEditList(records) {
+  const el = document.getElementById("attEditList");
+  if (!records || !records.length) {
+    el.innerHTML = `<p class="muted" style="padding:.5rem 0">No attendance records yet.</p>`;
+    return;
+  }
+  el.innerHTML = records
+    .map(
+      (r) => `
+    <div class="att-edit-row">
+      <span class="att-edit-date">${r.date}</span>
+      <span class="${r.status === "Present" ? "badge-present" : "badge-absent"}">${r.status}</span>
+      <span class="att-edit-time">${r.time || "—"}</span>
+      <span class="att-edit-note">${r.note || ""}</span>
+      <button class="att-edit-del" onclick="deleteAttRecord('${r.date}')" title="Remove">✕</button>
+    </div>`,
+    )
+    .join("");
+}
+
+async function saveAttendanceEdit() {
+  if (!_editingSid) return;
+  const date = document.getElementById("attEditDate").value;
+  const status = document.getElementById("attEditStatus").value;
+  const note = document.getElementById("attEditNote").value.trim();
+  if (!date) {
+    setMsg("attEditMsg", "Select a date.", "err");
+    return;
+  }
+
+  const r = await api(`/attendance/${_editingSid}/${date}`, {
+    method: "PUT",
+    json: { status, note },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) {
+    setMsg("attEditMsg", d.error || "Update failed.", "err");
+    return;
+  }
+
+  setMsg("attEditMsg", `✓ Attendance set to ${status} for ${date}.`, "ok");
+  document.getElementById("attEditNote").value = "";
+  // Reload student data to refresh the list
+  const sr = await api(`/students/${_editingSid}`);
+  const sd = await sr.json();
+  _renderAttEditList(sd.attendance || []);
+}
+
+async function deleteAttRecord(attDate) {
+  if (!confirm(`Remove attendance record for ${attDate}?`)) return;
+  const r = await api(`/attendance/${_editingSid}/${attDate}`, {
+    method: "DELETE",
+  });
+  if (!r) return;
+  toast("Record removed");
+  const sr = await api(`/students/${_editingSid}`);
+  const sd = await sr.json();
+  _renderAttEditList(sd.attendance || []);
+}
+
+// ── Activity log in modal ─────────────────────────────────────────────
+async function _loadActLog(sid) {
+  const el = document.getElementById("actLogList");
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  try {
+    const r = await api(`/activity-logs?target_id=${sid}&limit=30`);
+    const d = await r.json();
+    const logs = d.logs || [];
+    if (!logs.length) {
+      el.innerHTML = `<p class="muted">No activity recorded yet.</p>`;
+      return;
+    }
+    el.innerHTML = logs
+      .map(
+        (l) => `
+      <div class="act-log-row">
+        <span class="act-ts">${l.logged_at?.slice(0, 16) || ""}</span>
+        <span class="act-who">${l.admin_user}</span>
+        <span class="act-action">&nbsp;·&nbsp;${l.action.replace(/_/g, " ")}</span>
+        ${l.detail ? `<span class="act-detail">&nbsp;— ${l.detail}</span>` : ""}
+      </div>`,
+      )
+      .join("");
+  } catch {
+    el.innerHTML = `<p class="muted err">Failed to load.</p>`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SETTINGS PAGE — add email status + test button
+═══════════════════════════════════════════════════════════════════════ */
+const _origLoadSettings =
+  typeof loadSettings === "function" ? loadSettings : async () => {};
+window.loadSettings = async function () {
+  await _origLoadSettings();
+  try {
+    const r = await api("/settings");
+    const d = await r.json();
+    // Inject email status into settings page if element exists
+    let emailEl = document.getElementById("emailStatusBadge");
+    if (!emailEl) return;
+    const on = d.email_enabled;
+    emailEl.className = `email-status ${on ? "on" : "off"}`;
+    emailEl.textContent = on ? "✓ Email enabled" : "✗ Email disabled";
+    if (d.smtp_user)
+      document.getElementById("smtpUserDisplay") &&
+        (document.getElementById("smtpUserDisplay").textContent = d.smtp_user);
+  } catch {}
+};
+
+async function sendTestEmail() {
+  const email = prompt("Enter email address to send test to:");
+  if (!email) return;
+  const r = await api("/email/test", { method: "POST", json: { email } });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) toast("Test email queued — check inbox in ~10s");
+  else toast(d.error || "Failed", "err");
+}
+
+async function sendBulkAttendanceEmail() {
+  if (
+    !confirm(
+      "Send today's attendance summary to all registered students with email addresses?",
+    )
+  )
+    return;
+  const r = await api("/email/send-attendance-summary", {
+    method: "POST",
+    json: { date: todayStr() },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    toast(`Attendance emails queued for ${d.date}`);
+  } else {
+    toast(d.error || "Failed", "err");
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ENROLL — Step navigation
+═══════════════════════════════════════════════════════════════════════ */
+function _setEnrollStep(n) {
+  const titles = {
+    1: "Student Profile",
+    2: "Face Capture",
+    3: "Review & Confirm",
+  };
+  [1, 2, 3].forEach((i) => {
+    const panel = document.getElementById(`epanel-${i}`);
+    const step = document.getElementById(`estep-${i}`);
+    if (panel) panel.style.display = i === n ? "block" : "none";
+    if (step) {
+      step.classList.toggle("active", i === n);
+      step.classList.toggle("done", i < n);
+    }
+  });
+  const titleEl = document.getElementById("esbTitle");
+  if (titleEl) titleEl.textContent = titles[n] || "";
+}
+
+function goToStep1() {
+  _setEnrollStep(1);
+}
+
+function goToStep2() {
+  const sid = document.getElementById("eId").value.trim();
+  const name = document.getElementById("eName").value.trim();
+  if (!sid || !name) {
+    toast("Student ID and Full Name are required", "err");
+    document.getElementById("eId").focus();
+    return;
+  }
+  _setEnrollStep(2);
+}
+
+function goToStep3() {
+  // Build review grid
+  const fields = [
+    ["Student ID", document.getElementById("eId").value.trim()],
+    ["Full Name", document.getElementById("eName").value.trim()],
+    ["Department", document.getElementById("eDept").value.trim()],
+    ["Semester", document.getElementById("eSem")?.value.trim() || ""],
+    ["Email", document.getElementById("eEmail").value.trim()],
+    ["Phone", document.getElementById("ePhone").value.trim()],
+  ];
+  const grid = document.getElementById("reviewGrid");
+  grid.innerHTML = fields
+    .map(
+      ([label, val]) => `
+    <div class="rv-row">
+      <span class="rv-label">${label}</span>
+      <span class="rv-val ${val ? "" : "empty"}">${val || "—"}</span>
+    </div>`,
+    )
+    .join("");
+
+  // Capture summary badge
+  const total = Object.values(poseCaptureCounts).reduce((a, b) => a + b, 0);
+  const badge = document.getElementById("reviewCaptureBadge");
+  if (total > 0) {
+    badge.className = "review-capture-badge ready";
+    badge.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg>
+      ${total} frames captured via guided auto-capture`;
+  } else {
+    badge.className = "review-capture-badge warn";
+    badge.innerHTML = `⚠ No face images yet — go back and capture`;
+  }
+
+  setMsg("enrollMsg", "", "");
+  _setEnrollStep(3);
+}
+
+// Reset enroll page back to step 1 after successful enroll
+const _origResetCapture =
+  typeof resetCapture === "function" ? resetCapture : () => {};
+window.resetEnrollPage = function () {
+  _origResetCapture();
+  _setEnrollStep(1);
+  document.getElementById("reviewGrid") &&
+    (document.getElementById("reviewGrid").innerHTML = "");
+  setMsg("enrollMsg", "", "");
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STUDENTS — Faculty filter tabs
+═══════════════════════════════════════════════════════════════════════ */
+let _activeFacultyFilter = "";
+let _allStudentsCache = [];
+
+async function loadStudents() {
+  // Load departments for tab bar
+  try {
+    const r = await api("/departments");
+    const d = await r.json();
+    _buildStudentFacultyTabs(d.departments || []);
+  } catch {}
+  await searchStudents();
+}
+
+function _buildStudentFacultyTabs(depts) {
+  const bar = document.getElementById("studentFacultyTabs");
+  if (!bar) return;
+  bar.innerHTML = [
+    `<div class="faculty-tab ${_activeFacultyFilter === "" ? "active" : ""}"
+          onclick="filterStudentsByFaculty('',this)">All</div>`,
+    ...depts.map(
+      (d) =>
+        `<div class="faculty-tab ${_activeFacultyFilter === d ? "active" : ""}"
+            onclick="filterStudentsByFaculty('${d}',this)">${d}</div>`,
+    ),
+  ].join("");
+}
+
+async function filterStudentsByFaculty(dept, btn) {
+  _activeFacultyFilter = dept;
+  document
+    .querySelectorAll("#studentFacultyTabs .faculty-tab")
+    .forEach((b) =>
+      b.classList.toggle("active", b.textContent.trim() === (dept || "All")),
+    );
+  document.getElementById("studentSearch").value = "";
+  await searchStudents();
+}
+
+// Override existing searchStudents to use faculty filter
+const _origSearchStudents = window.searchStudents || (async () => {});
+window.searchStudents = async function () {
+  const q = document.getElementById("studentSearch")?.value.trim() || "";
+  const dept = _activeFacultyFilter;
+  let url = `/students?q=${encodeURIComponent(q)}`;
+  if (dept) url += `&department=${encodeURIComponent(dept)}`;
+  try {
+    const r = await api(url);
+    const d = await r.json();
+    _allStudentsCache = d.students || [];
+    _renderStudentGrid(_allStudentsCache);
+    _renderStudentFacultyBar(_allStudentsCache);
+  } catch (e) {
+    console.error("searchStudents:", e);
+  }
+};
+
+function _renderStudentGrid(students) {
+  const grid = document.getElementById("personsGrid");
+  if (!grid) return;
+  grid.innerHTML =
+    students
+      .map((s) => {
+        const initials = s.full_name
+          .split(" ")
+          .map((w) => w[0]?.toUpperCase())
+          .slice(0, 2)
+          .join("");
+        return `
+      <div class="person-card" onclick="viewProfile('${s.student_id}')">
+        <button class="person-del" onclick="event.stopPropagation();deleteStudent('${s.student_id}')" title="Edit">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <div class="person-avatar">${initials || "?"}</div>
+        <div class="person-name">${s.full_name}</div>
+        <div class="person-dept">${s.department || "—"}</div>
+        <div class="person-dept" style="font-family:var(--mono);font-size:10px;color:var(--text3)">${s.semester || ""} · ${s.sample_count} images</div>
+      </div>`;
+      })
+      .join("") ||
+    `<p style="color:var(--text3);grid-column:1/-1">No students found.</p>`;
+}
+
+function _renderStudentFacultyBar(students) {
+  const bar = document.getElementById("studentFacultyBar");
+  if (!bar) return;
+  if (_activeFacultyFilter) {
+    bar.innerHTML = "";
+    return;
+  }
+  const deptMap = {};
+  students.forEach((s) => {
+    const d = s.department || "Unassigned";
+    deptMap[d] = (deptMap[d] || 0) + 1;
+  });
+  bar.innerHTML = Object.entries(deptMap)
+    .sort((a, b) => b[1] - a[1])
+    .map(
+      ([dept, count]) => `
+      <div class="sfb-chip">
+        ${dept} <span class="sfb-count">${count}</span>
+      </div>`,
+    )
+    .join("");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO EMAIL on SSE attendance event
+   When the SSE connection receives a new attendance mark,
+   automatically queue an email — no manual trigger needed.
+═══════════════════════════════════════════════════════════════════════ */
+const _origHandleAttendanceEvent =
+  typeof handleAttendanceEvent === "function"
+    ? handleAttendanceEvent
+    : () => {};
+
+window.handleAttendanceEvent = function (event) {
+  // Call original handler (updates UI panels, toast, etc.)
+  _origHandleAttendanceEvent(event);
+
+  // Auto-send email — fire and forget, no await
+  // The backend already queues emails from camera stream,
+  // but for image-upload recognition we also trigger from here
+  // to ensure nothing is missed regardless of recognition path.
+  if (event.student_id && event.student_id !== "TEST") {
+    api(`/students/${event.student_id}`)
+      .then((r) => r && r.json())
+      .then((s) => {
+        if (s && s.email) {
+          // Email is already queued server-side by _mark_attendance_and_broadcast.
+          // The frontend just confirms — no double send because backend deduplicates
+          // on (student_id, subject, date) in email_log.
+          console.log(
+            `[email] attendance email queued for ${s.full_name} → ${s.email}`,
+          );
+        }
+      })
+      .catch(() => {});
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════
+   VOICE GUIDANCE & SOUND EFFECTS SYSTEM
+   ─────────────────────────────────────────────────────────────────────
+   Architecture:
+   • Voice: Web Speech API (SpeechSynthesis) — built into every modern
+     browser, no external library, no API key, works offline.
+   • Sounds: Web Audio API (AudioContext) — synthesised tones, no files
+     needed. Three distinct sounds:
+       - "ding"  : single high tone  → pose step complete
+       - "chime" : ascending 3-tone  → all capture complete / success
+       - "tick"  : soft click        → each frame captured (subtle)
+   • Debouncing: voice is throttled so the same phrase can't fire twice
+     within 2.5 seconds (prevents spam during frame capture loop).
+═══════════════════════════════════════════════════════════════════════ */
+
+// ── Voice state ───────────────────────────────────────────────────────
+let _voiceEnabled = true; // toggled by UI button
+let _lastSpokenText = "";
+let _lastSpokenTime = 0;
+const VOICE_COOLDOWN_MS = 2500;
+
+// Pick the best English voice available on this device
+let _selectedVoice = null;
+function _loadVoice() {
+  if (!window.speechSynthesis) return;
+  const pick = () => {
+    const voices = speechSynthesis.getVoices();
+    // Prefer: Samantha (macOS), Google UK English Female, any en-GB, en-US
+    _selectedVoice =
+      voices.find((v) => v.name === "Samantha") ||
+      voices.find((v) => v.name.includes("Google UK English Female")) ||
+      voices.find((v) => v.lang === "en-GB" && !v.name.includes("Male")) ||
+      voices.find((v) => v.lang.startsWith("en")) ||
+      voices[0] ||
+      null;
+  };
+  pick();
+  speechSynthesis.onvoiceschanged = pick; // fires asynchronously on Chrome
+}
+_loadVoice();
 
 function _speakInstruction(text, force = false) {
-  if (!_voiceEnabled || !("speechSynthesis" in window)) return;
+  if (!_voiceEnabled || !window.speechSynthesis) return;
   const now = Date.now();
   if (
     !force &&
@@ -3039,52 +2600,208 @@ function _speakInstruction(text, force = false) {
     return;
   _lastSpokenText = text;
   _lastSpokenTime = now;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 0.95;
-    u.pitch = 1.0;
-    u.volume = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const ev = voices.find((v) => v.lang.startsWith("en"));
-    if (ev) u.voice = ev;
-    window.speechSynthesis.speak(u);
-  } catch {}
-}
-if ("speechSynthesis" in window)
-  window.speechSynthesis.onvoiceschanged = () => {};
 
+  speechSynthesis.cancel(); // stop any currently speaking utterance
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.voice = _selectedVoice;
+  utt.rate = 0.92;
+  utt.pitch = 1.0;
+  utt.volume = 1.0;
+  speechSynthesis.speak(utt);
+}
+
+// ── Web Audio sound effects ───────────────────────────────────────────
 let _audioCtx = null;
 function _getAudioCtx() {
-  if (!_audioCtx)
+  if (!_audioCtx) {
     _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Resume if suspended (required after user gesture on some browsers)
   if (_audioCtx.state === "suspended") _audioCtx.resume();
   return _audioCtx;
 }
-function _playTone(freq, dur, type = "sine", gain = 0.35, delay = 0) {
+
+function _playTone(
+  freq,
+  duration,
+  type = "sine",
+  gainVal = 0.35,
+  startDelay = 0,
+) {
   try {
-    const ctx = _getAudioCtx(),
-      osc = ctx.createOscillator(),
-      g = ctx.createGain();
-    osc.connect(g);
-    g.connect(ctx.destination);
+    const ctx = _getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
     osc.type = type;
-    osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
-    g.gain.setValueAtTime(0, ctx.currentTime + delay);
-    g.gain.linearRampToValueAtTime(gain, ctx.currentTime + delay + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + dur);
-    osc.start(ctx.currentTime + delay);
-    osc.stop(ctx.currentTime + delay + dur + 0.05);
+    osc.frequency.setValueAtTime(freq, ctx.currentTime + startDelay);
+
+    gain.gain.setValueAtTime(0, ctx.currentTime + startDelay);
+    gain.gain.linearRampToValueAtTime(
+      gainVal,
+      ctx.currentTime + startDelay + 0.01,
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      ctx.currentTime + startDelay + duration,
+    );
+
+    osc.start(ctx.currentTime + startDelay);
+    osc.stop(ctx.currentTime + startDelay + duration + 0.05);
   } catch {}
 }
+
+// Ding: single 880 Hz tone — pose step complete
 function _soundDing() {
-  _playTone(880, 0.22);
+  _playTone(880, 0.22, "sine", 0.35);
 }
+
+// Chime: ascending C5-E5-G5 — all capture complete
 function _soundChime() {
-  _playTone(523, 0.18, "sine", 0.32, 0);
+  _playTone(523, 0.18, "sine", 0.32, 0.0);
   _playTone(659, 0.18, "sine", 0.32, 0.18);
   _playTone(784, 0.28, "sine", 0.38, 0.36);
 }
+
+// Tick: very quiet soft click — per-frame feedback
 function _soundTick() {
   _playTone(1200, 0.04, "triangle", 0.08);
 }
+
+// ── Wire sounds into capture events ──────────────────────────────────
+// Override _validateAndCapture to inject sounds + first instruction
+const _origValidateAndCapture = _validateAndCapture;
+
+// We can't simply reassign async functions by name in the same scope,
+// so we patch via the capture engine's integration points below.
+
+// Announce the first instruction when capture starts
+const _origStartAutoCapture = window.startAutoCapture || startAutoCapture;
+window.startAutoCapture = async function () {
+  await _origStartAutoCapture();
+  if (captureActive) {
+    // Small delay so voice starts after camera opens
+    setTimeout(() => {
+      _speakInstruction(
+        "Face capture started. " +
+          (POSE_SEQUENCE[0].voiceInstruction || POSE_SEQUENCE[0].instruction),
+        true,
+      );
+    }, 800);
+  }
+};
+
+// Patch _onCaptureComplete to play the chime + speak completion
+const _origOnCaptureComplete = _onCaptureComplete;
+window._onCaptureComplete = function () {
+  _soundChime();
+  setTimeout(() => {
+    _speakInstruction(
+      "Face capture complete! You may now proceed to enroll.",
+      true,
+    );
+  }, 400);
+  _origOnCaptureComplete();
+};
+
+// Patch the instruction display: intercept textContent changes
+// to auto-speak them. We do this by wrapping the setter.
+// The clean way is to call _speakInstruction explicitly at each update point.
+// We patch _validateAndCapture since that's where instructions are set.
+
+// Instruction auto-speak: hook into the per-frame logic
+// Add a MutationObserver on the instruction element
+window.addEventListener("load", () => {
+  // Wait until after DOM is ready
+  setTimeout(() => {
+    const instrEl = document.getElementById("captureInstruction");
+    if (!instrEl) return;
+
+    let _lastObservedText = "";
+    const observer = new MutationObserver(() => {
+      const text = instrEl.textContent.trim();
+      if (!text || text === _lastObservedText) return;
+      _lastObservedText = text;
+
+      // Speak warnings immediately (they start with ⚠)
+      if (text.startsWith("⚠")) {
+        _speakInstruction(text.replace("⚠", "").trim(), false);
+        return;
+      }
+
+      // Speak pose-done transitions (✓ ... done!  Now: ...)
+      // The transition message format is: "✓ POSE done!  Now: <next instruction>"
+      if (text.includes("done!") && text.includes("Now:")) {
+        // Sound is already played in _validateAndCapture — don't double-play.
+        // Voice is also already queued with 300ms delay in _validateAndCapture.
+        // Observer just needs to not interfere, so return early.
+        return;
+      }
+
+      // Speak ongoing instruction (✓ N frames — <instruction>)
+      // Format: "✓ 12 frames — Look straight at the camera"
+      if (text.startsWith("✓") && text.includes("frames —")) {
+        // Play a quiet tick per frame, speak the instruction every 10 frames
+        const match = text.match(/(\d+) frames/);
+        const n = match ? parseInt(match[1]) : 0;
+        _soundTick();
+        if (n > 0 && n % 10 === 0) {
+          const instr = text.split("—")[1]?.trim();
+          if (instr) _speakInstruction(`${n} frames. ${instr}`, false);
+        }
+        return;
+      }
+
+      // Completion
+      if (
+        text.includes("frames collected") ||
+        text.includes("capture complete")
+      ) {
+        return; // handled by _onCaptureComplete patch above
+      }
+    });
+
+    observer.observe(instrEl, {
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+  }, 500);
+});
+
+// ── Voice toggle button (injected into the capture panel) ─────────────
+// We add a small toggle button to the capture status bar automatically.
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    const bar = document.querySelector(".capture-status-bar");
+    if (!bar || document.getElementById("voiceToggleBtn")) return;
+
+    const btn = document.createElement("button");
+    btn.id = "voiceToggleBtn";
+    btn.title = "Toggle voice guidance";
+    btn.className = "csb-voice-btn active";
+    btn.innerHTML = `
+      <svg id="voiceIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+        <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+      </svg>`;
+    btn.onclick = () => {
+      _voiceEnabled = !_voiceEnabled;
+      btn.classList.toggle("active", _voiceEnabled);
+      btn.title = _voiceEnabled
+        ? "Voice on — click to mute"
+        : "Voice off — click to enable";
+      if (_voiceEnabled) {
+        _speakInstruction("Voice guidance enabled", true);
+      } else {
+        speechSynthesis.cancel();
+      }
+      // Update icon opacity
+      btn.style.opacity = _voiceEnabled ? "1" : "0.35";
+    };
+    bar.appendChild(btn);
+  }, 600);
+});
