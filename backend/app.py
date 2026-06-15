@@ -1652,10 +1652,15 @@ def delete_faculty_db(fid):
 @app.route("/api/timeslots")
 @require_auth
 def list_timeslots():
+    search = request.args.get("search", "").strip()
+    limit  = int(request.args.get("limit", 0))   # 0 = no limit (for dropdowns)
+    where  = "WHERE label ILIKE %s" if search else ""
+    vals   = ([f"%{search}%"] if search else [])
+    lim    = f"LIMIT {limit}" if limit else ""
     with get_db() as conn:
         rows = qall(conn,
-            "SELECT id, label, start_time::text AS start_time, end_time::text AS end_time "
-            "FROM time_slots ORDER BY start_time")
+            f"SELECT id, label, start_time::text AS start_time, end_time::text AS end_time "
+            f"FROM time_slots {where} ORDER BY start_time {lim}", vals)
     return jsonify({"time_slots": rows})
 
 @app.route("/api/timeslots", methods=["POST"])
@@ -1692,9 +1697,19 @@ def update_timeslot(tid):
 @require_auth
 def delete_timeslot(tid):
     with get_db() as conn:
+        qexec(conn, "UPDATE teacher_assignments SET time_slot_id=NULL WHERE time_slot_id=%s", (tid,))
         row = qone(conn, "DELETE FROM time_slots WHERE id=%s RETURNING id", (tid,))
     if not row: return jsonify({"error": "Time slot not found"}), 404
     _log_activity(g.user["username"], "delete_timeslot", "timeslot", target_id=str(tid))
+    return jsonify({"deleted": True})
+
+@app.route("/api/timeslots/all", methods=["DELETE"])
+@require_auth
+def delete_all_timeslots():
+    with get_db() as conn:
+        qexec(conn, "UPDATE teacher_assignments SET time_slot_id=NULL")
+        qexec(conn, "DELETE FROM time_slots")
+    _log_activity(g.user["username"], "delete_all_timeslots", "timeslot")
     return jsonify({"deleted": True})
 
 # ── Teachers CRUD ─────────────────────────────────────────────────────────
@@ -1703,17 +1718,54 @@ def delete_timeslot(tid):
 def list_teachers():
     with get_db() as conn:
         rows = qall(conn, """
-            SELECT t.id, t.teacher_id, t.full_name, t.email, t.phone, t.status, t.semester,
-                   f.id   AS faculty_id,   f.name  AS faculty_name,
-                   s.id   AS subject_id,   s.name  AS subject_name,
-                   ts.id  AS time_slot_id, ts.label AS time_slot_label
+            SELECT t.id, t.teacher_id, t.full_name, t.email, t.phone, t.status,
+                   COALESCE(
+                       json_agg(
+                           json_build_object(
+                               'id',              ta.id,
+                               'faculty_id',      ta.faculty_id,
+                               'faculty_name',    f.name,
+                               'faculty_code',    f.code,
+                               'semester',        ta.semester,
+                               'subject_id',      ta.subject_id,
+                               'subject_name',    s.name,
+                               'subject_code',    s.code,
+                               'time_slot_id',    ta.time_slot_id,
+                               'time_slot_label', ts.label
+                           ) ORDER BY ta.id
+                       ) FILTER (WHERE ta.id IS NOT NULL),
+                       '[]'::json
+                   ) AS assignments
             FROM teachers t
-            LEFT JOIN faculties  f  ON f.id  = t.faculty_id
-            LEFT JOIN subjects   s  ON s.id  = t.subject_id
-            LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
+            LEFT JOIN teacher_assignments ta ON ta.teacher_id = t.id
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            GROUP BY t.id
             ORDER BY t.full_name
         """)
     return jsonify({"teachers": rows})
+
+@app.route("/api/teachers/<int:tid>", methods=["GET"])
+@require_auth
+def get_teacher(tid):
+    with get_db() as conn:
+        t = qone(conn,
+            "SELECT id, teacher_id, full_name, email, phone, status FROM teachers WHERE id=%s",
+            (tid,))
+        if not t: return jsonify({"error": "Teacher not found"}), 404
+        assignments = qall(conn, """
+            SELECT ta.id, ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
+                   ta.time_slot_id, ts.label AS time_slot_label
+            FROM teacher_assignments ta
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s ORDER BY ta.id
+        """, (tid,))
+    t["assignments"] = assignments
+    return jsonify({"teacher": t})
 
 @app.route("/api/teachers", methods=["POST"])
 @require_auth
@@ -1726,21 +1778,12 @@ def create_teacher():
     try:
         with get_db() as conn:
             row = qone(conn, """
-                INSERT INTO teachers
-                    (teacher_id, full_name, email, phone, password_hash,
-                     faculty_id, semester, subject_id, time_slot_id, status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id, teacher_id, full_name, email, phone, status, semester,
-                          faculty_id, subject_id, time_slot_id
-            """, (
-                d["teacher_id"], d["full_name"],
-                d.get("email"), d.get("phone"), pw_hash,
-                d.get("faculty_id") or None,
-                d.get("semester") or None,
-                d.get("subject_id") or None,
-                d.get("time_slot_id") or None,
-                d.get("status", "active")
-            ))
+                INSERT INTO teachers (teacher_id, full_name, email, phone, password_hash, status)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                RETURNING id, teacher_id, full_name, email, phone, status
+            """, (d["teacher_id"], d["full_name"],
+                  d.get("email"), d.get("phone"), pw_hash,
+                  d.get("status", "active")))
     except Exception as e:
         if "unique" in str(e).lower():
             return jsonify({"error": "Teacher ID already exists"}), 409
@@ -1753,8 +1796,7 @@ def create_teacher():
 def update_teacher(tid):
     d = request.json or {}
     fields, values = [], []
-    for col in ["teacher_id","full_name","email","phone","status","semester",
-                "faculty_id","subject_id","time_slot_id"]:
+    for col in ["teacher_id", "full_name", "email", "phone", "status"]:
         if col in d:
             fields.append(f"{col}=%s")
             values.append(d[col] or None)
@@ -1766,8 +1808,7 @@ def update_teacher(tid):
     with get_db() as conn:
         row = qone(conn,
             f"UPDATE teachers SET {', '.join(fields)} WHERE id=%s "
-            "RETURNING id, teacher_id, full_name, email, phone, status, semester, "
-            "faculty_id, subject_id, time_slot_id",
+            "RETURNING id, teacher_id, full_name, email, phone, status",
             values)
     if not row: return jsonify({"error": "Teacher not found"}), 404
     _log_activity(g.user["username"], "update_teacher", "teacher", target_id=str(tid))
@@ -1777,9 +1818,61 @@ def update_teacher(tid):
 @require_auth
 def delete_teacher(tid):
     with get_db() as conn:
+        # Nullify FK references that are NO ACTION (not cascaded)
+        qexec(conn, "UPDATE recognition_logs SET teacher_id = NULL WHERE teacher_id = %s", (tid,))
+        qexec(conn, "UPDATE attendance SET teacher_id = NULL WHERE teacher_id = %s", (tid,))
         row = qone(conn, "DELETE FROM teachers WHERE id=%s RETURNING id", (tid,))
     if not row: return jsonify({"error": "Teacher not found"}), 404
     _log_activity(g.user["username"], "delete_teacher", "teacher", target_id=str(tid))
+    return jsonify({"deleted": True})
+
+# ── Teacher Assignments ────────────────────────────────────────────────────
+@app.route("/api/teachers/<int:tid>/assignments", methods=["GET"])
+@require_auth
+def get_teacher_assignments(tid):
+    with get_db() as conn:
+        rows = qall(conn, """
+            SELECT ta.id, ta.faculty_id, f.name AS faculty_name,
+                   ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
+                   ta.time_slot_id, ts.label AS time_slot_label
+            FROM teacher_assignments ta
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s ORDER BY ta.id
+        """, (tid,))
+    return jsonify({"assignments": rows})
+
+@app.route("/api/teachers/<int:tid>/assignments", methods=["POST"])
+@require_auth
+def add_teacher_assignment(tid):
+    d = request.json or {}
+    with get_db() as conn:
+        # verify teacher exists
+        if not qone(conn, "SELECT id FROM teachers WHERE id=%s", (tid,)):
+            return jsonify({"error": "Teacher not found"}), 404
+        row = qone(conn, """
+            INSERT INTO teacher_assignments
+                (teacher_id, faculty_id, semester, subject_id, time_slot_id, is_primary)
+            VALUES (%s,%s,%s,%s,%s,%s)
+            RETURNING id, faculty_id, semester, subject_id, time_slot_id
+        """, (tid,
+              d.get("faculty_id") or None,
+              d.get("semester") or None,
+              d.get("subject_id") or None,
+              d.get("time_slot_id") or None,
+              d.get("is_primary", False)))
+    _log_activity(g.user["username"], "add_assignment", "teacher", target_id=str(tid))
+    return jsonify({"assignment": row}), 201
+
+@app.route("/api/teacher-assignments/<int:aid>", methods=["DELETE"])
+@require_auth
+def delete_teacher_assignment(aid):
+    with get_db() as conn:
+        row = qone(conn,
+            "DELETE FROM teacher_assignments WHERE id=%s RETURNING id", (aid,))
+    if not row: return jsonify({"error": "Assignment not found"}), 404
+    _log_activity(g.user["username"], "delete_assignment", "teacher", target_id=str(aid))
     return jsonify({"deleted": True})
 
 # ── Subjects CRUD ──────────────────────────────────────────────────────────
@@ -1797,7 +1890,7 @@ def list_subjects():
     with get_db() as conn:
         rows = qall(conn, f"""
             SELECT s.id, s.name, s.code, s.semester, s.faculty_id,
-                   f.name AS faculty_name
+                   f.name AS faculty_name, f.code AS faculty_code
             FROM subjects s
             LEFT JOIN faculties f ON f.id = s.faculty_id
             {clause}
