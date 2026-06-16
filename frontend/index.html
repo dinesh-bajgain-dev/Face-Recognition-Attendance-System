@@ -564,6 +564,7 @@
           <button class="btn-secondary" onclick="navigate('students')">
             ← Back
           </button>
+          <div id="profileActions"></div>
         </header>
         <div id="profileContent"></div>
       </section>
@@ -1734,6 +1735,26 @@
           <label>Subject ID *</label
           ><input type="text" id="smCode" placeholder="e.g. CSC206" />
         </div>
+        <div class="form-group">
+          <label>Faculty</label>
+          <select id="smFaculty">
+            <option value="">-- Select Faculty --</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Semester</label>
+          <select id="smSemester">
+            <option value="">-- Select Semester --</option>
+            <option value="1">Semester 1</option>
+            <option value="2">Semester 2</option>
+            <option value="3">Semester 3</option>
+            <option value="4">Semester 4</option>
+            <option value="5">Semester 5</option>
+            <option value="6">Semester 6</option>
+            <option value="7">Semester 7</option>
+            <option value="8">Semester 8</option>
+          </select>
+        </div>
         <div id="subjectModalErr" class="msg err"></div>
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeModal('subjectModal')">
@@ -1777,44 +1798,105 @@
     </div>
 
     <!-- Student Edit Modal (admin) -->
-    <div class="modal-overlay" id="editModal">
-      <div class="modal-box">
-        <div class="modal-title">Edit Student</div>
-        <input type="hidden" id="editSid" />
-        <div class="modal-form-grid">
-          <div class="form-group">
-            <label>Full Name</label><input type="text" id="editName" />
-          </div>
-          <div class="form-group">
-            <label>Department</label
-            ><input type="text" id="editDept" list="editDeptList" />
-            <datalist id="editDeptList"></datalist>
-          </div>
-          <div class="form-group">
-            <label>Semester</label><input type="text" id="editSem" />
-          </div>
-          <div class="form-group">
-            <label>Email</label><input type="email" id="editEmail" />
-          </div>
-          <div class="form-group">
-            <label>Phone</label><input type="text" id="editPhone" />
-          </div>
-          <div class="form-group">
-            <label>Status</label>
-            <select id="editStatus">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="graduated">Graduated</option>
-              <option value="suspended">Suspended</option>
-            </select>
+    <div class="modal-overlay" id="editModal" onclick="closeEditModal(event)">
+      <div class="modal-box" style="width:560px;max-width:95%">
+        <!-- Header -->
+        <div class="modal-header">
+          <h2 id="editModalTitle">Edit Student</h2>
+          <button class="modal-close" onclick="_closeEditModal()">✕</button>
+        </div>
+        <!-- Tabs -->
+        <div style="padding:0.75rem 1.5rem 0">
+          <div class="modal-tabs">
+            <button class="mtab active" onclick="switchModalTab('profile',this)">Profile</button>
+            <button class="mtab" onclick="switchModalTab('attendance',this)">Attendance</button>
+            <button class="mtab" onclick="switchModalTab('actlog',this)">Activity Log</button>
           </div>
         </div>
-        <div id="editModalErr" class="msg err"></div>
-        <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('editModal')">
-            Cancel
-          </button>
-          <button class="btn-primary" onclick="saveStudentEdit()">Save</button>
+        <!-- Body -->
+        <div class="modal-body" style="padding-top:0">
+          <!-- Profile tab -->
+          <div id="mtab-profile">
+            <input type="hidden" id="editSid" />
+            <div class="modal-form-grid">
+              <div class="form-group">
+                <label>Student ID</label>
+                <input type="text" id="editSidDisplay" readonly style="opacity:.55;cursor:default" />
+              </div>
+              <div class="form-group">
+                <label>Full Name <span class="req">*</span></label>
+                <input type="text" id="editName" />
+              </div>
+              <div class="form-group">
+                <label>Department</label>
+                <input type="text" id="editDept" list="editDeptList" />
+                <datalist id="editDeptList"></datalist>
+              </div>
+              <div class="form-group">
+                <label>Semester</label>
+                <input type="text" id="editSem" />
+              </div>
+              <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="editEmail" />
+              </div>
+              <div class="form-group">
+                <label>Phone</label>
+                <input type="text" id="editPhone" />
+              </div>
+              <div class="form-group" style="grid-column:1/-1">
+                <label>Status</label>
+                <select id="editStatus">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="graduated">Graduated</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
+            </div>
+            <div id="editModalErr" class="msg err" style="margin-top:.75rem"></div>
+          </div>
+          <!-- Attendance tab -->
+          <div id="mtab-attendance" style="display:none">
+            <div id="attEditList" style="max-height:220px;overflow-y:auto;margin-bottom:1rem">
+              <p class="muted">Loading…</p>
+            </div>
+            <div style="border-top:1px solid var(--border);padding-top:.75rem">
+              <div class="modal-form-grid" style="grid-template-columns:1fr 1fr">
+                <div class="form-group">
+                  <label>Date</label>
+                  <input type="date" id="attEditDate" />
+                </div>
+                <div class="form-group">
+                  <label>Status</label>
+                  <select id="attEditStatus">
+                    <option value="Present">Present</option>
+                    <option value="Absent">Absent</option>
+                  </select>
+                </div>
+                <div class="form-group" style="grid-column:1/-1">
+                  <label>Note (optional)</label>
+                  <input type="text" id="attEditNote" placeholder="e.g. Medical leave" />
+                </div>
+              </div>
+              <div id="attEditMsg" class="msg" style="margin-bottom:.5rem"></div>
+              <button class="btn-primary" onclick="saveAttendanceEdit()">Set Attendance</button>
+            </div>
+          </div>
+          <!-- Activity Log tab -->
+          <div id="mtab-actlog" style="display:none">
+            <div id="actLogList" style="max-height:320px;overflow-y:auto">
+              <p class="muted">Loading…</p>
+            </div>
+          </div>
+        </div>
+        <!-- Footer -->
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem 1.5rem;border-top:1px solid var(--border)">
+          <button class="btn-danger" onclick="confirmDeleteStudent()">Delete Student</button>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn-secondary" onclick="_closeEditModal()">Cancel</button>
+            <button class="btn-primary" onclick="saveStudentEdit()">Save Changes</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1913,6 +1995,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script src="static/js/app.js"></script>
   </body>
 </html>
