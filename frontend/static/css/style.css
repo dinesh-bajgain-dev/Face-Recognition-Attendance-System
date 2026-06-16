@@ -372,6 +372,7 @@ canvas {
   font-size: 13px;
   border-bottom: 1px solid var(--border);
   color: var(--text2);
+  vertical-align: middle;
 }
 .data-table tr:last-child td {
   border-bottom: none;
@@ -388,10 +389,65 @@ canvas {
 .data-table td a:hover {
   text-decoration: underline;
 }
+/* teacher / subject table helpers */
+.t-mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+.t-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.t-email {
+  font-size: 12px;
+  color: var(--text3);
+}
+.t-asgn {
+  max-width: 320px;
+}
+.t-asgn-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-family: var(--mono);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin: 2px 2px 2px 0;
+  white-space: nowrap;
+}
+.t-no-asgn {
+  font-size: 11px;
+  color: var(--text3);
+  font-style: italic;
+}
+.t-status {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--mono);
+}
+.t-sem-cell {
+  text-align: center;
+  width: 70px;
+}
+.t-sem-badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
 
 /* ── Buttons ────────────────────────────────────────────────────────────── */
 .btn-primary,
-.btn-secondary {
+.btn-secondary,
+.btn-danger {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -402,12 +458,13 @@ canvas {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s;
-  border: none;
+  border: 1px solid transparent;
   white-space: nowrap;
 }
 .btn-primary {
   background: var(--text);
   color: var(--bg);
+  border-color: transparent;
 }
 .btn-primary:hover {
   background: #ccc;
@@ -418,19 +475,23 @@ canvas {
 .btn-secondary {
   background: var(--bg3);
   color: var(--text2);
-  border: 1px solid var(--border-hi);
+  border-color: var(--border-hi);
 }
 .btn-secondary:hover {
   color: var(--text);
   border-color: rgba(255, 255, 255, 0.25);
 }
 .btn-danger {
-  background: var(--red-dim);
+  background: var(--bg3);
   color: var(--red);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-color: rgba(239, 68, 68, 0.35);
 }
 .btn-danger:hover {
-  background: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+.btn-danger:active {
+  transform: scale(0.97);
 }
 
 /* ── Forms ──────────────────────────────────────────────────────────────── */
@@ -2153,36 +2214,28 @@ label .req {
 }
 
 /* ── Step 2: Capture ──────────────────────────────────────────────── */
+/* ── Capture grid ────────────────────────────────────────────────────────── */
 .enroll-capture-grid {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr 320px;
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
+  height: calc(100vh - 140px);
+  min-height: 520px;
 }
 
 /* Camera column */
 .ecap-camera-col {
   display: flex;
   flex-direction: column;
-  gap: 0;
-}
-.ecap-cam-label {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-family: var(--mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text3);
-  margin-bottom: 0.5rem;
+  height: 100%;
 }
 .ecap-camera-col .capture-cam-wrap {
-  min-height: 400px;
+  flex: 1;
   border-radius: var(--r-lg);
   border: 1px solid var(--border);
+  min-height: 0;
 }
-/* Mirror the video element so user sees natural selfie view */
 .ecap-camera-col video {
   transform: scaleX(-1);
   border-radius: var(--r-lg);
@@ -2193,50 +2246,58 @@ label .req {
   background: var(--bg2);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 1.1rem;
+  padding: 1rem 1.1rem;
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
-  min-height: 480px;
+  gap: 0.75rem;
+  height: 100%;
+  overflow-y: auto;
+  min-height: 0;
 }
+
+/* Panel header */
 .ecap-panel-label {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-family: var(--mono);
   font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--blue);
+  letter-spacing: 0.12em;
+  color: var(--green);
   padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border);
-  /* green upload icon styling */
 }
-.ecap-panel-label svg {
-  color: var(--green);
+.ecap-panel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  flex-shrink: 0;
 }
 
-/* Pose row inside controls */
+/* Pose icons row */
 .ecap-pose-row {
   display: flex;
   justify-content: space-between;
-  padding: 0.5rem 0;
+  padding: 0.25rem 0 0.75rem;
   border-bottom: 1px solid var(--border);
 }
 .ecap-pose-row .pose-pip {
-  gap: 4px;
+  gap: 5px;
 }
 .ecap-pose-row .pip-icon {
-  width: 32px;
-  height: 32px;
-  font-size: 13px;
+  width: 44px;
+  height: 44px;
+  font-size: 16px;
 }
 
 /* Metrics */
 .ecap-metrics {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 8px;
 }
 .ecap-metric-row {
   display: flex;
@@ -2260,11 +2321,11 @@ label .req {
 .ecap-metric-count {
   display: flex;
   align-items: baseline;
-  gap: 3px;
+  gap: 2px;
 }
 .ecap-count-cur {
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--green);
 }
@@ -2276,19 +2337,94 @@ label .req {
 .ecap-count-tot {
   font-family: var(--mono);
   font-size: 13px;
-  color: var(--green);
+  color: var(--text3);
 }
 
-/* Instruction */
+/* Instruction box */
 .ecap-instruction {
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text2);
   line-height: 1.5;
-  min-height: 40px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem 0.75rem;
   background: var(--bg3);
   border-radius: var(--r);
   border: 1px solid var(--border);
+}
+
+/* Per-pose progress list */
+.pose-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.35rem 0;
+}
+.pp-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  flex-shrink: 0;
+}
+.pp-row.active .pp-badge {
+  border-color: var(--amber);
+  background: rgba(245,158,11,0.12);
+  color: var(--amber);
+}
+.pp-row.done .pp-badge {
+  border-color: var(--green);
+  background: rgba(34,197,94,0.12);
+  color: var(--green);
+}
+.pp-info {
+  flex: 1;
+  min-width: 0;
+}
+.pp-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.pp-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text3);
+}
+.pp-row.active .pp-name {
+  color: var(--text);
+  font-weight: 600;
+}
+.pp-row.done .pp-name {
+  color: var(--text2);
+}
+.pp-count {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+}
+.pp-bar {
+  height: 3px;
+  background: var(--bg4);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.pp-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.3s ease;
 }
 
 /* Action buttons */
@@ -2303,39 +2439,33 @@ label .req {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 0.5rem 1rem;
+  padding: 0.45rem 1rem;
   border-radius: var(--r);
   font-family: var(--sans);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  border: 1px solid var(--border-hi);
+  border: 1px solid transparent;
   transition: all 0.15s;
   white-space: nowrap;
 }
 .ecap-btn-start {
   background: var(--text);
   color: var(--bg);
-  border-color: var(--text);
 }
-.ecap-btn-start:hover {
-  background: #ccc;
-}
+.ecap-btn-start:hover { background: #ccc; }
 .ecap-btn-stop {
-  background: var(--red-dim);
+  background: var(--bg3);
   color: var(--red);
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: rgba(239,68,68,0.35);
 }
-.ecap-btn-stop:hover {
-  background: rgba(239, 68, 68, 0.2);
-}
+.ecap-btn-stop:hover { background: rgba(239,68,68,0.12); }
 .ecap-btn-reset {
   background: var(--bg3);
   color: var(--text2);
+  border-color: var(--border-hi);
 }
-.ecap-btn-reset:hover {
-  color: var(--text);
-}
+.ecap-btn-reset:hover { color: var(--text); }
 
 .ecap-nav-row {
   display: flex;
@@ -3171,6 +3301,49 @@ label .req {
 #sidebarUserInfo > div {
   padding: 0 0.5rem 0.1rem;
 }
+.sidebar-user-block {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  margin: 0 0.25rem 0.25rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.sidebar-user-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--bg4);
+  border: 1px solid var(--border-hi);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--text2);
+}
+.sidebar-user-role {
+  font-size: 9px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+  margin-bottom: 2px;
+}
+.sidebar-user-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
 
 /* How-it-works list in teacher panel */
 .how-it-works ol li {
@@ -3967,33 +4140,10 @@ label .req {
 .teacher-table-wrap {
   overflow-x: auto;
 }
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-.data-table th,
-.data-table td {
-  padding: 0.6rem 0.8rem;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-}
-.data-table th {
-  color: var(--text3);
-  font-family: var(--mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  background: var(--bg3);
-  position: sticky;
-  top: 0;
-}
-.data-table tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
-}
 .action-btns {
   display: flex;
   gap: 0.4rem;
+  align-items: center;
 }
 
 /* ── Modal ────────────────────────────────────────── */
