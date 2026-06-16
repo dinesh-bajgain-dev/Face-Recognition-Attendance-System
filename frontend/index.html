@@ -584,11 +584,8 @@
                 <tr>
                   <th>ID</th>
                   <th>Name</th>
-                  <th>Faculty</th>
-                  <th>Sem</th>
-                  <th>Subject</th>
-                  <th>Time Slot</th>
                   <th>Email</th>
+                  <th>Assignments</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>
@@ -743,35 +740,14 @@
         <!-- ── STEP 2: Face Capture ──────────────────────────────────────── -->
         <div class="enroll-step-panel hidden" id="epanel-2">
           <div class="enroll-capture-grid">
-            <!-- LEFT: Camera feed — large -->
+            <!-- LEFT: Camera feed -->
             <div class="ecap-camera-col">
-              <div class="ecap-cam-label">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path d="M23 7 16 12 23 17z" />
-                  <rect x="1" y="5" width="15" height="14" rx="2" />
-                </svg>
-                GUIDED FACE CAPTURE
-              </div>
               <div class="capture-cam-wrap" id="captureCamWrap">
                 <video id="captureCam" autoplay muted playsinline></video>
                 <canvas id="captureOverlay"></canvas>
                 <div class="capture-cam-placeholder" id="capturePlaceholder">
-                  <svg
-                    width="40"
-                    height="40"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1"
-                    opacity="0.15"
-                  >
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="1" opacity="0.15">
                     <path d="M23 7 16 12 23 17z" />
                     <rect x="1" y="5" width="15" height="14" rx="2" />
                   </svg>
@@ -782,36 +758,20 @@
 
             <!-- RIGHT: Controls panel -->
             <div class="ecap-controls-col">
+              <!-- Header -->
               <div class="ecap-panel-label">
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
+                <span class="ecap-panel-dot"></span>
                 CAPTURE GUIDELINES
               </div>
 
-              <!-- Pose progress row -->
+              <!-- Pose icons row -->
               <div class="ecap-pose-row">
                 <div class="pose-pip" id="pip-front">
                   <div class="pip-icon">
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                    >
-                      <circle cx="12" cy="8" r="4" />
-                      <path d="M4 20v-1a8 8 0 0 1 16 0v1" />
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" stroke-width="2">
+                      <circle cx="12" cy="8" r="4"/>
+                      <path d="M4 20v-1a8 8 0 0 1 16 0v1"/>
                     </svg>
                   </div>
                   <span>Front</span>
@@ -834,7 +794,7 @@
                 </div>
               </div>
 
-              <!-- Status metrics -->
+              <!-- Metrics -->
               <div class="ecap-metrics">
                 <div class="ecap-metric-row">
                   <span class="ecap-metric-label">QUALITY</span>
@@ -848,7 +808,7 @@
                   <span class="ecap-metric-count">
                     <span class="ecap-count-cur" id="captureCount">0</span>
                     <span class="ecap-count-sep">/</span>
-                    <span class="ecap-count-tot">50</span>
+                    <span class="ecap-count-tot">60</span>
                   </span>
                 </div>
                 <div class="ecap-metric-row">
@@ -857,64 +817,39 @@
                 </div>
               </div>
 
-              <!-- Instruction text -->
+              <!-- Instruction -->
               <div class="ecap-instruction" id="captureInstruction">
-                Click Start Capture to begin guided face collection
+                Click Start to begin guided face collection
               </div>
 
-              <!-- Pose progress div for detailed tracking -->
-              <div class="pose-progress m-1rem-0" id="poseProgress"></div>
+              <!-- Per-pose progress list -->
+              <div class="pose-progress" id="poseProgress"></div>
 
-              <!-- Spacer so buttons push to bottom -->
               <div class="flex-1"></div>
 
               <!-- Action buttons -->
               <div class="ecap-actions">
-                <button
-                  class="ecap-btn-start"
-                  id="startCaptureBtn"
-                  onclick="startAutoCapture()"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <polygon points="5,3 19,12 5,21" />
+                <button class="ecap-btn-start" id="startCaptureBtn" onclick="startAutoCapture()">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="5,3 19,12 5,21"/>
                   </svg>
                   Start
                 </button>
-                <button
-                  class="ecap-btn-stop hidden"
-                  id="stopCaptureBtn"
-                  onclick="stopAutoCapture()"
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <rect x="6" y="6" width="12" height="12" />
+                <button class="ecap-btn-stop hidden" id="stopCaptureBtn" onclick="stopAutoCapture()">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12"/>
                   </svg>
                   Stop
                 </button>
-                <button
-                  class="ecap-btn-reset hidden"
-                  id="resetCaptureBtn"
-                  onclick="resetCapture()"
-                >
+                <button class="ecap-btn-reset hidden" id="resetCaptureBtn" onclick="resetCapture()">
                   ↺ Reset
                 </button>
               </div>
+
+              <!-- Nav -->
               <div class="ecap-nav-row">
-                <button class="btn-secondary" onclick="goToStep1()">
-                  ← Back
-                </button>
-                <button class="btn-primary" onclick="goToStep3()">
-                  Review &amp; Enroll →
-                </button>
+                <button class="btn-secondary" onclick="goToStep1()">← Back</button>
+                <button class="btn-primary" onclick="goToStep3()">Review &amp; Enroll →</button>
               </div>
             </div>
           </div>
@@ -1168,10 +1103,10 @@
                 <thead>
                   <tr>
                     <th>Name</th>
-                    <th>Code</th>
-                    <th>Faculty</th>
-                    <th>Semester</th>
-                    <th>Actions</th>
+                    <th style="width:90px">Code</th>
+                    <th style="width:110px">Faculty</th>
+                    <th style="width:70px;text-align:center">Sem</th>
+                    <th style="width:130px">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="subjectTableBody"></tbody>
@@ -1182,7 +1117,12 @@
 
         <!-- Time Slots tab -->
         <div class="sub-tab-panel" id="mtab-timeslots">
-          <div class="toolbar-row end">
+          <div class="toolbar-row">
+            <input type="text" id="tsmSearch" placeholder="Search time slots…"
+              style="flex:1;max-width:300px" oninput="loadTimeslots()" />
+            <button class="btn-danger" onclick="deleteAllTimeslots()">
+              Delete All
+            </button>
             <button class="btn-primary" onclick="openTimeSlotModal()">
               + Add Time Slot
             </button>
@@ -1622,9 +1562,11 @@
 
     <!-- Teacher Create/Edit Modal -->
     <div class="modal-overlay" id="teacherModal">
-      <div class="modal-box">
+      <div class="modal-box" style="width:660px;max-height:90vh;overflow-y:auto">
         <div class="modal-title" id="teacherModalTitle">Add Teacher</div>
         <input type="hidden" id="tmId" />
+
+        <!-- Basic info -->
         <div class="modal-form-grid">
           <div class="form-group">
             <label>Teacher ID *</label
@@ -1636,15 +1578,11 @@
           </div>
           <div class="form-group">
             <label>Password *</label
-            ><input type="password" id="tmPassword" placeholder="Min 6 chars" />
+            ><input type="password" id="tmPassword" placeholder="Min 6 chars (leave blank to keep)" />
           </div>
           <div class="form-group">
             <label>Email</label
-            ><input
-              type="email"
-              id="tmEmail"
-              placeholder="teacher@college.edu"
-            />
+            ><input type="email" id="tmEmail" placeholder="teacher@college.edu" />
           </div>
           <div class="form-group">
             <label>Phone</label
@@ -1657,43 +1595,68 @@
               <option value="inactive">Inactive</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Faculty *</label>
-            <select id="tmFaculty" onchange="loadSubjectsForModal()">
-              <option value="">Select faculty</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Semester (1–8) *</label>
-            <input
-              type="number"
-              id="tmSemester"
-              min="1"
-              max="8"
-              placeholder="e.g. 3"
-            />
-          </div>
-          <div class="form-group">
-            <label>Subject *</label>
-            <select id="tmSubject">
-              <option value="">Select subject</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Time Slot *</label>
-            <select id="tmTimeSlot">
-              <option value="">Select time slot</option>
-            </select>
-          </div>
         </div>
-        <div id="teacherModalErr" class="msg err"></div>
+
+        <!-- Assignments section -->
+        <div style="margin-top:1.2rem;border-top:1px solid var(--border);padding-top:1rem">
+          <div style="font-weight:600;font-size:13px;margin-bottom:0.75rem;color:var(--text1)">
+            Assignments
+            <span style="font-weight:400;color:var(--text3);font-size:11px;margin-left:0.5rem">Faculty · Semester · Subject · Time Slot</span>
+          </div>
+
+          <!-- Existing assignments list -->
+          <div id="teacherAssignmentsList" style="margin-bottom:0.75rem"></div>
+
+          <!-- Add assignment form (shown after teacher is saved) -->
+          <div id="addAssignmentForm" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:0.75rem">
+            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:0.5rem">Add Assignment</div>
+            <div class="modal-form-grid" style="gap:0.5rem">
+              <div class="form-group">
+                <label style="font-size:11px">Faculty</label>
+                <select id="taFaculty" onchange="loadSubjectsForAssignment()">
+                  <option value="">Select faculty</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-size:11px">Semester</label>
+                <select id="taSemester">
+                  <option value="">Any</option>
+                  <option value="1">Semester 1</option>
+                  <option value="2">Semester 2</option>
+                  <option value="3">Semester 3</option>
+                  <option value="4">Semester 4</option>
+                  <option value="5">Semester 5</option>
+                  <option value="6">Semester 6</option>
+                  <option value="7">Semester 7</option>
+                  <option value="8">Semester 8</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-size:11px">Subject</label>
+                <select id="taSubject">
+                  <option value="">Select subject</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-size:11px">Time Slot</label>
+                <select id="taTimeSlot">
+                  <option value="">Select time slot</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn-primary btn-sm" style="margin-top:0.5rem" onclick="addTeacherAssignment()">+ Add Assignment</button>
+            <div id="assignmentErr" class="msg err" style="margin-top:0.4rem"></div>
+          </div>
+
+          <p id="assignmentHint" style="font-size:12px;color:var(--text3);margin:0.5rem 0 0">
+            Save the teacher first, then add assignments.
+          </p>
+        </div>
+
+        <div id="teacherModalErr" class="msg err" style="margin-top:0.75rem"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('teacherModal')">
-            Cancel
-          </button>
-          <button class="btn-primary" onclick="saveTeacher()">
-            Save Teacher
-          </button>
+          <button class="btn-secondary" onclick="closeModal('teacherModal')">Cancel</button>
+          <button class="btn-primary" onclick="saveTeacher()">Save Teacher</button>
         </div>
       </div>
     </div>
