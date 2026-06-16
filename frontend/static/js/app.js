@@ -8,8 +8,9 @@
 ═══════════════════════════════════════════════════════════════════════════ */
 
 const API = "http://localhost:5050/api";
-let authToken = localStorage.getItem("frs_token") || "";
-let authRole = localStorage.getItem("frs_role") || "";
+let authToken    = localStorage.getItem("frs_token")    || "";
+let authRole     = localStorage.getItem("frs_role")     || "";
+let authUsername = localStorage.getItem("frs_username") || "";
 let selectedFiles = [];
 let webcamFiles = [];
 let webcamStream = null;
@@ -103,17 +104,68 @@ function showLogin() {
 }
 function showApp() {
   document.getElementById("loginOverlay").classList.add("hidden");
+
+  if (authRole === "student") {
+    document.getElementById("sidebar").style.display = "none";
+    document.querySelector(".main").style.display = "none";
+    loadStudentPortal();
+    return;
+  }
+
   document.getElementById("sidebar").style.display = "flex";
   document.querySelector(".main").style.display = "block";
-  checkAPI();
-  navigate("dashboard");
+
+  // Populate sidebar user info
+  const sui = document.getElementById("sidebarUserInfo");
+  if (sui) {
+    const ini = (authUsername || authRole || "?")
+      .split(/[\s_]/).map((w) => w[0]?.toUpperCase() || "").slice(0, 2).join("");
+    const roleLabel = authRole === "teacher" ? "TEACHER" : "ADMIN";
+    const roleColor = authRole === "teacher" ? "var(--amber)" : "var(--accent, #7c6af7)";
+    sui.innerHTML = `
+      <div class="sidebar-user-block">
+        <div class="sidebar-user-avatar">${ini}</div>
+        <div>
+          <div class="sidebar-user-role" style="color:${roleColor}">${roleLabel}</div>
+          <div class="sidebar-user-name">${escapeHtml(authUsername || authRole)}</div>
+        </div>
+      </div>`;
+  }
+
+  const adminNav = document.getElementById("adminNav");
+  const teacherNav = document.getElementById("teacherNav");
+  if (authRole === "teacher") {
+    if (adminNav) adminNav.classList.add("hidden");
+    if (teacherNav) teacherNav.classList.remove("hidden");
+    checkAPI();
+    navigate("t-dashboard");
+  } else {
+    if (adminNav) adminNav.classList.remove("hidden");
+    if (teacherNav) teacherNav.classList.add("hidden");
+    checkAPI();
+    navigate("dashboard");
+  }
 }
 
 async function doLogin() {
-  const username = document.getElementById("loginUser").value.trim();
-  const password = document.getElementById("loginPass").value;
   const errEl = document.getElementById("loginErr");
   errEl.textContent = "";
+
+  // Student login — email-based, no backend auth needed (read-only portal)
+  if (_loginRole === "student") {
+    const email = document.getElementById("loginEmail")?.value.trim();
+    if (!email) { errEl.textContent = "Enter your registered email"; return; }
+    authToken = "student-portal";
+    authRole = "student";
+    localStorage.setItem("frs_token", authToken);
+    localStorage.setItem("frs_role", authRole);
+    localStorage.setItem("frs_student_email", email);
+    showApp();
+    return;
+  }
+
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value;
   if (!username || !password) {
     errEl.textContent = "Enter username and password";
     return;
@@ -129,10 +181,12 @@ async function doLogin() {
       errEl.textContent = d.error || "Login failed";
       return;
     }
-    authToken = d.token;
-    authRole = d.role;
-    localStorage.setItem("frs_token", authToken);
-    localStorage.setItem("frs_role", authRole);
+    authToken    = d.token;
+    authRole     = d.role || _loginRole;
+    authUsername = d.username || username;
+    localStorage.setItem("frs_token",    authToken);
+    localStorage.setItem("frs_role",     authRole);
+    localStorage.setItem("frs_username", authUsername);
     showApp();
   } catch {
     errEl.textContent = "Cannot reach server";
@@ -142,8 +196,10 @@ async function doLogin() {
 function logout() {
   authToken = "";
   authRole = "";
+  authUsername = "";
   localStorage.removeItem("frs_token");
   localStorage.removeItem("frs_role");
+  localStorage.removeItem("frs_username");
   if (cameraActive) stopCamera();
   showLogin();
 }
@@ -187,6 +243,18 @@ function navigate(page) {
     reports: loadReports,
     settings: loadSettings,
     recognize: () => loadLiveLog(),
+    teachers: loadTeachers,
+    manage: () => switchManageTab("faculties"),
+    "t-dashboard": loadTeacherDashboard,
+    "t-recognize": () => {},
+    "t-manual": () => {
+      document.getElementById("tManualDate") && !document.getElementById("tManualDate").value &&
+        (document.getElementById("tManualDate").value = todayStr());
+      loadManualAttendance();
+    },
+    "t-logs": loadTeacherLogs,
+    profile: () => {},
+    enroll: () => { _ensureDefaultData(); _populateFacultyDropdowns(); },
   };
   if (loaders[page]) loaders[page]();
 }
@@ -196,33 +264,52 @@ function navigate(page) {
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadDashboard() {
   try {
-    const [att, hist, persons, logs] = await Promise.all([
-      api(`/attendance?date=${todayStr()}`).then((r) => r.json()),
+    const deptFilter = document.getElementById("dashDeptFilter")?.value || "";
+    const [att, hist, persons] = await Promise.all([
+      api(`/attendance?date=${todayStr()}${deptFilter ? "&department=" + encodeURIComponent(deptFilter) : ""}`).then((r) => r.json()),
       api(`/attendance/history`).then((r) => r.json()),
-      api(`/students`).then((r) => r.json()),
-      api(`/logs?limit=30`).then((r) => r.json()),
+      api(`/students${deptFilter ? "?department=" + encodeURIComponent(deptFilter) : ""}`).then((r) => r.json()),
     ]);
-    document.getElementById("statRegistered").textContent = persons.count;
-    document.getElementById("statPresent").textContent = att.present;
-    document.getElementById("statAbsent").textContent = att.absent;
+    // Populate dept filter if empty
+    const ddf = document.getElementById("dashDeptFilter");
+    if (ddf && ddf.options.length <= 1) {
+      try {
+        const dr = await api("/departments"); const dd = await dr.json();
+        (dd.departments || []).forEach(d => { const o = document.createElement("option"); o.value = d; o.text = d; ddf.add(o); });
+      } catch {}
+    }
     const rate =
       persons.count > 0
         ? Math.round((att.present / persons.count) * 100) + "%"
         : "—";
-    document.getElementById("statRate").textContent = rate;
-
+    const m = document.getElementById("dashMetrics");
+    if (m)
+      m.innerHTML = `
+      <div class="metric-card"><div class="metric-label">Total Students</div><div class="metric-val">${persons.count}</div></div>
+      <div class="metric-card"><div class="metric-label">Present Today</div><div class="metric-val" style="color:var(--green)">${att.present}</div></div>
+      <div class="metric-card"><div class="metric-label">Absent Today</div><div class="metric-val" style="color:var(--red)">${att.absent}</div></div>
+      <div class="metric-card"><div class="metric-label">Attendance Rate</div><div class="metric-val" style="color:var(--blue)">${rate}</div></div>`;
+    const dd = document.getElementById("dashDate");
+    if (dd)
+      dd.textContent = new Date().toLocaleDateString("en-GB", {
+        weekday: "long",
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      });
     renderHistoryChart(hist.history);
     dashRecords = att.records;
     renderDashTable(dashRecords);
-    renderRecentLogs(logs.logs);
   } catch (e) {
-    console.error(e);
+    console.error("loadDashboard:", e);
   }
 }
 
 function renderHistoryChart(history) {
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  const ctx = document.getElementById("attendanceChart").getContext("2d");
+  const _hc = document.getElementById("dashboardChart");
+  if (!_hc || typeof Chart === "undefined") return;
+  const ctx = _hc.getContext("2d");
   if (charts.dash) charts.dash.destroy();
   charts.dash = new Chart(ctx, {
     type: "bar",
@@ -250,34 +337,43 @@ function renderHistoryChart(history) {
 }
 
 function renderRecentLogs(logs) {
-  const el = document.getElementById("recentLogs");
+  const el =
+    document.getElementById("tSessionLog") ||
+    document.getElementById("liveLog");
   if (!el) return;
   el.innerHTML =
-    logs
+    (logs || [])
       .slice(0, 15)
       .map(
         (l) => `
     <div class="log-item ${l.recognized ? "ok" : "fail"}">
       <span class="log-name">${l.full_name || "Unknown"}</span>
-      <span class="log-conf">${l.confidence}% · ${l.logged_at?.slice(11, 16) || ""}</span>
+      <span class="log-conf">${l.confidence}% · ${(l.logged_at || "").slice(11, 16)}</span>
     </div>`,
       )
       .join("") || `<p class="muted">No events yet</p>`;
 }
 
 function renderDashTable(records) {
-  document.getElementById("dashTableBody").innerHTML = (records || [])
-    .map(
-      (r) => `
-    <tr>
+  const el = document.getElementById("dashAttTable");
+  if (!el) return;
+  if (!records || !records.length) {
+    el.innerHTML = `<p style="color:var(--text3);padding:1rem 0">No attendance records for today.</p>`;
+    return;
+  }
+  el.innerHTML = `<div style="overflow-x:auto"><table class="data-table">
+    <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Time</th><th>Status</th></tr></thead>
+    <tbody>${records
+      .map(
+        (r) => `<tr>
       <td style="font-family:var(--mono);font-size:12px">${r.student_id}</td>
-      <td><a onclick="viewProfile('${r.student_id}')">${escapeHtml(getStudentName(r))}</a></td>
+      <td><a style="cursor:pointer" onclick="viewProfile('${r.student_id}')">${escapeHtml(r.name || r.full_name || "")}</a></td>
       <td style="color:var(--text3)">${r.department || "—"}</td>
-      <td style="font-family:var(--mono);font-size:12px">${r.time}</td>
+      <td style="font-family:var(--mono);font-size:12px">${r.time || "—"}</td>
       <td>${badge(r.status)}</td>
     </tr>`,
-    )
-    .join("");
+      )
+      .join("")}</tbody></table></div>`;
 }
 
 function filterDashTable(q) {
@@ -291,8 +387,11 @@ function filterDashTable(q) {
 /* ═══════════════════════════════════════════════════════════════════════
    STUDENTS
 ═══════════════════════════════════════════════════════════════════════ */
+let _stuCache = null,
+  _stuDept = "";
 async function loadStudents() {
-  await loadDepartments("deptFilter");
+  _stuCache = null;
+  _stuDept = "";
   await searchStudents();
 }
 
@@ -314,37 +413,70 @@ async function loadDepartments(selectId) {
   } catch {}
 }
 
-async function searchStudents() {
-  const q = document.getElementById("studentSearch").value.trim();
-  const dept = document.getElementById("deptFilter").value;
-  let url = `/students?q=${encodeURIComponent(q)}`;
-  if (dept) url += `&department=${encodeURIComponent(dept)}`;
+function filterStudentDept(dept, btn) {
+  _stuDept = dept;
+  document
+    .querySelectorAll("#studentFacultyTabs .filter-btn")
+    .forEach((b) => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  searchStudents(true);
+}
+async function searchStudents(useCache = false) {
+  const q = document.getElementById("studentSearch")?.value.trim() || "";
   try {
-    const r = await api(url);
-    const d = await r.json();
-    const grid = document.getElementById("personsGrid");
-    grid.innerHTML =
-      d.students
-        .map((s) => {
-          const initials = s.full_name
-            .split(" ")
-            .map((w) => w[0]?.toUpperCase())
-            .slice(0, 2)
-            .join("");
-          return `
-        <div class="person-card" onclick="viewProfile('${s.student_id}')">
-          <button class="person-del" onclick="event.stopPropagation();deleteStudent('${s.student_id}')" title="Remove">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3,6 5,6 21,6"/><path d="M19 6l-1 14H6L5 6"/><path d="M9 6V4h6v2"/></svg>
-          </button>
-          <div class="person-avatar">${initials || "?"}</div>
-          <div class="person-name">${s.full_name}</div>
-          <div class="person-dept">${s.department || "—"}</div>
-          <div class="person-dept" style="font-family:var(--mono);font-size:10px;color:var(--text3)">${s.image_count} images</div>
+    if (!useCache || !_stuCache) {
+      const r = await api("/students");
+      _stuCache = await r.json();
+    }
+    const all = _stuCache;
+    const tabs = document.getElementById("studentFacultyTabs");
+    if (tabs) {
+      const depts = [
+        ...new Set(
+          (all.students || []).map((s) => s.department).filter(Boolean),
+        ),
+      ].sort();
+      tabs.innerHTML =
+        `<button class="filter-btn ${_stuDept === "" ? "active" : ""}" onclick="filterStudentDept('',this)">All (${all.count})</button>` +
+        depts
+          .map(
+            (d) =>
+              `<button class="filter-btn ${_stuDept === d ? "active" : ""}" onclick="filterStudentDept('${d}',this)">${d} (${(all.students || []).filter((s) => s.department === d).length})</button>`,
+          )
+          .join("");
+    }
+    let rows = all.students || [];
+    if (_stuDept) rows = rows.filter((s) => s.department === _stuDept);
+    if (q)
+      rows = rows.filter(
+        (s) =>
+          s.full_name.toLowerCase().includes(q.toLowerCase()) ||
+          s.student_id.toLowerCase().includes(q.toLowerCase()),
+      );
+    const grid = document.getElementById("studentFacultyBar");
+    if (!grid) return;
+    if (!rows.length) {
+      grid.innerHTML = `<p style="color:var(--text3);padding:1.5rem;text-align:center">No students found.</p>`;
+      return;
+    }
+    grid.innerHTML = `<div class="student-grid">${rows
+      .map((s) => {
+        const ini = (s.full_name || "?")
+          .split(" ").map((w) => w[0]?.toUpperCase() || "").slice(0, 2).join("");
+        const isActive = (s.status || "active") === "active";
+        const statusColor = isActive ? "var(--green)" : "var(--amber)";
+        const statusBg   = isActive ? "rgba(34,197,94,0.12)" : "rgba(245,158,11,0.12)";
+        return `<div class="student-card" onclick="viewProfile('${s.student_id}')" title="${escapeHtml(s.full_name)}">
+          <div class="stu-avatar-ini">${ini}</div>
+          <div class="student-name">${escapeHtml(s.full_name)}</div>
+          <div class="student-id">${s.student_id}</div>
+          ${s.department ? `<div class="stu-dept">${escapeHtml(s.department)}${s.semester ? " · " + escapeHtml(s.semester) : ""}</div>` : ""}
+          <span class="stu-status" style="color:${statusColor};background:${statusBg}">${s.status || "active"}</span>
         </div>`;
-        })
-        .join("") || `<p style="color:var(--text3)">No students found.</p>`;
+      })
+      .join("")}</div>`;
   } catch (e) {
-    console.error(e);
+    console.error("searchStudents:", e);
   }
 }
 
@@ -361,7 +493,7 @@ async function viewProfile(sid) {
       .map((w) => w[0]?.toUpperCase())
       .slice(0, 2)
       .join("");
-    document.getElementById("profileActions").innerHTML = `
+    (document.getElementById("profileActions") || null || {}).innerHTML = `
       <button class="btn-secondary" onclick="openEditModal('${sid}')">Edit Student</button>`;
 
     document.getElementById("profileContent").innerHTML = `
@@ -374,7 +506,7 @@ async function viewProfile(sid) {
             <span class="meta-tag">ID: ${s.student_id}</span>
             ${s.department ? `<span class="meta-tag">${s.department}</span>` : ""}
             <span class="meta-tag">Enrolled ${s.enrolled_at?.slice(0, 10) || ""}</span>
-            <span class="meta-tag">${s.image_count} training images</span>
+            <span class="meta-tag">${s.sample_count} training images</span>
           </div>
         </div>
       </div>
@@ -413,7 +545,11 @@ async function viewProfile(sid) {
     // Monthly chart
     const monthly = s.monthly || [];
     if (monthly.length) {
-      const ctx = document.getElementById("profileChart").getContext("2d");
+      const ctx = (
+        document.getElementById("profileChart") ||
+        null ||
+        {}
+      ).getContext("2d");
       new Chart(ctx, {
         type: "bar",
         data: {
@@ -456,7 +592,7 @@ async function openEditModal(sid) {
    ENROLL
 ═══════════════════════════════════════════════════════════════════════ */
 function initUploadZone() {
-  const zone = document.getElementById("uploadZone");
+  const zone = document.getElementById("uploadZone") || null;
   if (!zone) return;
   zone.addEventListener("dragover", (e) => {
     e.preventDefault();
@@ -469,7 +605,7 @@ function initUploadZone() {
     handleFiles(e.dataTransfer.files);
   });
   zone.addEventListener("click", () =>
-    document.getElementById("fileInput").click(),
+    (document.getElementById("fileInput") || null || {}).click(),
   );
 }
 
@@ -498,10 +634,10 @@ function renderFilePreviews(files, containerId) {
 
 async function startWebcam() {
   try {
-    const section = document.getElementById("webcamSection");
+    const section = document.getElementById("captureCamWrap");
     section.style.display = "block";
     webcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
-    document.getElementById("enrollCam").srcObject = webcamStream;
+    document.getElementById("captureCam").srcObject = webcamStream;
     webcamFiles = [];
     updateWebcamCount();
   } catch (e) {
@@ -514,11 +650,11 @@ function stopWebcam() {
     webcamStream.getTracks().forEach((t) => t.stop());
     webcamStream = null;
   }
-  document.getElementById("webcamSection").style.display = "none";
+  document.getElementById("captureCamWrap").style.display = "none";
 }
 
 function captureWebcamFrame() {
-  const video = document.getElementById("enrollCam");
+  const video = document.getElementById("captureCam");
   const canvas = document.createElement("canvas");
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -537,14 +673,14 @@ function captureWebcamFrame() {
 }
 
 function updateWebcamCount() {
-  document.getElementById("webcamCount").textContent =
+  document.getElementById("captureCount").textContent =
     `${webcamFiles.length} frames captured`;
 }
 
 async function enrollStudent() {
   const sid = document.getElementById("eId").value.trim();
   const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eDept").value.trim();
+  const dept = document.getElementById("eFaculty").value.trim();
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
   const msg = document.getElementById("enrollMsg");
@@ -597,9 +733,9 @@ async function enrollStudent() {
     stopWebcam();
     selectedFiles = [];
     webcamFiles = [];
-    const filePreview = document.getElementById("filePreview");
+    const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
+    ["eId", "eName", "eFaculty", "eEmail", "ePhone"].forEach(
       (id) => (document.getElementById(id).value = ""),
     );
   } catch (e) {
@@ -612,15 +748,15 @@ async function enrollStudent() {
    RECOGNIZE
 ═══════════════════════════════════════════════════════════════════════ */
 async function toggleCamera() {
-  const btn = document.getElementById("camToggle");
+  const btn = document.getElementById("camToggle") || null;
   if (!cameraActive) {
     await api("/camera/start", { method: "POST" });
     cameraActive = true;
     btn.textContent = "■ Stop Camera";
-    document.getElementById("liveStream").style.display = "block";
-    document.getElementById("cameraPlaceholder").style.display = "none";
-    document.getElementById("recognizeCanvas").style.display = "none";
-    document.getElementById("liveStream").src = `${API}/stream`;
+    document.getElementById("tRecogVideo").style.display = "block";
+    document.getElementById("tRecogOverlay").style.display = "none";
+    document.getElementById("tRecogCanvas").style.display = "none";
+    document.getElementById("tRecogVideo").src = `${API}/stream`;
     startPollLiveLog();
   } else {
     stopCamera();
@@ -630,14 +766,14 @@ async function toggleCamera() {
 async function stopCamera() {
   await api("/camera/stop", { method: "POST" });
   cameraActive = false;
-  const btn = document.getElementById("camToggle");
+  const btn = document.getElementById("camToggle") || null;
   if (btn) btn.textContent = "▶ Start Camera";
-  const stream = document.getElementById("liveStream");
+  const stream = document.getElementById("tRecogVideo");
   if (stream) {
     stream.src = "";
     stream.style.display = "none";
   }
-  const ph = document.getElementById("cameraPlaceholder");
+  const ph = document.getElementById("tRecogOverlay");
   if (ph) ph.style.display = "flex";
   if (pollTimer) {
     clearTimeout(pollTimer);
@@ -659,7 +795,7 @@ async function loadLiveLog() {
   try {
     const r = await api("/logs?limit=20");
     const d = await r.json();
-    const el = document.getElementById("liveLog");
+    const el = document.getElementById("tSessionLog");
     if (!el) return;
     el.innerHTML =
       d.logs
@@ -693,14 +829,14 @@ async function recognizeImage(input) {
     const b64 = e.target.result.split(",")[1];
     const img = new Image();
     img.onload = () => {
-      const canvas = document.getElementById("recognizeCanvas");
+      const canvas = document.getElementById("tRecogCanvas");
       const ctx = canvas.getContext("2d");
       canvas.width = img.width;
       canvas.height = img.height;
       ctx.drawImage(img, 0, 0);
       canvas.style.display = "block";
-      document.getElementById("cameraPlaceholder").style.display = "none";
-      document.getElementById("liveStream").style.display = "none";
+      document.getElementById("tRecogOverlay").style.display = "none";
+      document.getElementById("tRecogVideo").style.display = "none";
     };
     img.src = e.target.result;
 
@@ -731,10 +867,10 @@ async function recognizeImage(input) {
 }
 
 function setRecogResult(name, conf, badgeType) {
-  document.getElementById("recogName").textContent = name;
-  document.getElementById("recogConf").textContent = conf;
-  const icon = document.getElementById("recogIcon");
-  const badge = document.getElementById("recogBadge");
+  (document.getElementById("recogName") || null || {}).textContent = name;
+  (document.getElementById("recogConf") || null || {}).textContent = conf;
+  const icon = document.getElementById("recogIcon") || null;
+  const badge = document.getElementById("recogBadge") || null;
   icon.className =
     "recog-icon" +
     (badgeType === "present" ? " ok" : badgeType === "unknown" ? " fail" : "");
@@ -761,6 +897,14 @@ let filteredStudents = [];
 
 async function loadAttendancePage() {
   const dateVal = document.getElementById("attDate").value || todayStr();
+  // Populate department filter if empty
+  const adf = document.getElementById("attDeptFilter");
+  if (adf && adf.options.length <= 1) {
+    try {
+      const dr = await api("/departments"); const dd = await dr.json();
+      (dd.departments || []).forEach(d => { const o = document.createElement("option"); o.value = d; o.text = d; adf.add(o); });
+    } catch {}
+  }
   try {
     const r = await api(`/attendance/faculty-summary?date=${dateVal}`);
     if (!r || !r.ok) {
@@ -780,36 +924,38 @@ const loadAttendance = loadAttendancePage;
 
 function renderFacultyTabs() {
   if (!facultyData) return;
-  const container = document.getElementById("facultyTabs");
+  const container = document.getElementById("attFacultySummary");
+  if (!container) return;
   const faculties = facultyData.faculties || [];
 
   const tabs = [
-    { key: "", label: `All  (${facultyData.overall?.total || 0})` },
+    { key: "", label: `All (${facultyData.overall?.total || 0})` },
     ...faculties.map((f) => ({
       key: f.name,
-      label: `${f.name}  (${f.total})`,
+      label: `${f.name} (${f.total})`,
     })),
   ];
 
-  container.innerHTML = tabs
+  container.innerHTML = `<div class="filter-bar" id="facultyTabsBar">${tabs
     .map(
       (t) => `
-    <div class="faculty-tab ${activeFaculty === t.key ? "active" : ""}"
+    <button class="filter-btn ${activeFaculty === t.key ? "active" : ""}"
          onclick="showFaculty('${t.key}')">
       ${t.label}
-    </div>`,
+    </button>`,
     )
-    .join("");
+    .join("")}</div>`;
 }
 
 function showFaculty(key) {
   activeFaculty = key;
   // Update active tab highlight
-  document.querySelectorAll(".faculty-tab").forEach((el) => {
-    const isActive = el.textContent.trim().startsWith(key || "All");
+  document.querySelectorAll("#facultyTabsBar .filter-btn").forEach((el) => {
+    const isActive = key === "" ? el.textContent.trim().startsWith("All") : el.textContent.trim().startsWith(key);
     el.classList.toggle("active", isActive);
   });
-  document.getElementById("attSearch").value = "";
+  const attSearch = document.getElementById("attSearch");
+  if (attSearch) attSearch.value = "";
 
   if (key === "") {
     showAllFaculties();
@@ -824,31 +970,11 @@ function showAllFaculties() {
   const overall = facultyData?.overall || {};
   const dateVal = document.getElementById("attDate").value || todayStr();
 
-  // Hide single-faculty header card
-  document.getElementById("facultyHeaderCard").style.display = "none";
-
-  // Render summary cards
-  const summaryRow = document.getElementById("facultySummaryRow");
-  summaryRow.innerHTML = [
-    // Overall card first
-    renderSummaryCard(
-      {
-        name: "All Faculties",
-        total: overall.total,
-        present: overall.present,
-        absent: overall.absent,
-        rate: overall.rate,
-      },
-      true,
-    ),
-    ...faculties.map((f) => renderSummaryCard(f, false)),
-  ].join("");
-
-  // Render all faculties as sections in one table container
+  renderFacultyTabs();
   filteredStudents = faculties.flatMap((f) =>
     f.students.map((s) => ({ ...s, faculty: f.name })),
   );
-  const container = document.getElementById("attTableContainer");
+  const container = document.getElementById("attTableWrap");
   container.innerHTML =
     faculties
       .map(
@@ -873,32 +999,30 @@ function showSingleFaculty(fac) {
   if (!fac) return;
   const dateVal = document.getElementById("attDate").value || todayStr();
 
-  // Hide summary cards
-  document.getElementById("facultySummaryRow").innerHTML = "";
-
-  // Show header card
-  const card = document.getElementById("facultyHeaderCard");
-  card.style.display = "flex";
-  document.getElementById("fhcName").textContent = fac.name;
-  document.getElementById("fhcDate").textContent = new Date(
-    dateVal,
-  ).toLocaleDateString("en-GB", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  document.getElementById("fhcPresent").textContent = fac.present;
-  document.getElementById("fhcAbsent").textContent = fac.absent;
-  document.getElementById("fhcTotal").textContent = fac.total;
-  const rateEl = document.getElementById("fhcRate");
-  rateEl.textContent = fac.rate + "%";
-  rateEl.className =
-    "fhc-val " + (fac.rate >= 75 ? "green" : fac.rate >= 50 ? "amber" : "red");
-
-  // Render student table for this faculty
+  renderFacultyTabs();
+  const _hdr = document.getElementById("attFacultySummary");
+  if (_hdr) {
+    const rc =
+      fac.rate >= 75
+        ? "var(--green)"
+        : fac.rate >= 50
+          ? "var(--amber)"
+          : "var(--red)";
+    // Preserve the tabs bar, append the summary card after it
+    const tabsBar = _hdr.querySelector("#facultyTabsBar");
+    const tabsHtml = tabsBar ? tabsBar.outerHTML : "";
+    _hdr.innerHTML = tabsHtml + `<div class="card" style="margin-top:.75rem;display:flex;flex-wrap:wrap;gap:1.5rem;align-items:center;padding:1rem">
+      <div><div style="font-size:18px;font-weight:700">${fac.name}</div>
+      <div style="font-size:12px;color:var(--text3)">${new Date(dateVal).toLocaleDateString("en-GB", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div></div>
+      <div style="display:flex;gap:1.5rem;margin-left:auto;flex-wrap:wrap">
+        <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:var(--green)">${fac.present}</div><div style="font-size:11px;color:var(--text3)">Present</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:var(--red)">${fac.absent}</div><div style="font-size:11px;color:var(--text3)">Absent</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:700">${fac.total}</div><div style="font-size:11px;color:var(--text3)">Total</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:700;color:${rc}">${fac.rate}%</div><div style="font-size:11px;color:var(--text3)">Rate</div></div>
+      </div></div>`;
+  }
   filteredStudents = fac.students;
-  document.getElementById("attTableContainer").innerHTML = buildStudentTable(
+  document.getElementById("attTableWrap").innerHTML = buildStudentTable(
     fac.students,
     dateVal,
     true,
@@ -966,7 +1090,7 @@ function filterActiveTable(q) {
   if (activeFaculty === "") {
     // Filter across all faculties, rebuild sections
     const dateVal = document.getElementById("attDate").value || todayStr();
-    const container = document.getElementById("attTableContainer");
+    const container = document.getElementById("attTableWrap");
     container.innerHTML =
       (facultyData.faculties || [])
         .map((f) => {
@@ -1004,7 +1128,7 @@ function filterActiveTable(q) {
             s.student_id.toLowerCase().includes(q),
         )
       : fac.students;
-    document.getElementById("attTableContainer").innerHTML = buildStudentTable(
+    document.getElementById("attTableWrap").innerHTML = buildStudentTable(
       filtered,
       dateVal,
       true,
@@ -1052,42 +1176,52 @@ async function loadReports() {
     const high = pcts.length ? Math.max(...pcts).toFixed(1) + "%" : "—";
     const low = pcts.filter((p) => p < 75).length;
 
-    document.getElementById("repAvg").textContent = avg;
-    document.getElementById("repHigh").textContent = high;
-    document.getElementById("repLow").textContent = low;
-
-    // Total recognition events
-    const logsR = await api("/logs?limit=1000");
-    const logsD = await logsR.json();
-    document.getElementById("repTotal").textContent = logsD.logs.length;
-
-    // Per-student table
-    document.getElementById("repTableBody").innerHTML = rows
-      .map((r) => {
-        const pct = parseFloat(r.pct || 0);
-        const color =
-          pct >= 75
-            ? "var(--green)"
-            : pct >= 50
-              ? "var(--amber)"
-              : "var(--red)";
-        const statusLabel =
-          pct >= 75 ? "On Track" : pct >= 50 ? "At Risk" : "Critical";
-        return `<tr>
-        <td style="font-family:var(--mono);font-size:11px">${r.student_id}</td>
-        <td><a onclick="viewProfile('${r.student_id}')">${r.full_name}</a></td>
-        <td style="color:var(--text3)">${r.department || "—"}</td>
-        <td style="font-family:var(--mono)">${r.present_days || 0}</td>
-        <td>
-          <div class="inline-bar">
-            <div class="mini-bar"><div class="mini-fill" style="width:${pct}%;background:${color}"></div></div>
-            <span style="font-family:var(--mono);font-size:11px;color:${color}">${pct}%</span>
-          </div>
-        </td>
-        <td><span style="font-size:11px;font-family:var(--mono);color:${color}">${statusLabel}</span></td>
-      </tr>`;
-      })
-      .join("");
+    const _sv = (id, v) => {
+      const e = document.getElementById(id);
+      if (e) e.textContent = v;
+    };
+    _sv("repAvgAtt", avg);
+    _sv("repHighest", high);
+    _sv("repBelowCount", low);
+    api("/logs?limit=1000")
+      .then((r) => r.json())
+      .then((d) => _sv("repTotalRecog", (d.logs || []).length))
+      .catch(() => {});
+    const sw = document.getElementById("statsTableWrap");
+    if (sw) {
+      if (!rows.length) {
+        sw.innerHTML = `<p style="color:var(--text3);padding:1rem">No data yet.</p>`;
+        return;
+      }
+      sw.innerHTML = `<div style="overflow-x:auto"><table class="data-table">
+        <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Present</th><th>Percentage</th><th>Status</th></tr></thead>
+        <tbody>${rows
+          .map((r) => {
+            const pct = parseFloat(r.pct || 0);
+            const color =
+              pct >= 75
+                ? "var(--green)"
+                : pct >= 50
+                  ? "var(--amber)"
+                  : "var(--red)";
+            const label =
+              pct >= 75 ? "On Track" : pct >= 50 ? "At Risk" : "Critical";
+            return `<tr>
+            <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${r.student_id}</td>
+            <td><a style="cursor:pointer" onclick="viewProfile('${r.student_id}')">${r.full_name}</a></td>
+            <td style="color:var(--text3)">${r.department || "—"}</td>
+            <td style="text-align:center;font-family:var(--mono)">${r.present_days || 0}</td>
+            <td><div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden">
+                <div style="width:${Math.min(pct, 100)}%;height:100%;background:${color};border-radius:3px"></div>
+              </div>
+              <span style="font-family:var(--mono);font-size:11px;color:${color};min-width:36px">${pct}%</span>
+            </div></td>
+            <td><span style="font-size:11px;font-weight:600;color:${color}">${label}</span></td>
+          </tr>`;
+          })
+          .join("")}</tbody></table></div>`;
+    }
 
     // Monthly trend chart
     renderMonthlyChart(hist.history);
@@ -1100,7 +1234,9 @@ async function loadReports() {
 
 function renderMonthlyChart(history) {
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  const ctx = document.getElementById("monthlyChart").getContext("2d");
+  const _mc = document.getElementById("monthlyChart");
+  if (!_mc || typeof Chart === "undefined") return;
+  const ctx = _mc.getContext("2d");
   if (charts.monthly) charts.monthly.destroy();
   charts.monthly = new Chart(ctx, {
     type: "line",
@@ -1145,7 +1281,9 @@ function renderDeptChart(rows) {
       ? ((deptMap[d].present / deptMap[d].total) * 100).toFixed(1)
       : 0,
   );
-  const ctx = document.getElementById("deptChart").getContext("2d");
+  const _dc = document.getElementById("deptChart");
+  if (!_dc || typeof Chart === "undefined") return;
+  const ctx = _dc.getContext("2d");
   if (charts.dept) charts.dept.destroy();
   charts.dept = new Chart(ctx, {
     type: "bar",
@@ -1177,52 +1315,62 @@ async function loadSettings() {
   try {
     const r = await api("/settings");
     const d = await r.json();
-    document.getElementById("setThreshold").value = Math.round(
-      d.recognition_threshold * 100,
-    );
-    document.getElementById("setFrameSkip").value = d.frame_skip;
-    document.getElementById("setDataDir").textContent = d.data_dir;
+    const _ts = document.getElementById("threshSlider");
+    if (_ts) _ts.value = d.recognition_threshold;
+    const _ss = document.getElementById("skipSlider");
+    if (_ss) _ss.value = d.frame_skip;
+    const _tv = document.getElementById("threshVal");
+    if (_tv) _tv.textContent = Math.round(d.recognition_threshold * 100) + "%";
+    const _sv2 = document.getElementById("skipVal");
+    if (_sv2) _sv2.textContent = d.frame_skip;
+    const _si = document.getElementById("sysInfo");
+    if (_si)
+      _si.innerHTML = `
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Threshold</span><span style="font-family:var(--mono);font-size:12px">${Math.round(d.recognition_threshold * 100)}%</span></div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Frame Skip</span><span style="font-family:var(--mono);font-size:12px">every ${d.frame_skip} frames</span></div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Email</span><span style="font-family:var(--mono);font-size:12px;color:${d.email_enabled ? "var(--green)" : "var(--text3)"}">${d.email_enabled ? "Enabled" : "Disabled"}</span></div>
+      <div style="display:flex;justify-content:space-between;padding:7px 0"><span style="color:var(--text2)">Version</span><span style="font-family:var(--mono);font-size:12px">v3.2</span></div>`;
   } catch {}
 }
 
 async function saveSettings() {
   const threshold =
-    parseFloat(document.getElementById("setThreshold").value) / 100;
-  const frameSkip = parseInt(document.getElementById("setFrameSkip").value);
+    parseFloat(document.getElementById("threshSlider")?.value || 0.8);
+  const frameSkip = parseInt(document.getElementById("skipSlider")?.value || 2);
   try {
     const r = await api("/settings", {
       method: "PUT",
       json: { recognition_threshold: threshold, frame_skip: frameSkip },
     });
     if (r.ok) {
-      setMsg("settingsMsg", "Settings saved.", "ok");
-      toast("Saved");
-    } else setMsg("settingsMsg", "Failed to save.", "err");
+      toast("✓ Settings saved");
+      loadSettings();
+    } else toast("Failed to save");
   } catch {
-    setMsg("settingsMsg", "Error.", "err");
+    toast("Error saving settings");
   }
 }
 
 async function changePw() {
   const oldPw = document.getElementById("oldPw")?.value || "";
-  const newPw = document.getElementById("newPw").value;
+  const newPw = document.getElementById("newPw")?.value || "";
   if (!newPw || newPw.length < 6) {
-    setMsg("pwMsg", "New password must be at least 6 characters.", "err");
+    toast("New password must be at least 6 characters");
     return;
   }
-  const r = await api("/auth/change-password", {
-    method: "POST",
-    json: { old_password: oldPw, new_password: newPw },
-  });
-  if (!r) return;
-  const d = await r.json();
-  if (r.ok) {
-    setMsg("pwMsg", "✓ Password updated. Please log in again.", "ok");
-    toast("Password changed");
-    // Token changes — log out after 2s
-    setTimeout(() => logout(), 2000);
-  } else {
-    setMsg("pwMsg", d.error || "Update failed.", "err");
+  try {
+    const r = await api("/auth/change-password", {
+      method: "POST",
+      json: { old_password: oldPw, new_password: newPw },
+    });
+    if (!r) return;
+    const d = await r.json();
+    if (r.ok) {
+      toast("✓ Password updated — logging out");
+      setTimeout(() => logout(), 2000);
+    } else toast(d.error || "Password update failed");
+  } catch (e) {
+    toast("Error changing password");
   }
 }
 
@@ -1309,7 +1457,7 @@ function connectSSE() {
 
 function handleAttendanceEvent(event) {
   // 1. Update the live log panel on Recognize page
-  const liveLog = document.getElementById("liveLog");
+  const liveLog = document.getElementById("tSessionLog");
   if (liveLog) {
     const item = document.createElement("div");
     item.className = "log-item ok";
@@ -1358,7 +1506,7 @@ window.showApp = function () {
 window.enrollStudent = async function () {
   const sid = document.getElementById("eId").value.trim();
   const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eDept").value.trim();
+  const dept = document.getElementById("eFaculty").value.trim();
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
 
@@ -1454,9 +1602,9 @@ window.enrollStudent = async function () {
     stopWebcam();
     selectedFiles = [];
     webcamFiles = [];
-    const filePreview = document.getElementById("filePreview");
+    const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eDept", "eEmail", "ePhone"].forEach(
+    ["eId", "eName", "eFaculty", "eEmail", "ePhone"].forEach(
       (id) => (document.getElementById(id).value = ""),
     );
   } catch (e) {
@@ -1531,9 +1679,9 @@ function setCaptureMethod(method, btn) {
     .querySelectorAll(".cmtab")
     .forEach((b) => b.classList.remove("active"));
   btn.classList.add("active");
-  document.getElementById("uploadMode").style.display =
+  document.getElementById("epanel-1").style.display =
     method === "upload" ? "block" : "none";
-  document.getElementById("capturePanel").style.display =
+  document.getElementById("epanel-2").style.display =
     method === "auto" ? "flex" : "none";
   if (method === "upload") {
     stopAutoCapture();
@@ -1962,7 +2110,7 @@ function _drawOverlay(ctx, w, h) {
 window.enrollStudent = async function () {
   const sid = document.getElementById("eId").value.trim();
   const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eDept").value.trim();
+  const dept = document.getElementById("eFaculty").value.trim();
   const sem = document.getElementById("eSem")?.value.trim() || "";
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
@@ -2048,10 +2196,10 @@ window.enrollStudent = async function () {
     captureFrames = [];
     selectedFiles = [];
     webcamFiles = [];
-    document.getElementById("filePreview") &&
-      (document.getElementById("filePreview").innerHTML = "");
+    (document.getElementById("filePreview") || null) &&
+      ((document.getElementById("filePreview") || null || {}).innerHTML = "");
     resetCapture();
-    ["eId", "eName", "eDept", "eSem", "eEmail", "ePhone"].forEach((id) => {
+    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });
@@ -2071,29 +2219,35 @@ window.openEditModal = async function (sid) {
   _editingSid = sid;
   document.getElementById("editModal").style.display = "flex";
   document.body.style.overflow = "hidden";
+  switchModalTab("profile");
 
-  // Load student data
   const r = await api(`/students/${sid}`);
   if (!r) return;
   const s = await r.json();
 
-  document.getElementById("modalTitle").textContent = `Edit — ${s.full_name}`;
-  document.getElementById("mSid").value = s.student_id;
-  document.getElementById("mName").value = s.full_name;
-  document.getElementById("mDept").value = s.department || "";
-  document.getElementById("mSem").value = s.semester || "";
-  document.getElementById("mEmail").value = s.email || "";
-  document.getElementById("mPhone").value = s.phone || "";
-  document.getElementById("mStatus").value = s.status || "active";
+  const titleEl = document.getElementById("editModalTitle");
+  if (titleEl) titleEl.textContent = `Edit — ${s.full_name}`;
 
-  setMsg("editMsg", "", "");
-  setMsg("attEditMsg", "", "");
-  document.getElementById("attEditDate").value = todayStr();
+  document.getElementById("editSid").value = s.student_id;
+  const dispEl = document.getElementById("editSidDisplay");
+  if (dispEl) dispEl.value = s.student_id;
+  document.getElementById("editName").value = s.full_name;
+  document.getElementById("editDept").value = s.department || "";
+  document.getElementById("editSem").value = s.semester || "";
+  document.getElementById("editEmail").value = s.email || "";
+  document.getElementById("editPhone").value = s.phone || "";
+  document.getElementById("editStatus").value = s.status || "active";
 
-  // Load attendance records for the attendance tab
-  _renderAttEditList(s.attendance || []);
-  // Reset to profile tab
-  switchModalTab("profile", document.querySelector(".mtab"));
+  // Populate department datalist
+  const dl = document.getElementById("editDeptList");
+  if (dl) {
+    dl.innerHTML = "";
+    _ensureDefaultData();
+    getFaculties().forEach(f => {
+      const opt = document.createElement("option"); opt.value = f.name; dl.appendChild(opt);
+    });
+  }
+  setMsg("editModalErr", "", "");
 };
 
 function closeEditModal(event) {
@@ -2101,7 +2255,8 @@ function closeEditModal(event) {
   _closeEditModal();
 }
 function _closeEditModal() {
-  document.getElementById("editModal").style.display = "none";
+  const el = document.getElementById("editModal");
+  if (el) el.style.display = "none";
   document.body.style.overflow = "";
   _editingSid = null;
 }
@@ -2126,20 +2281,35 @@ function switchModalTab(tab, btn) {
     if (el) el.style.display = t === tab ? "block" : "none";
   });
   if (tab === "actlog" && _editingSid) _loadActLog(_editingSid);
+  if (tab === "attendance" && _editingSid) _loadAttendanceTab(_editingSid);
+}
+
+async function _loadAttendanceTab(sid) {
+  const el = document.getElementById("attEditList");
+  if (!el) return;
+  el.innerHTML = `<p class="muted">Loading…</p>`;
+  try {
+    const r = await api(`/students/${sid}`);
+    if (!r) return;
+    const sd = await r.json();
+    _renderAttEditList(sd.attendance || []);
+  } catch {
+    el.innerHTML = `<p class="muted err">Failed to load attendance.</p>`;
+  }
 }
 
 async function saveStudentEdit() {
   if (!_editingSid) return;
   const fields = {
-    full_name: document.getElementById("mName").value.trim(),
-    department: document.getElementById("mDept").value.trim() || null,
-    semester: document.getElementById("mSem").value.trim() || null,
-    email: document.getElementById("mEmail").value.trim() || null,
-    phone: document.getElementById("mPhone").value.trim() || null,
-    status: document.getElementById("mStatus").value,
+    full_name: document.getElementById("editName").value.trim(),
+    department: document.getElementById("editDept").value.trim() || null,
+    semester: document.getElementById("editSem").value.trim() || null,
+    email: document.getElementById("editEmail").value.trim() || null,
+    phone: document.getElementById("editPhone").value.trim() || null,
+    status: document.getElementById("editStatus").value,
   };
   if (!fields.full_name) {
-    setMsg("editMsg", "Name is required.", "err");
+    setMsg("editModalErr", "Name is required.", "err");
     return;
   }
 
@@ -2150,11 +2320,11 @@ async function saveStudentEdit() {
   if (!r) return;
   const d = await r.json();
   if (!r.ok) {
-    setMsg("editMsg", d.error || "Update failed.", "err");
+    setMsg("editModalErr", d.error || "Update failed.", "err");
     return;
   }
 
-  setMsg("editMsg", "✓ Profile updated successfully.", "ok");
+  setMsg("editModalErr", "✓ Profile updated successfully.", "ok");
   toast("Student updated");
   // Refresh whichever page is visible
   const activePage = document.querySelector(".page.active")?.id;
@@ -2180,7 +2350,7 @@ async function confirmDeleteStudent() {
 
 // ── Attendance override in modal ──────────────────────────────────────
 function _renderAttEditList(records) {
-  const el = document.getElementById("attEditList");
+  const el = document.getElementById("attEditList") || null;
   if (!records || !records.length) {
     el.innerHTML = `<p class="muted" style="padding:.5rem 0">No attendance records yet.</p>`;
     return;
@@ -2201,9 +2371,13 @@ function _renderAttEditList(records) {
 
 async function saveAttendanceEdit() {
   if (!_editingSid) return;
-  const date = document.getElementById("attEditDate").value;
-  const status = document.getElementById("attEditStatus").value;
-  const note = document.getElementById("attEditNote").value.trim();
+  const date = (document.getElementById("attEditDate") || null || {}).value;
+  const status = (document.getElementById("attEditStatus") || null || {}).value;
+  const note = (
+    document.getElementById("attEditNote") ||
+    null ||
+    {}
+  ).value.trim();
   if (!date) {
     setMsg("attEditMsg", "Select a date.", "err");
     return;
@@ -2221,7 +2395,7 @@ async function saveAttendanceEdit() {
   }
 
   setMsg("attEditMsg", `✓ Attendance set to ${status} for ${date}.`, "ok");
-  document.getElementById("attEditNote").value = "";
+  (document.getElementById("attEditNote") || null || {}).value = "";
   // Reload student data to refresh the list
   const sr = await api(`/students/${_editingSid}`);
   const sd = await sr.json();
@@ -2242,7 +2416,7 @@ async function deleteAttRecord(attDate) {
 
 // ── Activity log in modal ─────────────────────────────────────────────
 async function _loadActLog(sid) {
-  const el = document.getElementById("actLogList");
+  const el = document.getElementById("actLogList") || null;
   el.innerHTML = `<p class="muted">Loading…</p>`;
   try {
     const r = await api(`/activity-logs?target_id=${sid}&limit=30`);
@@ -2279,19 +2453,20 @@ window.loadSettings = async function () {
     const r = await api("/settings");
     const d = await r.json();
     // Inject email status into settings page if element exists
-    let emailEl = document.getElementById("emailStatusBadge");
+    let emailEl = document.getElementById("emailTestMsg");
     if (!emailEl) return;
     const on = d.email_enabled;
     emailEl.className = `email-status ${on ? "on" : "off"}`;
     emailEl.textContent = on ? "✓ Email enabled" : "✗ Email disabled";
     if (d.smtp_user)
-      document.getElementById("smtpUserDisplay") &&
-        (document.getElementById("smtpUserDisplay").textContent = d.smtp_user);
+      document.getElementById("emailTestMsg") &&
+        ((document.getElementById("emailTestMsg") || {}).textContent =
+          d.smtp_user);
   } catch {}
 };
 
 async function sendTestEmail() {
-  const email = prompt("Enter email address to send test to:");
+  const email = document.getElementById("testEmailAddr")?.value.trim() || prompt("Enter email address to send test to:");
   if (!email) return;
   const r = await api("/email/test", { method: "POST", json: { email } });
   if (!r) return;
@@ -2362,7 +2537,7 @@ function goToStep3() {
   const fields = [
     ["Student ID", document.getElementById("eId").value.trim()],
     ["Full Name", document.getElementById("eName").value.trim()],
-    ["Department", document.getElementById("eDept").value.trim()],
+    ["Department", document.getElementById("eFaculty").value.trim()],
     ["Semester", document.getElementById("eSem")?.value.trim() || ""],
     ["Email", document.getElementById("eEmail").value.trim()],
     ["Phone", document.getElementById("ePhone").value.trim()],
@@ -2404,114 +2579,6 @@ window.resetEnrollPage = function () {
     (document.getElementById("reviewGrid").innerHTML = "");
   setMsg("enrollMsg", "", "");
 };
-
-/* ═══════════════════════════════════════════════════════════════════════
-   STUDENTS — Faculty filter tabs
-═══════════════════════════════════════════════════════════════════════ */
-let _activeFacultyFilter = "";
-let _allStudentsCache = [];
-
-async function loadStudents() {
-  // Load departments for tab bar
-  try {
-    const r = await api("/departments");
-    const d = await r.json();
-    _buildStudentFacultyTabs(d.departments || []);
-  } catch {}
-  await searchStudents();
-}
-
-function _buildStudentFacultyTabs(depts) {
-  const bar = document.getElementById("studentFacultyTabs");
-  if (!bar) return;
-  bar.innerHTML = [
-    `<div class="faculty-tab ${_activeFacultyFilter === "" ? "active" : ""}"
-          onclick="filterStudentsByFaculty('',this)">All</div>`,
-    ...depts.map(
-      (d) =>
-        `<div class="faculty-tab ${_activeFacultyFilter === d ? "active" : ""}"
-            onclick="filterStudentsByFaculty('${d}',this)">${d}</div>`,
-    ),
-  ].join("");
-}
-
-async function filterStudentsByFaculty(dept, btn) {
-  _activeFacultyFilter = dept;
-  document
-    .querySelectorAll("#studentFacultyTabs .faculty-tab")
-    .forEach((b) =>
-      b.classList.toggle("active", b.textContent.trim() === (dept || "All")),
-    );
-  document.getElementById("studentSearch").value = "";
-  await searchStudents();
-}
-
-// Override existing searchStudents to use faculty filter
-const _origSearchStudents = window.searchStudents || (async () => {});
-window.searchStudents = async function () {
-  const q = document.getElementById("studentSearch")?.value.trim() || "";
-  const dept = _activeFacultyFilter;
-  let url = `/students?q=${encodeURIComponent(q)}`;
-  if (dept) url += `&department=${encodeURIComponent(dept)}`;
-  try {
-    const r = await api(url);
-    const d = await r.json();
-    _allStudentsCache = d.students || [];
-    _renderStudentGrid(_allStudentsCache);
-    _renderStudentFacultyBar(_allStudentsCache);
-  } catch (e) {
-    console.error("searchStudents:", e);
-  }
-};
-
-function _renderStudentGrid(students) {
-  const grid = document.getElementById("personsGrid");
-  if (!grid) return;
-  grid.innerHTML =
-    students
-      .map((s) => {
-        const initials = s.full_name
-          .split(" ")
-          .map((w) => w[0]?.toUpperCase())
-          .slice(0, 2)
-          .join("");
-        return `
-      <div class="person-card" onclick="viewProfile('${s.student_id}')">
-        <button class="person-del" onclick="event.stopPropagation();deleteStudent('${s.student_id}')" title="Edit">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        </button>
-        <div class="person-avatar">${initials || "?"}</div>
-        <div class="person-name">${s.full_name}</div>
-        <div class="person-dept">${s.department || "—"}</div>
-        <div class="person-dept" style="font-family:var(--mono);font-size:10px;color:var(--text3)">${s.semester || ""} · ${s.sample_count} images</div>
-      </div>`;
-      })
-      .join("") ||
-    `<p style="color:var(--text3);grid-column:1/-1">No students found.</p>`;
-}
-
-function _renderStudentFacultyBar(students) {
-  const bar = document.getElementById("studentFacultyBar");
-  if (!bar) return;
-  if (_activeFacultyFilter) {
-    bar.innerHTML = "";
-    return;
-  }
-  const deptMap = {};
-  students.forEach((s) => {
-    const d = s.department || "Unassigned";
-    deptMap[d] = (deptMap[d] || 0) + 1;
-  });
-  bar.innerHTML = Object.entries(deptMap)
-    .sort((a, b) => b[1] - a[1])
-    .map(
-      ([dept, count]) => `
-      <div class="sfb-chip">
-        ${dept} <span class="sfb-count">${count}</span>
-      </div>`,
-    )
-    .join("");
-}
 
 /* ═══════════════════════════════════════════════════════════════════════
    AUTO EMAIL on SSE attendance event
@@ -2776,7 +2843,7 @@ window.addEventListener("load", () => {
 window.addEventListener("load", () => {
   setTimeout(() => {
     const bar = document.querySelector(".capture-status-bar");
-    if (!bar || document.getElementById("voiceToggleBtn")) return;
+    if (!bar || document.getElementById("voiceToggleBtn") || null) return;
 
     const btn = document.createElement("button");
     btn.id = "voiceToggleBtn";
@@ -2805,3 +2872,877 @@ window.addEventListener("load", () => {
     bar.appendChild(btn);
   }, 600);
 });
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MISSING IMPLEMENTATIONS — login role selector, modals, teachers,
+   manage page, teacher panel pages, student portal
+═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Login role selector ──────────────────────────────────────────────── */
+let _loginRole = "admin";
+function selectLoginRole(role) {
+  _loginRole = role;
+  document.querySelectorAll(".role-btn").forEach((b) => b.classList.remove("active"));
+  const rb = document.getElementById(`roleBtn-${role}`);
+  if (rb) rb.classList.add("active");
+
+  const userField = document.getElementById("field-username");
+  const emailField = document.getElementById("field-email");
+  const hint = document.getElementById("loginHint");
+
+  if (role === "student") {
+    if (userField) userField.classList.add("hidden");
+    if (emailField) emailField.classList.remove("hidden");
+    if (hint) hint.textContent = "Enter your registered email address";
+  } else {
+    if (userField) userField.classList.remove("hidden");
+    if (emailField) emailField.classList.add("hidden");
+    if (hint) hint.textContent = role === "teacher" ? "Use credentials given by admin" : "Default: admin / admin123";
+  }
+}
+
+/* ── Generic modal close ──────────────────────────────────────────────── */
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = "none";
+  document.body.style.overflow = "";
+}
+
+/* ── Alias functions for HTML-called names ────────────────────────────── */
+function changeAdminPw() { changePw(); }
+function filterAttendance() {
+  filterActiveTable(document.getElementById("attSearch")?.value || "");
+}
+function exportAttCSV() { exportFacultyCSV(); }
+function exportReport() { exportRange(); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   LOCAL DATA STORE — faculties, subjects, time slots, teachers
+   Stored in localStorage since the backend has no CRUD endpoints.
+══════════════════════════════════════════════════════════════════════ */
+const LS = {
+  get(key) { try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; } },
+  set(key, val) { localStorage.setItem(key, JSON.stringify(val)); },
+};
+function _nextId(arr) { return arr.length ? Math.max(...arr.map((x) => x.id || 0)) + 1 : 1; }
+
+function getFaculties() { return LS.get("frs_faculties"); }
+function setFaculties(arr) { LS.set("frs_faculties", arr); }
+function getSubjects() { return LS.get("frs_subjects"); }
+function setSubjects(arr) { LS.set("frs_subjects", arr); }
+function getTimeSlots() { return LS.get("frs_timeslots"); }
+function setTimeSlots(arr) { LS.set("frs_timeslots", arr); }
+function getTeachers() { return LS.get("frs_teachers"); }
+function setTeachers(arr) { LS.set("frs_teachers", arr); }
+
+function _ensureDefaultData() {
+  if (!getFaculties().length) {
+    setFaculties([
+      { id: 1, name: "BCA", code: "BCA" },
+      { id: 2, name: "CSIT", code: "CSIT" },
+      { id: 3, name: "BBM", code: "BBM" },
+    ]);
+  }
+  if (!getTimeSlots().length) {
+    setTimeSlots([
+      { id: 1, label: "Period 1 (07:15–08:15)", start: "07:15", end: "08:15" },
+      { id: 2, label: "Period 2 (08:15–09:15)", start: "08:15", end: "09:15" },
+      { id: 3, label: "Period 3 (09:15–10:15)", start: "09:15", end: "10:15" },
+      { id: 4, label: "Period 4 (11:00–12:00)", start: "11:00", end: "12:00" },
+      { id: 5, label: "Period 5 (12:00–13:00)", start: "12:00", end: "13:00" },
+    ]);
+  }
+}
+
+/* ── Faculty dropdown populator (shared) ─────────────────────────────── */
+let _cachedFaculties = [];
+
+async function _loadFaculties() {
+  try {
+    const r = await api("/faculties");
+    if (r && r.ok) {
+      const data = await r.json();
+      _cachedFaculties = data.faculties || [];
+    }
+  } catch (_) {}
+  return _cachedFaculties;
+}
+
+async function _populateFacultyDropdowns() {
+  const faculties = await _loadFaculties();
+
+  const populate = (selId, keepName = false) => {
+    const sel = document.getElementById(selId);
+    if (!sel) return;
+    const cur = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    faculties.forEach((f) => {
+      const o = document.createElement("option");
+      o.value = keepName ? f.name : f.id;
+      o.text = f.name;
+      sel.add(o);
+    });
+    sel.value = cur;
+  };
+
+  populate("tmFaculty");       // teacher modal — value = faculty id
+  populate("smFaculty");       // subject modal — value = faculty id
+  populate("eFaculty", true);  // enrollment — value = faculty name (stored as text in students)
+}
+
+async function loadSubjectsForModal() {
+  const faculty_id = document.getElementById("tmFaculty")?.value || "";
+  const sel = document.getElementById("tmSubject");
+  if (!sel) return;
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  try {
+    const params = faculty_id ? `?faculty_id=${encodeURIComponent(faculty_id)}` : "";
+    const r = await api(`/subjects${params}`);
+    if (r && r.ok) {
+      const data = await r.json();
+      (data.subjects || []).forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s.id; o.text = `${s.name} (${s.code})`;
+        sel.add(o);
+      });
+    }
+  } catch (_) {}
+  sel.value = cur;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   MANAGE PAGE — Faculties
+══════════════════════════════════════════════════════════════════════ */
+function switchManageTab(tab, btn) {
+  document.querySelectorAll(".sub-tab").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll(".sub-tab-panel").forEach((p) => p.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  else {
+    const tabs = ["faculties", "subjects", "timeslots"];
+    const idx = tabs.indexOf(tab);
+    document.querySelectorAll(".sub-tab")[idx]?.classList.add("active");
+  }
+  const panel = document.getElementById(`mtab-${tab}`);
+  if (panel) panel.classList.add("active");
+
+  if (tab === "faculties") loadFaculties();
+  else if (tab === "subjects") { _populateFacSubjectFilters().then(() => loadSubjects()); }
+  else if (tab === "timeslots") loadTimeslots();
+}
+
+function loadFaculties() {
+  _ensureDefaultData();
+  const faculties = getFaculties();
+  const tbody = document.getElementById("facultyTableBody");
+  if (!tbody) return;
+  if (!faculties.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:2rem">No faculties yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = faculties
+    .map((f) => `
+      <tr>
+        <td style="font-weight:500">${escapeHtml(f.name)}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${escapeHtml(f.code || "")}</td>
+        <td>
+          <button class="btn-secondary btn-sm" onclick="openFacultyModal(${f.id})">Edit</button>
+          <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteFaculty(${f.id})">Delete</button>
+        </td>
+      </tr>`)
+    .join("");
+  _populateFacultyDropdowns();
+}
+
+function openFacultyModal(id) {
+  const f = id ? getFaculties().find((x) => x.id === id) : null;
+  document.getElementById("facultyModalTitle").textContent = f ? "Edit Faculty" : "Add Faculty";
+  document.getElementById("fmId").value = f ? f.id : "";
+  document.getElementById("fmName").value = f ? f.name : "";
+  document.getElementById("fmCode").value = f ? (f.code || "") : "";
+  setMsg("facultyModalErr", "", "");
+  document.getElementById("facultyModal").style.display = "flex";
+}
+
+function saveFaculty() {
+  const id = parseInt(document.getElementById("fmId").value) || null;
+  const name = document.getElementById("fmName").value.trim();
+  const code = document.getElementById("fmCode").value.trim();
+  if (!name) { setMsg("facultyModalErr", "Faculty name is required.", "err"); return; }
+  const faculties = getFaculties();
+  if (id) {
+    const idx = faculties.findIndex((f) => f.id === id);
+    if (idx !== -1) faculties[idx] = { id, name, code };
+  } else {
+    faculties.push({ id: _nextId(faculties), name, code });
+  }
+  setFaculties(faculties);
+  closeModal("facultyModal");
+  loadFaculties();
+  toast(id ? "Faculty updated" : "Faculty added");
+}
+
+function deleteFaculty(id) {
+  if (!confirm("Delete this faculty?")) return;
+  setFaculties(getFaculties().filter((f) => f.id !== id));
+  loadFaculties();
+  toast("Faculty deleted");
+}
+
+/* ── Subjects ─────────────────────────────────────────────────────────── */
+async function _populateFacSubjectFilters() {
+  const faculties = await _loadFaculties();
+  const sel = document.getElementById("subjFacultyFilter");
+  if (sel) {
+    const cur = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    faculties.forEach((f) => {
+      const o = document.createElement("option");
+      o.value = f.id; o.text = f.name; sel.add(o);
+    });
+    sel.value = cur;
+  }
+  const semSel = document.getElementById("subjSemesterFilter");
+  if (semSel && semSel.options.length <= 1) {
+    for (let i = 1; i <= 8; i++) {
+      const o = document.createElement("option"); o.value = String(i); o.text = `Semester ${i}`; semSel.add(o);
+    }
+  }
+}
+
+async function loadSubjects() {
+  const facFilter = document.getElementById("subjFacultyFilter")?.value || "";
+  const semFilter = document.getElementById("subjSemesterFilter")?.value || "";
+  const tbody = document.getElementById("subjectTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+  try {
+    const params = new URLSearchParams();
+    if (facFilter) params.set("faculty_id", facFilter);
+    if (semFilter) params.set("semester", semFilter);
+    const r = await api(`/subjects${params.toString() ? "?" + params.toString() : ""}`);
+    if (!r || !r.ok) { tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red);padding:2rem">Failed to load subjects.</td></tr>`; return; }
+    const data = await r.json();
+    const subjects = data.subjects || [];
+    if (!subjects.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:2rem">No subjects yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = subjects
+      .map((s) => `
+        <tr>
+          <td style="font-weight:500">${escapeHtml(s.name)}</td>
+          <td style="font-family:var(--mono);font-size:11px">${escapeHtml(s.code || "")}</td>
+          <td>${escapeHtml(s.faculty_name || "—")}</td>
+          <td style="text-align:center">${s.semester || "—"}</td>
+          <td>
+            <button class="btn-secondary btn-sm" onclick="openSubjectModal(${s.id})">Edit</button>
+            <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteSubject(${s.id})">Delete</button>
+          </td>
+        </tr>`)
+      .join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red);padding:2rem">Error: ${escapeHtml(String(e))}</td></tr>`;
+  }
+}
+
+let _subjectCache = [];
+
+async function openSubjectModal(id) {
+  await _populateFacultyDropdowns();
+  let s = null;
+  if (id) {
+    try {
+      const r = await api("/subjects");
+      if (r && r.ok) {
+        const data = await r.json();
+        _subjectCache = data.subjects || [];
+        s = _subjectCache.find((x) => x.id === id) || null;
+      }
+    } catch (_) {}
+  }
+  document.getElementById("subjectModalTitle").textContent = s ? "Edit Subject" : "Add Subject";
+  document.getElementById("smId").value = s ? s.id : "";
+  document.getElementById("smName").value = s ? s.name : "";
+  document.getElementById("smCode").value = s ? (s.code || "") : "";
+  const smFac = document.getElementById("smFaculty");
+  if (smFac) smFac.value = s ? (s.faculty_id || "") : "";
+  const smSem = document.getElementById("smSemester");
+  if (smSem) smSem.value = s ? (s.semester || "") : "";
+  setMsg("subjectModalErr", "", "");
+  document.getElementById("subjectModal").style.display = "flex";
+}
+
+async function saveSubject() {
+  const id = parseInt(document.getElementById("smId").value) || null;
+  const name = document.getElementById("smName").value.trim();
+  const code = document.getElementById("smCode").value.trim();
+  const faculty_id = parseInt(document.getElementById("smFaculty")?.value) || null;
+  const semester = document.getElementById("smSemester")?.value || "";
+  if (!name) { setMsg("subjectModalErr", "Subject name is required.", "err"); return; }
+  if (!code) { setMsg("subjectModalErr", "Subject ID is required.", "err"); return; }
+  try {
+    const body = { name, code, faculty_id, semester: semester ? parseInt(semester) : null };
+    const r = id
+      ? await api(`/subjects/${id}`, { method: "PUT",  headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
+      : await api(`/subjects`,       { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      setMsg("subjectModalErr", err.error || "Save failed.", "err");
+      return;
+    }
+  } catch (e) {
+    setMsg("subjectModalErr", String(e), "err");
+    return;
+  }
+  closeModal("subjectModal");
+  loadSubjects();
+  toast(id ? "Subject updated" : "Subject added");
+}
+
+async function deleteSubject(id) {
+  if (!confirm("Delete this subject?")) return;
+  try {
+    await api(`/subjects/${id}`, { method: "DELETE" });
+  } catch (_) {}
+  loadSubjects();
+  toast("Subject deleted");
+}
+
+/* ── Time Slots ───────────────────────────────────────────────────────── */
+function loadTimeslots() {
+  _ensureDefaultData();
+  const slots = getTimeSlots();
+  const tbody = document.getElementById("timeslotTableBody");
+  if (!tbody) return;
+  if (!slots.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem">No time slots yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = slots
+    .map((s) => `
+      <tr>
+        <td style="font-weight:500">${escapeHtml(s.label)}</td>
+        <td style="font-family:var(--mono);font-size:12px">${s.start || "—"}</td>
+        <td style="font-family:var(--mono);font-size:12px">${s.end || "—"}</td>
+        <td>
+          <button class="btn-secondary btn-sm" onclick="openTimeSlotModal(${s.id})">Edit</button>
+          <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteTimeSlot(${s.id})">Delete</button>
+        </td>
+      </tr>`)
+    .join("");
+}
+
+let _tsmEditId = null;
+function openTimeSlotModal(id) {
+  _tsmEditId = id || null;
+  const s = id ? getTimeSlots().find((x) => x.id === id) : null;
+  document.getElementById("tsmLabel").value = s ? s.label : "";
+  document.getElementById("tsmStart").value = s ? s.start : "";
+  document.getElementById("tsmEnd").value = s ? s.end : "";
+  document.getElementById("tsmErr").textContent = "";
+  document.getElementById("timeSlotModal").style.display = "flex";
+}
+
+function saveTimeSlot() {
+  const label = document.getElementById("tsmLabel").value.trim();
+  const start = document.getElementById("tsmStart").value;
+  const end = document.getElementById("tsmEnd").value;
+  if (!label) { document.getElementById("tsmErr").textContent = "Label is required."; return; }
+  if (!start || !end) { document.getElementById("tsmErr").textContent = "Start and end times required."; return; }
+  const slots = getTimeSlots();
+  if (_tsmEditId) {
+    const idx = slots.findIndex((s) => s.id === _tsmEditId);
+    if (idx !== -1) slots[idx] = { id: _tsmEditId, label, start, end };
+  } else {
+    slots.push({ id: _nextId(slots), label, start, end });
+  }
+  setTimeSlots(slots);
+  closeModal("timeSlotModal");
+  loadTimeslots();
+  toast(_tsmEditId ? "Time slot updated" : "Time slot added");
+  _tsmEditId = null;
+}
+
+function deleteTimeSlot(id) {
+  if (!confirm("Delete this time slot?")) return;
+  setTimeSlots(getTimeSlots().filter((s) => s.id !== id));
+  loadTimeslots();
+  toast("Time slot deleted");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   TEACHERS PAGE
+══════════════════════════════════════════════════════════════════════ */
+let _deletingTeacherId = null;
+
+async function loadTeachers() {
+  const tbody = document.getElementById("teacherTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+  try {
+    const r = await api("/teachers");
+    if (!r || !r.ok) { tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--red);padding:2rem">Failed to load teachers.</td></tr>`; return; }
+    const data = await r.json();
+    const teachers = data.teachers || [];
+    if (!teachers.length) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem">No teachers yet. Click + Add Teacher.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = teachers
+      .map((t) => `
+        <tr>
+          <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${escapeHtml(t.teacher_id || "")}</td>
+          <td style="font-weight:500">${escapeHtml(t.full_name || "")}</td>
+          <td>${escapeHtml(t.faculty || "—")}</td>
+          <td style="text-align:center">${t.semester || "—"}</td>
+          <td>${escapeHtml(t.subject || "—")}</td>
+          <td style="font-size:11px;color:var(--text3)">${escapeHtml(t.time_slot || "—")}</td>
+          <td style="font-size:11px;color:var(--text3)">${escapeHtml(t.email || "—")}</td>
+          <td><span style="font-size:11px;font-weight:600;color:${t.status === "active" ? "var(--green)" : "var(--amber)"}">${t.status || "active"}</span></td>
+          <td>
+            <button class="btn-secondary btn-sm" onclick="openTeacherModal(${t.id})">Edit</button>
+            <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteTeacher(${t.id})">Delete</button>
+          </td>
+        </tr>`)
+      .join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--red);padding:2rem">Error: ${escapeHtml(String(e))}</td></tr>`;
+  }
+}
+
+let _teacherCache = [];
+
+async function openTeacherModal(id) {
+  await _populateFacultyDropdowns();
+  let t = null;
+  if (id) {
+    try {
+      const r = await api("/teachers");
+      if (r && r.ok) {
+        const data = await r.json();
+        _teacherCache = data.teachers || [];
+        t = _teacherCache.find((x) => x.id === id) || null;
+      }
+    } catch (_) {}
+  }
+  document.getElementById("teacherModalTitle").textContent = t ? `Edit — ${t.full_name}` : "Add Teacher";
+  document.getElementById("tmId").value = t ? t.id : "";
+  document.getElementById("tmTeacherId").value = t ? (t.teacher_id || "") : "";
+  document.getElementById("tmFullName").value = t ? (t.full_name || "") : "";
+  document.getElementById("tmPassword").value = "";
+  document.getElementById("tmEmail").value = t ? (t.email || "") : "";
+  document.getElementById("tmPhone").value = t ? (t.phone || "") : "";
+  document.getElementById("tmStatus").value = t ? (t.status || "active") : "active";
+  document.getElementById("tmSemester").value = t ? (t.semester || "") : "";
+  if (t) document.getElementById("tmFaculty").value = t.faculty || "";
+
+  const slotSel = document.getElementById("tmTimeSlot");
+  while (slotSel.options.length > 1) slotSel.remove(1);
+  getTimeSlots().forEach((s) => {
+    const o = document.createElement("option");
+    o.value = s.label; o.text = s.label;
+    slotSel.add(o);
+  });
+  if (t) slotSel.value = t.time_slot || "";
+
+  await loadSubjectsForModal();
+  if (t) document.getElementById("tmSubject").value = t.subject || "";
+
+  setMsg("teacherModalErr", "", "");
+  document.getElementById("teacherModal").style.display = "flex";
+}
+
+async function saveTeacher() {
+  const id = parseInt(document.getElementById("tmId").value) || null;
+  const teacher_id = document.getElementById("tmTeacherId").value.trim();
+  const full_name = document.getElementById("tmFullName").value.trim();
+  const password = document.getElementById("tmPassword").value;
+  const email = document.getElementById("tmEmail").value.trim();
+  const phone = document.getElementById("tmPhone").value.trim();
+  const status = document.getElementById("tmStatus").value;
+  const faculty = document.getElementById("tmFaculty").value;
+  const semester = document.getElementById("tmSemester").value;
+  const subject = document.getElementById("tmSubject").value;
+  const time_slot = document.getElementById("tmTimeSlot").value;
+
+  if (!teacher_id) { setMsg("teacherModalErr", "Teacher ID is required.", "err"); return; }
+  if (!full_name) { setMsg("teacherModalErr", "Full name is required.", "err"); return; }
+  if (!id && !password) { setMsg("teacherModalErr", "Password is required for new teacher.", "err"); return; }
+  if (password && password.length < 6) { setMsg("teacherModalErr", "Password must be at least 6 characters.", "err"); return; }
+  if (!faculty) { setMsg("teacherModalErr", "Faculty is required.", "err"); return; }
+
+  const body = {
+    teacher_id, full_name, email, phone, status, faculty,
+    semester: semester ? parseInt(semester) : null,
+    subject, time_slot,
+    username: teacher_id,
+  };
+  if (password) body.password = password;
+
+  try {
+    const r = id
+      ? await api(`/teachers/${id}`, { method: "PUT",  headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
+      : await api(`/teachers`,       { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      setMsg("teacherModalErr", err.error || "Save failed.", "err");
+      return;
+    }
+  } catch (e) {
+    setMsg("teacherModalErr", String(e), "err");
+    return;
+  }
+  closeModal("teacherModal");
+  loadTeachers();
+  toast(id ? "Teacher updated" : "Teacher added");
+}
+
+async function deleteTeacher(id) {
+  _deletingTeacherId = id;
+  const t = _teacherCache.find((x) => x.id === id);
+  const name = t ? t.full_name : `ID ${id}`;
+  if (!confirm(`Delete teacher ${name}? This cannot be undone.`)) { _deletingTeacherId = null; return; }
+  try {
+    await api(`/teachers/${id}`, { method: "DELETE" });
+  } catch (_) {}
+  loadTeachers();
+  toast("Teacher deleted");
+  _deletingTeacherId = null;
+}
+
+function reassignTeacherReferences() { toast("No teacher references to reassign.", "err"); }
+function clearTeacherReferences() { toast("No teacher references to clear.", "err"); }
+function deleteTeacherConfirmed() {
+  if (!_deletingTeacherId) return;
+  deleteTeacher(_deletingTeacherId);
+  closeModal("teacherRefsModal");
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   TEACHER PANEL — Dashboard
+══════════════════════════════════════════════════════════════════════ */
+async function loadTeacherDashboard() {
+  try {
+    const [att, persons] = await Promise.all([
+      api(`/attendance?date=${todayStr()}`).then((r) => r?.json()),
+      api(`/students`).then((r) => r?.json()),
+    ]);
+    if (!att || !persons) return;
+
+    const m = document.getElementById("tDashMetrics");
+    if (m) {
+      const rate = persons.count > 0 ? Math.round((att.present / persons.count) * 100) : 0;
+      m.innerHTML = `
+        <div class="metric-card"><div class="metric-label">Students</div><div class="metric-val">${persons.count}</div></div>
+        <div class="metric-card"><div class="metric-label">Present</div><div class="metric-val" style="color:var(--green)">${att.present}</div></div>
+        <div class="metric-card"><div class="metric-label">Absent</div><div class="metric-val" style="color:var(--red)">${att.absent}</div></div>
+        <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:var(--blue)">${rate}%</div></div>`;
+    }
+
+    const table = document.getElementById("tDashTable");
+    if (table) {
+      if (!att.records || !att.records.length) {
+        table.innerHTML = `<p style="color:var(--text3);padding:1rem 0">No attendance records today.</p>`;
+        return;
+      }
+      table.innerHTML = `<div style="overflow-x:auto"><table class="data-table">
+        <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Time</th><th>Status</th></tr></thead>
+        <tbody>${att.records
+          .map((r) => `
+          <tr>
+            <td style="font-family:var(--mono);font-size:11px">${r.student_id}</td>
+            <td>${escapeHtml(r.name || r.full_name || "")}</td>
+            <td style="color:var(--text3)">${r.department || "—"}</td>
+            <td style="font-family:var(--mono);font-size:11px">${r.time || "—"}</td>
+            <td>${badge(r.status)}</td>
+          </tr>`)
+          .join("")}</tbody></table></div>`;
+    }
+  } catch (e) {
+    console.error("loadTeacherDashboard:", e);
+  }
+}
+
+/* ── Teacher Recognition Page ─────────────────────────────────────────── */
+let _teacherWebcamStream = null;
+let _teacherAutoInterval = null;
+let _teacherAutoActive = false;
+let _sessionMarked = new Set();
+
+async function startTeacherWebcam() {
+  try {
+    _teacherWebcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const video = document.getElementById("tRecogVideo");
+    video.srcObject = _teacherWebcamStream;
+    video.style.display = "block";
+    const overlay = document.getElementById("tRecogOverlay");
+    if (overlay) overlay.style.display = "none";
+    document.getElementById("btnTRecogStop")?.classList.remove("hidden");
+    document.getElementById("tRecogStopFloat")?.classList.remove("hidden");
+  } catch {
+    toast("Camera access denied", "err");
+  }
+}
+
+function stopTeacherWebcam() {
+  if (_teacherAutoActive) toggleTeacherAuto();
+  if (_teacherWebcamStream) {
+    _teacherWebcamStream.getTracks().forEach((t) => t.stop());
+    _teacherWebcamStream = null;
+  }
+  const video = document.getElementById("tRecogVideo");
+  if (video) { video.srcObject = null; video.style.display = "none"; }
+  const overlay = document.getElementById("tRecogOverlay");
+  if (overlay) overlay.style.display = "flex";
+  document.getElementById("btnTRecogStop")?.classList.add("hidden");
+  document.getElementById("tRecogStopFloat")?.classList.add("hidden");
+  const btn = document.getElementById("btnTRecogAuto");
+  if (btn) btn.textContent = "▶ Start Auto";
+  _teacherAutoActive = false;
+}
+
+function toggleTeacherAuto() {
+  const btn = document.getElementById("btnTRecogAuto");
+  if (_teacherAutoActive) {
+    clearInterval(_teacherAutoInterval);
+    _teacherAutoInterval = null;
+    _teacherAutoActive = false;
+    if (btn) btn.textContent = "▶ Start Auto";
+    const sb = document.getElementById("sessionStatusBar");
+    if (sb) { sb.classList.add("hidden"); sb.textContent = ""; }
+  } else {
+    if (!_teacherWebcamStream) { toast("Start camera first", "err"); return; }
+    _teacherAutoActive = true;
+    if (btn) btn.textContent = "⏸ Pause Auto";
+    const sb = document.getElementById("sessionStatusBar");
+    if (sb) { sb.classList.remove("hidden"); sb.textContent = "Auto recognition active — scanning every 2 seconds"; }
+    _sessionMarked.clear();
+    _teacherAutoInterval = setInterval(doTeacherRecognize, 2000);
+  }
+}
+
+async function doTeacherRecognize() {
+  const video = document.getElementById("tRecogVideo");
+  if (!video || !video.srcObject || video.readyState < 2) return;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+
+  try {
+    const r = await api("/recognize", { method: "POST", json: { image: b64 } });
+    if (!r) return;
+    const d = await r.json();
+
+    const resultEl = document.getElementById("tRecogResult");
+    if (d.recognized) {
+      if (resultEl)
+        resultEl.innerHTML = `<span style="color:var(--green);font-size:13px;font-weight:600">✓ ${escapeHtml(d.name)} — ${d.confidence}%${d.attendance_marked ? " (marked)" : " (already marked)"}</span>`;
+
+      if (d.attendance_marked) {
+        toast(`✓ ${d.name} marked present`);
+        _sessionMarked.add(d.student_id);
+        const countEl = document.getElementById("sessionCountPill");
+        if (countEl) countEl.textContent = `${_sessionMarked.size} marked`;
+        const markedCountEl = document.getElementById("sessionMarkedCount");
+        if (markedCountEl) markedCountEl.textContent = _sessionMarked.size;
+        const markedLabelEl = document.getElementById("sessionMarkedLabel");
+        if (markedLabelEl) markedLabelEl.textContent = "marked today";
+
+        const log = document.getElementById("tSessionLog");
+        if (log) {
+          const placeholder = log.querySelector(".session-placeholder");
+          if (placeholder) placeholder.remove();
+          const item = document.createElement("div");
+          item.className = "log-item ok";
+          item.innerHTML = `<span class="log-name">${escapeHtml(d.name)}</span><span class="log-conf">${d.confidence}% · ${new Date().toLocaleTimeString("en-GB").slice(0, 5)}</span>`;
+          log.prepend(item);
+          while (log.children.length > 30) log.removeChild(log.lastChild);
+        }
+      }
+    } else {
+      if (resultEl)
+        resultEl.innerHTML = `<span style="color:var(--text3);font-size:13px">${d.confidence ? `No match (${d.confidence}% best)` : "No face detected"}</span>`;
+    }
+  } catch {}
+}
+
+/* ── Teacher Manual Attendance ────────────────────────────────────────── */
+async function loadManualAttendance() {
+  const dateVal = document.getElementById("tManualDate")?.value || todayStr();
+  const grid = document.getElementById("manualAttGrid");
+  if (!grid) return;
+  grid.innerHTML = `<p class="muted">Loading…</p>`;
+
+  try {
+    const [stuR, attR] = await Promise.all([
+      api("/students").then((r) => r?.json()),
+      api(`/attendance?date=${dateVal}`).then((r) => r?.json()),
+    ]);
+    if (!stuR) return;
+    const students = stuR.students || [];
+    const attMap = {};
+    (attR?.records || []).forEach((r) => { attMap[r.student_id] = r.status; });
+
+    if (!students.length) {
+      grid.innerHTML = `<p class="muted">No students enrolled.</p>`;
+      return;
+    }
+    grid.innerHTML = `<div style="overflow-x:auto"><table class="data-table">
+      <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Mark</th></tr></thead>
+      <tbody>${students
+        .map((s) => `
+        <tr>
+          <td style="font-family:var(--mono);font-size:11px">${s.student_id}</td>
+          <td>${escapeHtml(s.full_name)}</td>
+          <td style="color:var(--text3)">${s.department || "—"}</td>
+          <td>
+            <select class="input-sm manual-status-sel" data-sid="${s.student_id}">
+              <option value="Present" ${attMap[s.student_id] === "Present" ? "selected" : ""}>Present</option>
+              <option value="Absent" ${!attMap[s.student_id] || attMap[s.student_id] === "Absent" ? "selected" : ""}>Absent</option>
+            </select>
+          </td>
+        </tr>`)
+        .join("")}</tbody></table></div>`;
+  } catch {
+    grid.innerHTML = `<p class="msg err">Failed to load students.</p>`;
+  }
+}
+
+async function saveAllManualAttendance() {
+  const dateVal = document.getElementById("tManualDate")?.value || todayStr();
+  const selects = document.querySelectorAll(".manual-status-sel");
+  if (!selects.length) { toast("No students loaded", "err"); return; }
+
+  let saved = 0, failed = 0;
+  for (const sel of selects) {
+    const sid = sel.dataset.sid;
+    const status = sel.value;
+    try {
+      const r = await api(`/attendance/${sid}/${dateVal}`, { method: "PUT", json: { status } });
+      if (r?.ok) saved++;
+      else failed++;
+    } catch { failed++; }
+  }
+  toast(failed ? `Saved ${saved}, failed ${failed}` : `✓ ${saved} records saved for ${dateVal}`);
+}
+
+/* ── Teacher Logs ─────────────────────────────────────────────────────── */
+async function loadTeacherLogs() {
+  const days = parseInt(document.getElementById("tLogDays")?.value || 30);
+  const tbody = document.getElementById("tLogsBody");
+  if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+
+  try {
+    const r = await api(`/logs?limit=${days * 30}`);
+    if (!r || !r.ok) throw new Error("failed");
+    const d = await r.json();
+    const logs = d.logs || [];
+
+    if (!logs.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem">No logs found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = logs
+      .map((l) => `
+        <tr>
+          <td style="font-family:var(--mono);font-size:11px">${(l.logged_at || "").slice(0, 10)}</td>
+          <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${escapeHtml(l.student_id || "—")}</td>
+          <td>${escapeHtml(l.full_name || "")}</td>
+          <td style="font-family:var(--mono);font-size:11px">${(l.logged_at || "").slice(11, 16)}</td>
+          <td>${badge(l.recognized ? "Present" : "Absent")}</td>
+          <td style="color:var(--text3);font-size:11px">${l.confidence ? l.confidence + "%" : "—"}</td>
+        </tr>`)
+      .join("");
+  } catch {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:2rem">Failed to load logs.</td></tr>`;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   STUDENT PORTAL
+══════════════════════════════════════════════════════════════════════ */
+async function loadStudentPortal() {
+  const panel = document.getElementById("student-panel");
+  if (!panel) return;
+  panel.style.display = "flex";
+
+  const email = localStorage.getItem("frs_student_email") || "";
+
+  try {
+    const r = await fetch(`${API}/students`, { headers: { Authorization: `Bearer ${authToken}` } });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const students = d.students || [];
+    const student = email
+      ? students.find((s) => s.email?.toLowerCase() === email.toLowerCase())
+      : null;
+
+    if (!student) {
+      const wn = document.getElementById("studentWelcomeName");
+      if (wn) wn.textContent = "Welcome";
+      const ws = document.getElementById("studentWelcomeSub");
+      if (ws) ws.textContent = email ? `No student record found for ${email}` : "Please log in with your email.";
+      return;
+    }
+
+    const hn = document.getElementById("studentHeaderName");
+    if (hn) hn.textContent = student.student_id;
+    const wn = document.getElementById("studentWelcomeName");
+    if (wn) wn.textContent = `Welcome, ${student.full_name}`;
+    const ws = document.getElementById("studentWelcomeSub");
+    if (ws) ws.textContent = `${student.department || ""} · ${student.email || ""}`;
+
+    // Load full profile
+    const pr = await fetch(`${API}/students/${student.student_id}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!pr.ok) throw new Error();
+    const p = await pr.json();
+
+    const pct = p.stats?.percentage || 0;
+    const color = pct >= 75 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)";
+
+    const sp = document.getElementById("sStat-present");
+    if (sp) sp.textContent = p.stats?.total_present || 0;
+    const st = document.getElementById("sStat-total");
+    if (st) st.textContent = p.stats?.total_days || 0;
+    const sc = document.getElementById("sStat-pct");
+    if (sc) { sc.textContent = `${pct}%`; sc.style.color = color; }
+
+    const subjectEl = document.getElementById("studentSubjectSummary");
+    if (subjectEl)
+      subjectEl.innerHTML = `
+        <div style="margin-bottom:4px;font-size:13px;color:var(--text2)">Overall Attendance</div>
+        <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:6px 0">
+          <div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:3px"></div>
+        </div>
+        <div style="font-size:12px;color:${color};font-weight:600">${pct}%</div>`;
+
+    const attBody = document.getElementById("studentAttBody");
+    if (attBody) {
+      const records = (p.attendance || []).slice(0, 90);
+      if (!records.length) {
+        attBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted p-2rem">No records yet.</td></tr>`;
+      } else {
+        attBody.innerHTML = records
+          .map((rec) => `
+            <tr>
+              <td style="font-family:var(--mono);font-size:11px">${rec.date}</td>
+              <td style="color:var(--text3);font-size:11px">—</td>
+              <td style="color:var(--text3);font-size:11px">—</td>
+              <td>${badge(rec.status)}</td>
+            </tr>`)
+          .join("");
+      }
+    }
+  } catch (e) {
+    console.error("loadStudentPortal:", e);
+    const ws = document.getElementById("studentWelcomeSub");
+    if (ws) ws.textContent = "Could not load your attendance data. Check connection.";
+  }
+}
