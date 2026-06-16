@@ -1971,15 +1971,40 @@ function _getNextPoseStep() {
 }
 
 function _updatePosePips() {
+  const currentPose = _getCurrentPoseStep()?.pose;
   for (const step of POSE_SEQUENCE) {
     const pip = document.getElementById(`pip-${step.pose}`);
     if (!pip) continue;
     const count = poseCaptureCounts[step.pose] || 0;
     const isDone = count >= step.target;
-    const isCurrent = _getCurrentPoseStep()?.pose === step.pose;
+    const isCurrent = currentPose === step.pose;
     pip.classList.toggle("done", isDone);
     pip.classList.toggle("active", isCurrent && !isDone);
   }
+
+  // Update per-pose progress list
+  const listEl = document.getElementById("poseProgress");
+  if (!listEl) return;
+  listEl.innerHTML = POSE_SEQUENCE.map((step, idx) => {
+    const count = poseCaptureCounts[step.pose] || 0;
+    const isDone = count >= step.target;
+    const isCurrent = currentPose === step.pose;
+    const pct = Math.min(100, (count / step.target) * 100);
+    const label = step.pose.charAt(0).toUpperCase() + step.pose.slice(1);
+    const fillColor = isDone ? "var(--green)" : isCurrent ? "var(--amber)" : "var(--text3)";
+    const badgeContent = isDone ? "✓" : String(idx + 1);
+    const rowClass = isDone ? "done" : isCurrent ? "active" : "";
+    return `<div class="pp-row ${rowClass}">
+      <span class="pp-badge">${badgeContent}</span>
+      <div class="pp-info">
+        <div class="pp-top">
+          <span class="pp-name">${label}</span>
+          <span class="pp-count">${count}/${step.target}</span>
+        </div>
+        <div class="pp-bar"><div class="pp-fill" style="width:${pct}%;background:${fillColor}"></div></div>
+      </div>
+    </div>`;
+  }).join("");
 }
 
 function _onCaptureComplete() {
@@ -2530,6 +2555,7 @@ function goToStep2() {
     return;
   }
   _setEnrollStep(2);
+  _updatePosePips(); // render progress list immediately when panel opens
 }
 
 function goToStep3() {
@@ -3131,14 +3157,14 @@ async function loadSubjects() {
     tbody.innerHTML = subjects
       .map((s) => `
         <tr>
-          <td style="font-weight:500">${escapeHtml(s.name)}</td>
-          <td style="font-family:var(--mono);font-size:11px">${escapeHtml(s.code || "")}</td>
-          <td>${escapeHtml(s.faculty_name || "—")}</td>
-          <td style="text-align:center">${s.semester || "—"}</td>
-          <td>
+          <td class="t-name">${escapeHtml(s.name)}</td>
+          <td class="t-mono">${escapeHtml(s.code || "—")}</td>
+          <td><span class="t-asgn-chip">${escapeHtml(s.faculty_code || s.faculty_name || "—")}</span></td>
+          <td class="t-sem-cell">${s.semester ? `<span class="t-sem-badge">Sem ${s.semester}</span>` : `<span class="t-mono">—</span>`}</td>
+          <td><div class="action-btns">
             <button class="btn-secondary btn-sm" onclick="openSubjectModal(${s.id})">Edit</button>
-            <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteSubject(${s.id})">Delete</button>
-          </td>
+            <button class="btn-danger btn-sm" onclick="deleteSubject(${s.id})">Delete</button>
+          </div></td>
         </tr>`)
       .join("");
   } catch (e) {
@@ -3210,65 +3236,91 @@ async function deleteSubject(id) {
 }
 
 /* ── Time Slots ───────────────────────────────────────────────────────── */
-function loadTimeslots() {
-  _ensureDefaultData();
-  const slots = getTimeSlots();
+let _tsmCache = [];
+
+async function loadTimeslots() {
+  const search = document.getElementById("tsmSearch")?.value.trim() || "";
   const tbody = document.getElementById("timeslotTableBody");
   if (!tbody) return;
-  if (!slots.length) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem">No time slots yet.</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = slots
-    .map((s) => `
+  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+  try {
+    const params = new URLSearchParams({ limit: 100 });
+    if (search) params.set("search", search);
+    const r = await api(`/timeslots?${params}`);
+    if (!r || !r.ok) { tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--red);padding:2rem">Failed to load.</td></tr>`; return; }
+    const data = await r.json();
+    _tsmCache = data.time_slots || [];
+    if (!_tsmCache.length) {
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:2rem">No time slots found${search ? ' matching "' + escapeHtml(search) + '"' : ""}.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = _tsmCache.map((s) => `
       <tr>
         <td style="font-weight:500">${escapeHtml(s.label)}</td>
-        <td style="font-family:var(--mono);font-size:12px">${s.start || "—"}</td>
-        <td style="font-family:var(--mono);font-size:12px">${s.end || "—"}</td>
+        <td style="font-family:var(--mono);font-size:12px">${s.start_time || "—"}</td>
+        <td style="font-family:var(--mono);font-size:12px">${s.end_time || "—"}</td>
         <td>
           <button class="btn-secondary btn-sm" onclick="openTimeSlotModal(${s.id})">Edit</button>
           <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteTimeSlot(${s.id})">Delete</button>
         </td>
-      </tr>`)
-    .join("");
+      </tr>`).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;color:var(--red);padding:2rem">Error: ${escapeHtml(String(e))}</td></tr>`;
+  }
 }
 
 let _tsmEditId = null;
 function openTimeSlotModal(id) {
   _tsmEditId = id || null;
-  const s = id ? getTimeSlots().find((x) => x.id === id) : null;
+  const s = id ? _tsmCache.find((x) => x.id === id) : null;
   document.getElementById("tsmLabel").value = s ? s.label : "";
-  document.getElementById("tsmStart").value = s ? s.start : "";
-  document.getElementById("tsmEnd").value = s ? s.end : "";
+  document.getElementById("tsmStart").value = s ? (s.start_time || "") : "";
+  document.getElementById("tsmEnd").value = s ? (s.end_time || "") : "";
   document.getElementById("tsmErr").textContent = "";
   document.getElementById("timeSlotModal").style.display = "flex";
 }
 
-function saveTimeSlot() {
-  const label = document.getElementById("tsmLabel").value.trim();
-  const start = document.getElementById("tsmStart").value;
-  const end = document.getElementById("tsmEnd").value;
+async function saveTimeSlot() {
+  const label      = document.getElementById("tsmLabel").value.trim();
+  const start_time = document.getElementById("tsmStart").value;
+  const end_time   = document.getElementById("tsmEnd").value;
   if (!label) { document.getElementById("tsmErr").textContent = "Label is required."; return; }
-  if (!start || !end) { document.getElementById("tsmErr").textContent = "Start and end times required."; return; }
-  const slots = getTimeSlots();
-  if (_tsmEditId) {
-    const idx = slots.findIndex((s) => s.id === _tsmEditId);
-    if (idx !== -1) slots[idx] = { id: _tsmEditId, label, start, end };
-  } else {
-    slots.push({ id: _nextId(slots), label, start, end });
+  if (!start_time || !end_time) { document.getElementById("tsmErr").textContent = "Start and end times required."; return; }
+  try {
+    const body = { label, start_time, end_time };
+    const r = _tsmEditId
+      ? await api(`/timeslots/${_tsmEditId}`, { method: "PUT",  headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) })
+      : await api(`/timeslots`,               { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(body) });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      document.getElementById("tsmErr").textContent = err.error || "Save failed.";
+      return;
+    }
+  } catch (e) {
+    document.getElementById("tsmErr").textContent = String(e);
+    return;
   }
-  setTimeSlots(slots);
   closeModal("timeSlotModal");
   loadTimeslots();
   toast(_tsmEditId ? "Time slot updated" : "Time slot added");
   _tsmEditId = null;
 }
 
-function deleteTimeSlot(id) {
+async function deleteTimeSlot(id) {
   if (!confirm("Delete this time slot?")) return;
-  setTimeSlots(getTimeSlots().filter((s) => s.id !== id));
+  try {
+    await api(`/timeslots/${id}`, { method: "DELETE" });
+  } catch (_) {}
   loadTimeslots();
   toast("Time slot deleted");
+}
+
+async function deleteAllTimeslots() {
+  if (!confirm("Delete ALL time slots? This will also remove time slot assignments from all teachers. This cannot be undone.")) return;
+  const r = await api("/timeslots/all", { method: "DELETE" });
+  if (!r || !r.ok) { toast("Failed to delete time slots"); return; }
+  loadTimeslots();
+  toast("All time slots deleted");
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -3286,46 +3338,55 @@ async function loadTeachers() {
     const data = await r.json();
     const teachers = data.teachers || [];
     if (!teachers.length) {
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:2rem">No teachers yet. Click + Add Teacher.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem">No teachers yet. Click + Add Teacher.</td></tr>`;
       return;
     }
     tbody.innerHTML = teachers
-      .map((t) => `
-        <tr>
-          <td style="font-family:var(--mono);font-size:11px;color:var(--text3)">${escapeHtml(t.teacher_id || "")}</td>
-          <td style="font-weight:500">${escapeHtml(t.full_name || "")}</td>
-          <td>${escapeHtml(t.faculty || "—")}</td>
-          <td style="text-align:center">${t.semester || "—"}</td>
-          <td>${escapeHtml(t.subject || "—")}</td>
-          <td style="font-size:11px;color:var(--text3)">${escapeHtml(t.time_slot || "—")}</td>
-          <td style="font-size:11px;color:var(--text3)">${escapeHtml(t.email || "—")}</td>
-          <td><span style="font-size:11px;font-weight:600;color:${t.status === "active" ? "var(--green)" : "var(--amber)"}">${t.status || "active"}</span></td>
-          <td>
+      .map((t) => {
+        const asgn = t.assignments || [];
+        const asgnHtml = asgn.length === 0
+          ? `<span class="t-no-asgn">No assignments</span>`
+          : asgn.map((a) => {
+              const fac = escapeHtml(a.faculty_code || a.faculty_name || "");
+              const sub = escapeHtml(a.subject_code || a.subject_name || "");
+              const sem = a.semester ? `S${a.semester}` : "";
+              return `<span class="t-asgn-chip">${fac}${sem ? " " + sem : ""} · ${sub}</span>`;
+            }).join("");
+        const statusColor = t.status === "active" ? "var(--green)" : "var(--amber)";
+        return `<tr>
+          <td class="t-mono">${escapeHtml(t.teacher_id || "—")}</td>
+          <td class="t-name">${escapeHtml(t.full_name || "")}</td>
+          <td class="t-email">${escapeHtml(t.email || "—")}</td>
+          <td class="t-asgn">${asgnHtml}</td>
+          <td><span class="t-status" style="color:${statusColor}">${t.status || "active"}</span></td>
+          <td><div class="action-btns">
             <button class="btn-secondary btn-sm" onclick="openTeacherModal(${t.id})">Edit</button>
-            <button class="btn-danger btn-sm" style="margin-left:4px" onclick="deleteTeacher(${t.id})">Delete</button>
-          </td>
-        </tr>`)
+            <button class="btn-danger btn-sm" onclick="deleteTeacher(${t.id})">Delete</button>
+          </div></td>
+        </tr>`;
+      })
       .join("");
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--red);padding:2rem">Error: ${escapeHtml(String(e))}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--red);padding:2rem">Error: ${escapeHtml(String(e))}</td></tr>`;
   }
 }
 
 let _teacherCache = [];
+let _currentEditTeacherId = null;
 
 async function openTeacherModal(id) {
-  await _populateFacultyDropdowns();
+  _currentEditTeacherId = id || null;
   let t = null;
   if (id) {
     try {
-      const r = await api("/teachers");
+      const r = await api(`/teachers/${id}`);
       if (r && r.ok) {
         const data = await r.json();
-        _teacherCache = data.teachers || [];
-        t = _teacherCache.find((x) => x.id === id) || null;
+        t = data.teacher || null;
       }
     } catch (_) {}
   }
+
   document.getElementById("teacherModalTitle").textContent = t ? `Edit — ${t.full_name}` : "Add Teacher";
   document.getElementById("tmId").value = t ? t.id : "";
   document.getElementById("tmTeacherId").value = t ? (t.teacher_id || "") : "";
@@ -3334,50 +3395,165 @@ async function openTeacherModal(id) {
   document.getElementById("tmEmail").value = t ? (t.email || "") : "";
   document.getElementById("tmPhone").value = t ? (t.phone || "") : "";
   document.getElementById("tmStatus").value = t ? (t.status || "active") : "active";
-  document.getElementById("tmSemester").value = t ? (t.semester || "") : "";
-  if (t) document.getElementById("tmFaculty").value = t.faculty || "";
 
-  const slotSel = document.getElementById("tmTimeSlot");
-  while (slotSel.options.length > 1) slotSel.remove(1);
-  getTimeSlots().forEach((s) => {
-    const o = document.createElement("option");
-    o.value = s.label; o.text = s.label;
-    slotSel.add(o);
-  });
-  if (t) slotSel.value = t.time_slot || "";
-
-  await loadSubjectsForModal();
-  if (t) document.getElementById("tmSubject").value = t.subject || "";
+  // Assignments section: show only when editing existing teacher
+  const assignForm = document.getElementById("addAssignmentForm");
+  const assignHint = document.getElementById("assignmentHint");
+  if (t) {
+    assignForm.style.display = "block";
+    assignHint.style.display = "none";
+    await _populateAssignmentDropdowns();
+    _renderAssignments(t.assignments || []);
+  } else {
+    assignForm.style.display = "none";
+    assignHint.style.display = "block";
+    document.getElementById("teacherAssignmentsList").innerHTML = "";
+  }
 
   setMsg("teacherModalErr", "", "");
   document.getElementById("teacherModal").style.display = "flex";
 }
 
+async function _populateAssignmentDropdowns() {
+  const faculties = await _loadFaculties();
+  const facSel = document.getElementById("taFaculty");
+  if (facSel) {
+    const cur = facSel.value;
+    while (facSel.options.length > 1) facSel.remove(1);
+    faculties.forEach((f) => {
+      const o = document.createElement("option");
+      o.value = f.id; o.text = f.name; facSel.add(o);
+    });
+    facSel.value = cur;
+  }
+  // Time slots — always reload fresh (all 810+)
+  const tsSel = document.getElementById("taTimeSlot");
+  if (tsSel) {
+    while (tsSel.options.length > 1) tsSel.remove(1);
+    try {
+      const r = await api("/timeslots");
+      if (r && r.ok) {
+        const data = await r.json();
+        (data.time_slots || []).forEach((ts) => {
+          const o = document.createElement("option");
+          o.value = ts.id;
+          o.text = `${ts.label}${ts.start_time ? " (" + ts.start_time + " – " + ts.end_time + ")" : ""}`;
+          tsSel.add(o);
+        });
+      }
+    } catch (_) {}
+  }
+}
+
+async function loadSubjectsForAssignment() {
+  const faculty_id = document.getElementById("taFaculty")?.value || "";
+  const sel = document.getElementById("taSubject");
+  if (!sel) return;
+  const cur = sel.value;
+  while (sel.options.length > 1) sel.remove(1);
+  try {
+    const params = faculty_id ? `?faculty_id=${encodeURIComponent(faculty_id)}` : "";
+    const r = await api(`/subjects${params}`);
+    if (r && r.ok) {
+      const data = await r.json();
+      (data.subjects || []).forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s.id; o.text = `${s.name} (${s.code})`; sel.add(o);
+      });
+    }
+  } catch (_) {}
+  sel.value = cur;
+}
+
+function _renderAssignments(assignments) {
+  const el = document.getElementById("teacherAssignmentsList");
+  if (!el) return;
+  if (!assignments.length) {
+    el.innerHTML = `<p style="font-size:12px;color:var(--text3);margin:0 0 0.5rem">No assignments yet.</p>`;
+    return;
+  }
+  el.innerHTML = assignments.map((a) => `
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:var(--bg2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:12px">
+      <span style="flex:1">
+        <strong>${escapeHtml(a.faculty_name || "—")}</strong>
+        · Sem <strong>${a.semester || "?"}</strong>
+        · ${escapeHtml(a.subject_name || "—")} <span style="color:var(--text3)">(${escapeHtml(a.subject_code || "")})</span>
+        · <span style="color:var(--text3)">${escapeHtml(a.time_slot_label || "—")}</span>
+      </span>
+      <button class="btn-danger btn-sm" onclick="removeTeacherAssignment(${a.id})" style="padding:2px 8px;font-size:11px">×</button>
+    </div>`).join("");
+}
+
+async function addTeacherAssignment() {
+  const tid = _currentEditTeacherId;
+  if (!tid) return;
+  const faculty_id  = parseInt(document.getElementById("taFaculty")?.value) || null;
+  const semester    = parseInt(document.getElementById("taSemester")?.value) || null;
+  const subject_id  = parseInt(document.getElementById("taSubject")?.value) || null;
+  const time_slot_id = parseInt(document.getElementById("taTimeSlot")?.value) || null;
+  setMsg("assignmentErr", "", "");
+  try {
+    const r = await api(`/teachers/${tid}/assignments`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ faculty_id, semester, subject_id, time_slot_id })
+    });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      setMsg("assignmentErr", err.error || "Failed to add assignment.", "err");
+      return;
+    }
+  } catch (e) {
+    setMsg("assignmentErr", String(e), "err");
+    return;
+  }
+  // Reload teacher to refresh assignments list
+  const tr = await api(`/teachers/${tid}`);
+  if (tr && tr.ok) {
+    const data = await tr.json();
+    _renderAssignments(data.teacher?.assignments || []);
+  }
+  // Reset dropdowns
+  document.getElementById("taFaculty").value = "";
+  document.getElementById("taSemester").value = "";
+  document.getElementById("taSubject").value = "";
+  document.getElementById("taTimeSlot").value = "";
+  toast("Assignment added");
+  loadTeachers();
+}
+
+async function removeTeacherAssignment(aid) {
+  if (!confirm("Remove this assignment?")) return;
+  try {
+    await api(`/teacher-assignments/${aid}`, { method: "DELETE" });
+  } catch (_) {}
+  const tid = _currentEditTeacherId;
+  if (tid) {
+    const tr = await api(`/teachers/${tid}`);
+    if (tr && tr.ok) {
+      const data = await tr.json();
+      _renderAssignments(data.teacher?.assignments || []);
+    }
+  }
+  toast("Assignment removed");
+  loadTeachers();
+}
+
 async function saveTeacher() {
   const id = parseInt(document.getElementById("tmId").value) || null;
   const teacher_id = document.getElementById("tmTeacherId").value.trim();
-  const full_name = document.getElementById("tmFullName").value.trim();
-  const password = document.getElementById("tmPassword").value;
-  const email = document.getElementById("tmEmail").value.trim();
-  const phone = document.getElementById("tmPhone").value.trim();
-  const status = document.getElementById("tmStatus").value;
-  const faculty = document.getElementById("tmFaculty").value;
-  const semester = document.getElementById("tmSemester").value;
-  const subject = document.getElementById("tmSubject").value;
-  const time_slot = document.getElementById("tmTimeSlot").value;
+  const full_name  = document.getElementById("tmFullName").value.trim();
+  const password   = document.getElementById("tmPassword").value;
+  const email      = document.getElementById("tmEmail").value.trim();
+  const phone      = document.getElementById("tmPhone").value.trim();
+  const status     = document.getElementById("tmStatus").value;
 
   if (!teacher_id) { setMsg("teacherModalErr", "Teacher ID is required.", "err"); return; }
-  if (!full_name) { setMsg("teacherModalErr", "Full name is required.", "err"); return; }
+  if (!full_name)  { setMsg("teacherModalErr", "Full name is required.", "err"); return; }
   if (!id && !password) { setMsg("teacherModalErr", "Password is required for new teacher.", "err"); return; }
   if (password && password.length < 6) { setMsg("teacherModalErr", "Password must be at least 6 characters.", "err"); return; }
-  if (!faculty) { setMsg("teacherModalErr", "Faculty is required.", "err"); return; }
 
-  const body = {
-    teacher_id, full_name, email, phone, status, faculty,
-    semester: semester ? parseInt(semester) : null,
-    subject, time_slot,
-    username: teacher_id,
-  };
+  const body = { teacher_id, full_name, email, phone, status };
   if (password) body.password = password;
 
   try {
@@ -3389,22 +3565,43 @@ async function saveTeacher() {
       setMsg("teacherModalErr", err.error || "Save failed.", "err");
       return;
     }
+    if (!id) {
+      // New teacher: get the new ID and switch modal to edit mode so assignments can be added
+      const data = await r.json();
+      const newId = data.teacher?.id;
+      _currentEditTeacherId = newId;
+      document.getElementById("tmId").value = newId;
+      document.getElementById("teacherModalTitle").textContent = `Edit — ${full_name}`;
+      document.getElementById("addAssignmentForm").style.display = "block";
+      document.getElementById("assignmentHint").style.display = "none";
+      document.getElementById("teacherAssignmentsList").innerHTML = `<p style="font-size:12px;color:var(--text3);margin:0 0 0.5rem">No assignments yet.</p>`;
+      await _populateAssignmentDropdowns();
+      toast("Teacher created — now add assignments");
+      loadTeachers();
+      return;
+    }
   } catch (e) {
     setMsg("teacherModalErr", String(e), "err");
     return;
   }
   closeModal("teacherModal");
   loadTeachers();
-  toast(id ? "Teacher updated" : "Teacher added");
+  toast("Teacher updated");
 }
 
 async function deleteTeacher(id) {
   _deletingTeacherId = id;
   const t = _teacherCache.find((x) => x.id === id);
   const name = t ? t.full_name : `ID ${id}`;
-  if (!confirm(`Delete teacher ${name}? This cannot be undone.`)) { _deletingTeacherId = null; return; }
+  if (!confirm(`Delete teacher "${name}"? This cannot be undone.`)) { _deletingTeacherId = null; return; }
   try {
-    await api(`/teachers/${id}`, { method: "DELETE" });
+    const r = await api(`/teachers/${id}`, { method: "DELETE" });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      toast(err.error || "Delete failed.", "err");
+      _deletingTeacherId = null;
+      return;
+    }
   } catch (_) {}
   loadTeachers();
   toast("Teacher deleted");
