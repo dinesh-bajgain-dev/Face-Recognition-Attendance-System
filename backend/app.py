@@ -153,12 +153,50 @@ def init_db():
                 error_msg   TEXT
             );
 
+            -- Subjects table
+            CREATE TABLE IF NOT EXISTS subjects (
+                id         SERIAL PRIMARY KEY,
+                name       TEXT NOT NULL,
+                code       TEXT NOT NULL UNIQUE,
+                faculty    TEXT,
+                semester   INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
             INSERT INTO users (username, password_hash, role)
             VALUES ('admin',
                     '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
                     'admin')
             ON CONFLICT DO NOTHING;
             """)
+        # Non-destructive migrations for subjects table (may pre-exist without these columns)
+        with conn.cursor() as c:
+            for col_sql in [
+                "ALTER TABLE subjects ADD COLUMN IF NOT EXISTS faculty    TEXT",
+                "ALTER TABLE subjects ADD COLUMN IF NOT EXISTS semester   INTEGER",
+                "ALTER TABLE subjects ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+            ]:
+                try:
+                    c.execute(col_sql)
+                except Exception:
+                    pass
+        # Teacher profile columns — non-destructive migrations
+        with conn.cursor() as c:
+            for col_sql in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name  TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS email      TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone      TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS teacher_id TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS faculty    TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS semester   INTEGER",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS subject    TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS time_slot  TEXT",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS status     TEXT NOT NULL DEFAULT 'active'",
+            ]:
+                try:
+                    c.execute(col_sql)
+                except Exception:
+                    pass
         with conn.cursor() as c:
             c.execute("""
                 CREATE INDEX IF NOT EXISTS students_embedding_hnsw
@@ -1559,6 +1597,268 @@ def update_settings():
     if "frame_skip" in d:            SKIP      = int(d["frame_skip"])
     _log_activity(g.user["username"],"update_settings","system",detail=str(d))
     return jsonify({"recognition_threshold":THRESHOLD,"frame_skip":SKIP})
+
+# ── Faculties ─────────────────────────────────────────────────────────────
+@app.route("/api/faculties")
+@require_auth
+def list_faculties():
+    with get_db() as conn:
+        rows = qall(conn, "SELECT id, name, code FROM faculties ORDER BY name")
+    return jsonify({"faculties": rows})
+
+@app.route("/api/faculties", methods=["POST"])
+@require_auth
+def create_faculty():
+    d = request.json or {}
+    if not d.get("name"): return jsonify({"error": "name is required"}), 400
+    try:
+        with get_db() as conn:
+            row = qone(conn,
+                "INSERT INTO faculties (name, code) VALUES (%s,%s) RETURNING id, name, code",
+                (d["name"], d.get("code", "")))
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Faculty already exists"}), 409
+        raise
+    _log_activity(g.user["username"], "create_faculty", "faculty", target_id=d["name"])
+    return jsonify({"faculty": row}), 201
+
+@app.route("/api/faculties/<int:fid>", methods=["PUT"])
+@require_auth
+def update_faculty(fid):
+    d = request.json or {}
+    fields, vals = [], []
+    for col in ["name", "code"]:
+        if col in d:
+            fields.append(f"{col}=%s"); vals.append(d[col])
+    if not fields: return jsonify({"error": "Nothing to update"}), 400
+    vals.append(fid)
+    with get_db() as conn:
+        row = qone(conn, f"UPDATE faculties SET {','.join(fields)} WHERE id=%s RETURNING id,name,code", vals)
+    if not row: return jsonify({"error": "Faculty not found"}), 404
+    _log_activity(g.user["username"], "update_faculty", "faculty", target_id=str(fid))
+    return jsonify({"faculty": row})
+
+@app.route("/api/faculties/<int:fid>", methods=["DELETE"])
+@require_auth
+def delete_faculty_db(fid):
+    with get_db() as conn:
+        row = qone(conn, "DELETE FROM faculties WHERE id=%s RETURNING id", (fid,))
+    if not row: return jsonify({"error": "Faculty not found"}), 404
+    _log_activity(g.user["username"], "delete_faculty", "faculty", target_id=str(fid))
+    return jsonify({"deleted": True})
+
+# ── Time Slots ────────────────────────────────────────────────────────────
+@app.route("/api/timeslots")
+@require_auth
+def list_timeslots():
+    with get_db() as conn:
+        rows = qall(conn,
+            "SELECT id, label, start_time::text AS start_time, end_time::text AS end_time "
+            "FROM time_slots ORDER BY start_time")
+    return jsonify({"time_slots": rows})
+
+@app.route("/api/timeslots", methods=["POST"])
+@require_auth
+def create_timeslot():
+    d = request.json or {}
+    if not d.get("label"): return jsonify({"error": "label is required"}), 400
+    with get_db() as conn:
+        row = qone(conn,
+            "INSERT INTO time_slots (label, start_time, end_time) VALUES (%s,%s,%s) "
+            "RETURNING id, label, start_time::text, end_time::text",
+            (d["label"], d.get("start_time"), d.get("end_time")))
+    _log_activity(g.user["username"], "create_timeslot", "timeslot", target_id=d["label"])
+    return jsonify({"time_slot": row}), 201
+
+@app.route("/api/timeslots/<int:tid>", methods=["PUT"])
+@require_auth
+def update_timeslot(tid):
+    d = request.json or {}
+    fields, vals = [], []
+    for col in ["label", "start_time", "end_time"]:
+        if col in d:
+            fields.append(f"{col}=%s"); vals.append(d[col])
+    if not fields: return jsonify({"error": "Nothing to update"}), 400
+    vals.append(tid)
+    with get_db() as conn:
+        row = qone(conn,
+            f"UPDATE time_slots SET {','.join(fields)} WHERE id=%s "
+            "RETURNING id, label, start_time::text, end_time::text", vals)
+    if not row: return jsonify({"error": "Time slot not found"}), 404
+    return jsonify({"time_slot": row})
+
+@app.route("/api/timeslots/<int:tid>", methods=["DELETE"])
+@require_auth
+def delete_timeslot(tid):
+    with get_db() as conn:
+        row = qone(conn, "DELETE FROM time_slots WHERE id=%s RETURNING id", (tid,))
+    if not row: return jsonify({"error": "Time slot not found"}), 404
+    _log_activity(g.user["username"], "delete_timeslot", "timeslot", target_id=str(tid))
+    return jsonify({"deleted": True})
+
+# ── Teachers CRUD ─────────────────────────────────────────────────────────
+@app.route("/api/teachers", methods=["GET"])
+@require_auth
+def list_teachers():
+    with get_db() as conn:
+        rows = qall(conn, """
+            SELECT t.id, t.teacher_id, t.full_name, t.email, t.phone, t.status, t.semester,
+                   f.id   AS faculty_id,   f.name  AS faculty_name,
+                   s.id   AS subject_id,   s.name  AS subject_name,
+                   ts.id  AS time_slot_id, ts.label AS time_slot_label
+            FROM teachers t
+            LEFT JOIN faculties  f  ON f.id  = t.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = t.subject_id
+            LEFT JOIN time_slots ts ON ts.id = t.time_slot_id
+            ORDER BY t.full_name
+        """)
+    return jsonify({"teachers": rows})
+
+@app.route("/api/teachers", methods=["POST"])
+@require_auth
+def create_teacher():
+    d = request.json or {}
+    if not d.get("teacher_id"): return jsonify({"error": "teacher_id is required"}), 400
+    if not d.get("full_name"):  return jsonify({"error": "full_name is required"}), 400
+    if not d.get("password"):   return jsonify({"error": "password is required"}), 400
+    pw_hash = hashlib.sha256(d["password"].encode()).hexdigest()
+    try:
+        with get_db() as conn:
+            row = qone(conn, """
+                INSERT INTO teachers
+                    (teacher_id, full_name, email, phone, password_hash,
+                     faculty_id, semester, subject_id, time_slot_id, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, teacher_id, full_name, email, phone, status, semester,
+                          faculty_id, subject_id, time_slot_id
+            """, (
+                d["teacher_id"], d["full_name"],
+                d.get("email"), d.get("phone"), pw_hash,
+                d.get("faculty_id") or None,
+                d.get("semester") or None,
+                d.get("subject_id") or None,
+                d.get("time_slot_id") or None,
+                d.get("status", "active")
+            ))
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Teacher ID already exists"}), 409
+        raise
+    _log_activity(g.user["username"], "create_teacher", "teacher", target_id=d["teacher_id"])
+    return jsonify({"teacher": row}), 201
+
+@app.route("/api/teachers/<int:tid>", methods=["PUT"])
+@require_auth
+def update_teacher(tid):
+    d = request.json or {}
+    fields, values = [], []
+    for col in ["teacher_id","full_name","email","phone","status","semester",
+                "faculty_id","subject_id","time_slot_id"]:
+        if col in d:
+            fields.append(f"{col}=%s")
+            values.append(d[col] or None)
+    if "password" in d and d["password"]:
+        fields.append("password_hash=%s")
+        values.append(hashlib.sha256(d["password"].encode()).hexdigest())
+    if not fields: return jsonify({"error": "Nothing to update"}), 400
+    values.append(tid)
+    with get_db() as conn:
+        row = qone(conn,
+            f"UPDATE teachers SET {', '.join(fields)} WHERE id=%s "
+            "RETURNING id, teacher_id, full_name, email, phone, status, semester, "
+            "faculty_id, subject_id, time_slot_id",
+            values)
+    if not row: return jsonify({"error": "Teacher not found"}), 404
+    _log_activity(g.user["username"], "update_teacher", "teacher", target_id=str(tid))
+    return jsonify({"teacher": row})
+
+@app.route("/api/teachers/<int:tid>", methods=["DELETE"])
+@require_auth
+def delete_teacher(tid):
+    with get_db() as conn:
+        row = qone(conn, "DELETE FROM teachers WHERE id=%s RETURNING id", (tid,))
+    if not row: return jsonify({"error": "Teacher not found"}), 404
+    _log_activity(g.user["username"], "delete_teacher", "teacher", target_id=str(tid))
+    return jsonify({"deleted": True})
+
+# ── Subjects CRUD ──────────────────────────────────────────────────────────
+@app.route("/api/subjects", methods=["GET"])
+@require_auth
+def list_subjects():
+    faculty_id = request.args.get("faculty_id", "")
+    semester   = request.args.get("semester", "")
+    where, vals = [], []
+    if faculty_id:
+        where.append("s.faculty_id = %s"); vals.append(int(faculty_id))
+    if semester:
+        where.append("s.semester = %s"); vals.append(int(semester))
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with get_db() as conn:
+        rows = qall(conn, f"""
+            SELECT s.id, s.name, s.code, s.semester, s.faculty_id,
+                   f.name AS faculty_name
+            FROM subjects s
+            LEFT JOIN faculties f ON f.id = s.faculty_id
+            {clause}
+            ORDER BY s.name
+        """, vals)
+    return jsonify({"subjects": rows})
+
+@app.route("/api/subjects", methods=["POST"])
+@require_auth
+def create_subject():
+    d = request.json or {}
+    if not d.get("name"): return jsonify({"error": "name is required"}), 400
+    if not d.get("code"): return jsonify({"error": "code is required"}), 400
+    try:
+        with get_db() as conn:
+            row = qone(conn, """
+                INSERT INTO subjects (name, code, faculty_id, semester)
+                VALUES (%s,%s,%s,%s)
+                RETURNING id, name, code, faculty_id, semester
+            """, (d["name"], d["code"],
+                  d.get("faculty_id") or None,
+                  d.get("semester") or None))
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Subject code already exists"}), 409
+        raise
+    _log_activity(g.user["username"], "create_subject", "subject", target_id=d["code"])
+    return jsonify({"subject": row}), 201
+
+@app.route("/api/subjects/<int:sid>", methods=["PUT"])
+@require_auth
+def update_subject(sid):
+    d = request.json or {}
+    fields, values = [], []
+    for col in ["name", "code", "faculty_id", "semester"]:
+        if col in d:
+            fields.append(f"{col}=%s")
+            values.append(d[col] or None)
+    if not fields: return jsonify({"error": "Nothing to update"}), 400
+    values.append(sid)
+    try:
+        with get_db() as conn:
+            row = qone(conn,
+                f"UPDATE subjects SET {', '.join(fields)} WHERE id=%s "
+                "RETURNING id, name, code, faculty_id, semester", values)
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Subject code already exists"}), 409
+        raise
+    if not row: return jsonify({"error": "Subject not found"}), 404
+    _log_activity(g.user["username"], "update_subject", "subject", target_id=str(sid))
+    return jsonify({"subject": row})
+
+@app.route("/api/subjects/<int:sid>", methods=["DELETE"])
+@require_auth
+def delete_subject(sid):
+    with get_db() as conn:
+        row = qone(conn, "DELETE FROM subjects WHERE id=%s RETURNING id", (sid,))
+    if not row: return jsonify({"error": "Subject not found"}), 404
+    _log_activity(g.user["username"], "delete_subject", "subject", target_id=str(sid))
+    return jsonify({"deleted": True})
 
 # ── Boot ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
