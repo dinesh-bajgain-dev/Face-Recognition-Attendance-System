@@ -151,7 +151,7 @@ async function doLogin() {
   const errEl = document.getElementById("loginErr");
   errEl.textContent = "";
 
-  // Student login — email-based, no backend auth needed (read-only portal)
+  // Student login — email-based, read-only portal (no backend auth)
   if (_loginRole === "student") {
     const email = document.getElementById("loginEmail")?.value.trim();
     if (!email) { errEl.textContent = "Enter your registered email"; return; }
@@ -164,6 +164,31 @@ async function doLogin() {
     return;
   }
 
+  // Teacher login — email + password against teachers table
+  if (_loginRole === "teacher") {
+    const email = document.getElementById("loginEmail")?.value.trim();
+    const password = document.getElementById("loginPass").value;
+    if (!email || !password) { errEl.textContent = "Enter your email and password"; return; }
+    try {
+      const r = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const d = await r.json();
+      if (!r.ok) { errEl.textContent = d.error || "Login failed"; return; }
+      authToken    = d.token;
+      authRole     = d.role || "teacher";
+      authUsername = d.username || email;
+      localStorage.setItem("frs_token",    authToken);
+      localStorage.setItem("frs_role",     authRole);
+      localStorage.setItem("frs_username", authUsername);
+      showApp();
+    } catch { errEl.textContent = "Cannot reach server"; }
+    return;
+  }
+
+  // Admin login — username + password against users table
   const username = document.getElementById("loginUser").value.trim();
   const password = document.getElementById("loginPass").value;
   if (!username || !password) {
@@ -2912,18 +2937,33 @@ function selectLoginRole(role) {
   const rb = document.getElementById(`roleBtn-${role}`);
   if (rb) rb.classList.add("active");
 
-  const userField = document.getElementById("field-username");
+  const userField  = document.getElementById("field-username");
   const emailField = document.getElementById("field-email");
-  const hint = document.getElementById("loginHint");
+  const passField  = document.getElementById("field-password");
+  const hint       = document.getElementById("loginHint");
+  const emailLabel = document.getElementById("emailLabel");
+  const emailInput = document.getElementById("loginEmail");
 
-  if (role === "student") {
-    if (userField) userField.classList.add("hidden");
-    if (emailField) emailField.classList.remove("hidden");
-    if (hint) hint.textContent = "Enter your registered email address";
+  if (role === "admin") {
+    userField?.classList.remove("hidden");
+    emailField?.classList.add("hidden");
+    passField?.classList.remove("hidden");
+    if (hint) hint.textContent = "Default: admin / admin123";
+  } else if (role === "teacher") {
+    userField?.classList.add("hidden");
+    emailField?.classList.remove("hidden");
+    passField?.classList.remove("hidden");
+    if (emailLabel) emailLabel.textContent = "Email";
+    if (emailInput) emailInput.placeholder = "teacher@college.edu";
+    if (hint) hint.textContent = "Use your email and password set by admin";
   } else {
-    if (userField) userField.classList.remove("hidden");
-    if (emailField) emailField.classList.add("hidden");
-    if (hint) hint.textContent = role === "teacher" ? "Use credentials given by admin" : "Default: admin / admin123";
+    // student
+    userField?.classList.add("hidden");
+    emailField?.classList.remove("hidden");
+    passField?.classList.add("hidden");
+    if (emailLabel) emailLabel.textContent = "Registered Email";
+    if (emailInput) emailInput.placeholder = "student@college.edu";
+    if (hint) hint.textContent = "Enter your registered email address";
   }
 }
 
@@ -3045,16 +3085,17 @@ function switchManageTab(tab, btn) {
   document.querySelectorAll(".sub-tab-panel").forEach((p) => p.classList.remove("active"));
   if (btn) btn.classList.add("active");
   else {
-    const tabs = ["faculties", "subjects", "timeslots"];
+    const tabs = ["faculties", "subjects", "timeslots", "timetable"];
     const idx = tabs.indexOf(tab);
     document.querySelectorAll(".sub-tab")[idx]?.classList.add("active");
   }
   const panel = document.getElementById(`mtab-${tab}`);
   if (panel) panel.classList.add("active");
 
-  if (tab === "faculties") loadFaculties();
-  else if (tab === "subjects") { _populateFacSubjectFilters().then(() => loadSubjects()); }
-  else if (tab === "timeslots") loadTimeslots();
+  if (tab === "faculties")  loadFaculties();
+  else if (tab === "subjects")   { _populateFacSubjectFilters().then(() => loadSubjects()); }
+  else if (tab === "timeslots")  loadTimeslots();
+  else if (tab === "timetable")  _populateTimetableFacultyFilter();
 }
 
 function loadFaculties() {
@@ -3487,16 +3528,16 @@ function _renderAssignments(assignments) {
 async function addTeacherAssignment() {
   const tid = _currentEditTeacherId;
   if (!tid) return;
-  const faculty_id  = parseInt(document.getElementById("taFaculty")?.value) || null;
-  const semester    = parseInt(document.getElementById("taSemester")?.value) || null;
-  const subject_id  = parseInt(document.getElementById("taSubject")?.value) || null;
+  const faculty_id   = parseInt(document.getElementById("taFaculty")?.value)  || null;
+  const semester     = parseInt(document.getElementById("taSemester")?.value) || null;
+  const subject_id   = parseInt(document.getElementById("taSubject")?.value)  || null;
   const time_slot_id = parseInt(document.getElementById("taTimeSlot")?.value) || null;
+  const day_of_week  = document.getElementById("taDay")?.value || null;
   setMsg("assignmentErr", "", "");
   try {
     const r = await api(`/teachers/${tid}/assignments`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({ faculty_id, semester, subject_id, time_slot_id })
+      json: { faculty_id, semester, subject_id, time_slot_id, day_of_week }
     });
     if (!r || !r.ok) {
       const err = await r?.json().catch(() => ({}));
@@ -3514,10 +3555,10 @@ async function addTeacherAssignment() {
     _renderAssignments(data.teacher?.assignments || []);
   }
   // Reset dropdowns
-  document.getElementById("taFaculty").value = "";
-  document.getElementById("taSemester").value = "";
-  document.getElementById("taSubject").value = "";
-  document.getElementById("taTimeSlot").value = "";
+  ["taFaculty","taSemester","taSubject","taTimeSlot","taDay"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
   toast("Assignment added");
   loadTeachers();
 }
@@ -3620,45 +3661,115 @@ function deleteTeacherConfirmed() {
    TEACHER PANEL — Dashboard
 ══════════════════════════════════════════════════════════════════════ */
 async function loadTeacherDashboard() {
-  try {
-    const [att, persons] = await Promise.all([
-      api(`/attendance?date=${todayStr()}`).then((r) => r?.json()),
-      api(`/students`).then((r) => r?.json()),
-    ]);
-    if (!att || !persons) return;
+  const dayEl = document.getElementById("tDashDay");
+  if (dayEl) dayEl.textContent = new Date().toLocaleDateString("en-GB",
+    { weekday:"long", year:"numeric", month:"long", day:"numeric" });
 
+  try {
+    const [todayData, statsData, schedData] = await Promise.all([
+      api("/teacher/me/today").then(r => r?.json()),
+      api("/teacher/me/stats").then(r => r?.json()),
+      api("/teacher/me/schedule").then(r => r?.json()),
+    ]);
+
+    // Stats row
     const m = document.getElementById("tDashMetrics");
-    if (m) {
-      const rate = persons.count > 0 ? Math.round((att.present / persons.count) * 100) : 0;
+    if (m && statsData) {
       m.innerHTML = `
-        <div class="metric-card"><div class="metric-label">Students</div><div class="metric-val">${persons.count}</div></div>
-        <div class="metric-card"><div class="metric-label">Present</div><div class="metric-val" style="color:var(--green)">${att.present}</div></div>
-        <div class="metric-card"><div class="metric-label">Absent</div><div class="metric-val" style="color:var(--red)">${att.absent}</div></div>
-        <div class="metric-card"><div class="metric-label">Rate</div><div class="metric-val" style="color:var(--blue)">${rate}%</div></div>`;
+        <div class="metric-card">
+          <div class="metric-label">My Classes</div>
+          <div class="metric-val">${statsData.class_count}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Sessions Held</div>
+          <div class="metric-val" style="color:var(--blue)">${statsData.total_sessions}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Today's Present</div>
+          <div class="metric-val" style="color:var(--green)">${statsData.today_marked}</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Today</div>
+          <div class="metric-val" style="font-size:1rem">${new Date().toLocaleDateString("en-GB",{weekday:"short"})}</div>
+        </div>`;
     }
 
-    const table = document.getElementById("tDashTable");
-    if (table) {
-      if (!att.records || !att.records.length) {
-        table.innerHTML = `<p style="color:var(--text3);padding:1rem 0">No attendance records today.</p>`;
-        return;
+    // Today's classes
+    const todayEl = document.getElementById("tTodayClasses");
+    if (todayEl) {
+      const classes = todayData?.classes || [];
+      if (!classes.length) {
+        todayEl.innerHTML = `<div class="teacher-no-class">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".4"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <div>No classes scheduled for today</div>
+        </div>`;
+      } else {
+        todayEl.innerHTML = classes.map(cls => _renderClassCard(cls)).join("");
       }
-      table.innerHTML = `<div style="overflow-x:auto"><table class="data-table">
-        <thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Time</th><th>Status</th></tr></thead>
-        <tbody>${att.records
-          .map((r) => `
-          <tr>
-            <td style="font-family:var(--mono);font-size:11px">${r.student_id}</td>
-            <td>${escapeHtml(r.name || r.full_name || "")}</td>
-            <td style="color:var(--text3)">${r.department || "—"}</td>
-            <td style="font-family:var(--mono);font-size:11px">${r.time || "—"}</td>
-            <td>${badge(r.status)}</td>
-          </tr>`)
-          .join("")}</tbody></table></div>`;
+    }
+
+    // Weekly schedule
+    const weekEl = document.getElementById("tWeeklySchedule");
+    if (weekEl && schedData) {
+      const days = schedData.days || ["Mon","Tue","Wed","Thu","Fri","Sat"];
+      const sched = schedData.schedule || {};
+      weekEl.innerHTML = `<div class="weekly-grid">
+        ${days.map(day => `
+          <div class="weekly-day">
+            <div class="weekly-day-label">${day}</div>
+            <div class="weekly-day-slots">
+              ${(sched[day] || []).length
+                ? (sched[day] || []).map(cls => `
+                    <div class="weekly-slot">
+                      <div class="weekly-slot-subject">${escapeHtml(cls.subject_name || "—")}</div>
+                      <div class="weekly-slot-meta">${cls.faculty_code || ""} Sem ${cls.semester}</div>
+                      ${cls.time_slot_label ? `<div class="weekly-slot-time">${cls.time_slot_label}</div>` : ""}
+                    </div>`).join("")
+                : `<div class="weekly-slot-empty">—</div>`}
+            </div>
+          </div>`).join("")}
+      </div>`;
     }
   } catch (e) {
     console.error("loadTeacherDashboard:", e);
   }
+}
+
+function _renderClassCard(cls) {
+  const sess = cls.session;
+  const sessStatus = sess ? sess.status : null;
+  const markedCount = sess ? (sess.marked_count || 0) : 0;
+  const statusHtml = sessStatus === "open"
+    ? `<span class="pill pill-amber">Session Open · ${markedCount} marked</span>`
+    : sessStatus === "closed"
+    ? `<span class="pill pill-green">Done · ${markedCount} marked</span>`
+    : `<span class="pill" style="background:var(--bg3);color:var(--text3)">Not started</span>`;
+
+  return `<div class="teacher-class-card">
+    <div class="tcc-header">
+      <div>
+        <div class="tcc-subject">${escapeHtml(cls.subject_name || "—")}</div>
+        <div class="tcc-meta">${cls.faculty_code || ""}  ·  Semester ${cls.semester}</div>
+      </div>
+      ${statusHtml}
+    </div>
+    ${cls.time_slot_label ? `<div class="tcc-time">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      ${cls.time_slot_label}${cls.start_time ? ` · ${cls.start_time.slice(0,5)}–${(cls.end_time||"").slice(0,5)}` : ""}
+    </div>` : ""}
+    <div class="tcc-actions">
+      ${sessStatus === "open"
+        ? `<button class="btn-primary btn-sm" onclick="continueSession(${sess.id}, '${escapeHtml(cls.subject_name||"")}')">Continue Session</button>`
+        : sessStatus === "closed"
+        ? `<button class="btn-secondary btn-sm" onclick="viewSessionReport(${sess.id})">View Report</button>`
+        : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.assignment_id})">Start Attendance</button>`}
+    </div>
+  </div>`;
+}
+
+function toggleWeeklySchedule() {
+  const el = document.getElementById("tWeeklySchedule");
+  if (el) el.classList.toggle("hidden");
 }
 
 /* ── Teacher Recognition Page ─────────────────────────────────────────── */
@@ -3666,10 +3777,19 @@ let _teacherWebcamStream = null;
 let _teacherAutoInterval = null;
 let _teacherAutoActive = false;
 let _sessionMarked = new Set();
+let _cameraFacing = "user";   // "user" = front, "environment" = rear
+let _photoCamStream = null;
+let _photoCamFacing = "environment";
 
 async function startTeacherWebcam() {
   try {
-    _teacherWebcamStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    if (_teacherWebcamStream) {
+      _teacherWebcamStream.getTracks().forEach(t => t.stop());
+    }
+    const constraints = {
+      video: { facingMode: _cameraFacing, width: { ideal: 1280 }, height: { ideal: 720 } }
+    };
+    _teacherWebcamStream = await navigator.mediaDevices.getUserMedia(constraints);
     const video = document.getElementById("tRecogVideo");
     video.srcObject = _teacherWebcamStream;
     video.style.display = "block";
@@ -3677,9 +3797,16 @@ async function startTeacherWebcam() {
     if (overlay) overlay.style.display = "none";
     document.getElementById("btnTRecogStop")?.classList.remove("hidden");
     document.getElementById("tRecogStopFloat")?.classList.remove("hidden");
-  } catch {
-    toast("Camera access denied", "err");
+    document.getElementById("btnSwitchCam")?.classList.remove("hidden");
+  } catch (e) {
+    toast("Camera access denied — " + (e.message || "check permissions"), "err");
   }
+}
+
+async function switchCamera() {
+  _cameraFacing = _cameraFacing === "user" ? "environment" : "user";
+  toast(`Switching to ${_cameraFacing === "user" ? "front" : "rear"} camera…`);
+  await startTeacherWebcam();
 }
 
 function stopTeacherWebcam() {
@@ -3694,6 +3821,7 @@ function stopTeacherWebcam() {
   if (overlay) overlay.style.display = "flex";
   document.getElementById("btnTRecogStop")?.classList.add("hidden");
   document.getElementById("tRecogStopFloat")?.classList.add("hidden");
+  document.getElementById("btnSwitchCam")?.classList.add("hidden");
   const btn = document.getElementById("btnTRecogAuto");
   if (btn) btn.textContent = "▶ Start Auto";
   _teacherAutoActive = false;
@@ -3943,3 +4071,486 @@ async function loadStudentPortal() {
     if (ws) ws.textContent = "Could not load your attendance data. Check connection.";
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TIMETABLE MANAGEMENT  (Admin — Manage → Timetable tab)
+═══════════════════════════════════════════════════════════════════════ */
+let _ttSlots = [], _ttTeachers = [], _ttSubjects = [], _ttData = [];
+
+async function loadTimetable() {
+  const facId = document.getElementById("ttFacultyFilter")?.value || "";
+  const sem   = document.getElementById("ttSemesterFilter")?.value || "";
+  const grid  = document.getElementById("timetableGrid");
+  if (!grid) return;
+  if (!facId || !sem) {
+    grid.innerHTML = `<div class="text-muted text-center p-2rem text-13px">Select a faculty and semester to view the timetable</div>`;
+    return;
+  }
+  grid.innerHTML = `<div class="text-muted text-center p-1rem">Loading…</div>`;
+  try {
+    const r = await api(`/timetable?faculty_id=${facId}&semester=${sem}`);
+    if (!r) return;
+    const d = await r.json();
+    _ttSlots = d.slots || [];
+    _ttData  = d.timetable || [];
+    _renderTimetableGrid(facId, sem);
+  } catch (e) { grid.innerHTML = `<div class="msg err">Failed to load timetable</div>`; }
+}
+
+function _renderTimetableGrid(facId, sem) {
+  const grid = document.getElementById("timetableGrid");
+  if (!grid) return;
+  const days = ["Mon","Tue","Wed","Thu","Fri","Sat"];
+
+  // Build lookup: day+slotId → entry
+  const lookup = {};
+  _ttData.forEach(e => { lookup[`${e.day_of_week}_${e.time_slot_id}`] = e; });
+
+  const dayLabels = { Mon:"Monday", Tue:"Tuesday", Wed:"Wednesday",
+                      Thu:"Thursday", Fri:"Friday", Sat:"Saturday" };
+
+  grid.innerHTML = `
+    <div class="tt-grid">
+      <div class="tt-head-cell tt-corner"></div>
+      ${days.map(d => `<div class="tt-head-cell">${dayLabels[d]}</div>`).join("")}
+      ${_ttSlots.map(slot => `
+        <div class="tt-slot-label">
+          <div class="tt-slot-name">${slot.label}</div>
+          <div class="tt-slot-time">${(slot.start_time||"").slice(0,5)}–${(slot.end_time||"").slice(0,5)}</div>
+        </div>
+        ${days.map(day => {
+          const e = lookup[`${day}_${slot.id}`];
+          if (e) {
+            return `<div class="tt-cell tt-cell-filled" title="${e.teacher_name||"?"}">
+              <div class="tt-cell-subject">${escapeHtml(e.subject_code || e.subject_name || "—")}</div>
+              <div class="tt-cell-teacher">${escapeHtml(e.teacher_name || "")}</div>
+              <button class="tt-cell-del" onclick="deleteTimetableEntry(${e.id})" title="Remove">✕</button>
+            </div>`;
+          }
+          return `<div class="tt-cell tt-cell-empty" onclick="quickAssignSlot('${day}',${slot.id},'${slot.label}',${facId},${sem})">
+            <span class="tt-cell-add">+</span>
+          </div>`;
+        }).join("")}
+      `).join("")}
+    </div>`;
+}
+
+function openTimetableModal() {
+  document.getElementById("ttmConflict").textContent = "";
+  document.getElementById("ttmErr").textContent = "";
+  // Populate teachers and slots
+  _loadTimetableModalDropdowns();
+  document.getElementById("timetableModal").classList.add("open");
+}
+
+async function _loadTimetableModalDropdowns() {
+  // Slots
+  const slotSel = document.getElementById("ttmSlot");
+  if (slotSel && _ttSlots.length) {
+    slotSel.innerHTML = `<option value="">Select period</option>` +
+      _ttSlots.map(s => `<option value="${s.id}">${s.label} (${(s.start_time||"").slice(0,5)}–${(s.end_time||"").slice(0,5)})</option>`).join("");
+  }
+  // Teachers
+  const teachSel = document.getElementById("ttmTeacher");
+  if (teachSel) {
+    const r = await api("/teachers"); if (!r) return;
+    const d = await r.json();
+    teachSel.innerHTML = `<option value="">Unassigned</option>` +
+      (d.teachers||[]).map(t => `<option value="${t.id}">${escapeHtml(t.full_name)}</option>`).join("");
+  }
+  // Faculties
+  const facSel = document.getElementById("ttmFaculty");
+  if (facSel && !facSel.options.length) {
+    const r = await api("/faculties"); if (!r) return;
+    const d = await r.json();
+    facSel.innerHTML = `<option value="">Select faculty</option>` +
+      (d.faculties||[]).map(f => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join("");
+  }
+}
+
+async function ttmLoadSubjects() {
+  const fid = document.getElementById("ttmFaculty")?.value || "";
+  const sem = document.getElementById("ttmSemester")?.value || "";
+  const sel = document.getElementById("ttmSubject"); if (!sel) return;
+  sel.innerHTML = `<option value="">Loading…</option>`;
+  const r = await api(`/subjects?faculty_id=${fid}${sem ? "&semester="+sem : ""}`);
+  if (!r) return;
+  const d = await r.json();
+  sel.innerHTML = `<option value="">Select subject</option>` +
+    (d.subjects||[]).map(s => `<option value="${s.id}">${escapeHtml(s.code)} — ${escapeHtml(s.name)}</option>`).join("");
+}
+
+async function checkTimetableConflict() {
+  const fid = document.getElementById("ttmFaculty")?.value;
+  const sem = document.getElementById("ttmSemester")?.value;
+  const day = document.getElementById("ttmDay")?.value;
+  const sid = document.getElementById("ttmSlot")?.value;
+  const conflEl = document.getElementById("ttmConflict");
+  if (!fid || !sem || !day || !sid) { conflEl.textContent = "Fill all required fields first"; return; }
+  const r = await api("/timetable/check", { method:"POST", json:{ faculty_id:+fid, semester:+sem, day_of_week:day, time_slot_id:+sid } });
+  if (!r) return;
+  const d = await r.json();
+  if (d.available) {
+    conflEl.style.color = "var(--green)";
+    conflEl.textContent = "✓ Slot is available";
+  } else {
+    conflEl.style.color = "var(--red)";
+    conflEl.textContent = "✕ " + (d.message || "Slot occupied");
+  }
+}
+
+async function saveTimetableEntry() {
+  const fid = document.getElementById("ttmFaculty")?.value;
+  const sem = document.getElementById("ttmSemester")?.value;
+  const day = document.getElementById("ttmDay")?.value;
+  const slotId  = document.getElementById("ttmSlot")?.value;
+  const teachId = document.getElementById("ttmTeacher")?.value;
+  const subjId  = document.getElementById("ttmSubject")?.value;
+  const errEl   = document.getElementById("ttmErr");
+  errEl.textContent = "";
+  if (!fid || !sem || !day || !slotId) { errEl.textContent = "Faculty, Semester, Day, Period are required"; return; }
+  const r = await api("/timetable", { method:"POST", json:{
+    faculty_id:+fid, semester:+sem, day_of_week:day,
+    time_slot_id:+slotId,
+    teacher_id: teachId ? +teachId : null,
+    subject_id: subjId  ? +subjId  : null,
+  }});
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok) { errEl.textContent = d.error || "Save failed"; return; }
+  toast("Timetable entry saved");
+  closeModal("timetableModal");
+  loadTimetable();
+}
+
+async function deleteTimetableEntry(id) {
+  if (!confirm("Remove this timetable entry?")) return;
+  const r = await api(`/timetable/${id}`, { method:"DELETE" });
+  if (r?.ok) { toast("Entry removed"); loadTimetable(); }
+  else toast("Delete failed", "err");
+}
+
+function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
+  // Pre-fill the modal and open it
+  document.getElementById("ttmDay").value = day;
+  document.getElementById("ttmFaculty").value = facId;
+  document.getElementById("ttmSemester").value = sem;
+  _loadTimetableModalDropdowns().then(() => {
+    document.getElementById("ttmSlot").value = slotId;
+    ttmLoadSubjects();
+  });
+  document.getElementById("ttmConflict").textContent = "";
+  document.getElementById("ttmErr").textContent = "";
+  document.getElementById("timetableModal").classList.add("open");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MANAGE → TIMETABLE TAB  (faculty filter population)
+═══════════════════════════════════════════════════════════════════════ */
+async function _populateTimetableFacultyFilter() {
+  const sel = document.getElementById("ttFacultyFilter"); if (!sel) return;
+  if (sel.options.length > 1) return; // already populated
+  const r = await api("/faculties"); if (!r) return;
+  const d = await r.json();
+  (d.faculties || []).forEach(f => {
+    const o = document.createElement("option");
+    o.value = f.id; o.textContent = f.name;
+    sel.appendChild(o);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ATTENDANCE SESSION FLOW
+═══════════════════════════════════════════════════════════════════════ */
+let _activeSession = null;
+let _sessionAssignment = null;
+
+async function openSessionModal(assignmentId) {
+  // Fetch assignment details from teacher's schedule
+  try {
+    const r = await api("/teacher/me/schedule"); if (!r) return;
+    const d = await r.json();
+    const allAssignments = d.all || [];
+    const cls = allAssignments.find(a => a.assignment_id === assignmentId);
+    if (!cls) { toast("Assignment not found", "err"); return; }
+
+    _sessionAssignment = cls;
+    document.getElementById("sessionSubjectId").value   = cls.subject_id || "";
+    document.getElementById("sessionFacultyId").value   = cls.faculty_id || "";
+    document.getElementById("sessionSemester").value    = cls.semester || "";
+    document.getElementById("sessionDayOfWeek").value   = cls.day_of_week || "";
+    document.getElementById("sessionTimeSlotId").value  = cls.time_slot_id || "";
+    document.getElementById("sessionDate").value        = todayStr();
+    document.getElementById("sessionSubjectDisplay").textContent =
+      `${cls.subject_name || "Unknown"} · ${cls.faculty_name || ""} · Semester ${cls.semester}`;
+    document.getElementById("sessionStartErr").textContent = "";
+    document.getElementById("sessionStartModal").classList.add("open");
+  } catch (e) { toast("Failed to load class info", "err"); }
+}
+
+async function confirmStartSession() {
+  const errEl = document.getElementById("sessionStartErr");
+  errEl.textContent = "";
+  const subjId  = document.getElementById("sessionSubjectId").value;
+  const facId   = document.getElementById("sessionFacultyId").value;
+  const sem     = document.getElementById("sessionSemester").value;
+  const day     = document.getElementById("sessionDayOfWeek").value;
+  const slotId  = document.getElementById("sessionTimeSlotId").value;
+  const sesDate = document.getElementById("sessionDate").value || todayStr();
+  const method  = document.querySelector("input[name='sessionMethod']:checked")?.value || "manual";
+
+  if (!subjId || !facId || !sem) { errEl.textContent = "Missing class information"; return; }
+
+  const r = await api("/attendance/sessions", { method:"POST", json:{
+    faculty_id: +facId, semester: +sem, subject_id: +subjId,
+    time_slot_id: slotId ? +slotId : null, day_of_week: day,
+    session_date: sesDate, method,
+  }});
+  if (!r) return;
+  const d = await r.json();
+  if (!r.ok && !d.session) { errEl.textContent = d.error || "Failed to start session"; return; }
+
+  _activeSession = d.session;
+  closeModal("sessionStartModal");
+  toast(d.resumed ? "Resumed existing session" : "Session started");
+
+  // Navigate to the correct method panel
+  navigate("t-recognize");
+  selectAttMethod(method, document.getElementById(`mBtn-${method}`));
+  if (method === "manual") loadManualSessionStudents(_activeSession.id);
+  else if (method === "camera") startTeacherWebcam();
+}
+
+function continueSession(sessionId, subjectName) {
+  navigate("t-recognize");
+  _activeSession = { id: sessionId };
+  toast(`Continuing session for ${subjectName}`);
+  loadManualSessionStudents(sessionId);
+}
+
+function viewSessionReport(sessionId) {
+  toast("Session report coming soon");
+}
+
+/* ── Attendance method switcher ────────────────────────────────────── */
+let _currentAttMethod = "camera";
+
+function selectAttMethod(method, btn) {
+  _currentAttMethod = method;
+  document.querySelectorAll(".att-method-btn").forEach(b => b.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  document.getElementById("photoAttPanel")?.classList.add("hidden");
+  document.getElementById("manualAttPanel")?.classList.add("hidden");
+  // Live camera is the default panel (already visible)
+  const liveArea = document.querySelector(".teacher-recog-area");
+  if (method === "photo") {
+    if (liveArea) liveArea.style.display = "none";
+    document.getElementById("photoAttPanel")?.classList.remove("hidden");
+  } else if (method === "manual") {
+    if (liveArea) liveArea.style.display = "none";
+    document.getElementById("manualAttPanel")?.classList.remove("hidden");
+    if (_activeSession) loadManualSessionStudents(_activeSession.id);
+  } else {
+    if (liveArea) liveArea.style.display = "";
+  }
+}
+
+/* ── Manual attendance list ──────────────────────────────────────── */
+let _manualStudents = [];
+
+async function loadManualSessionStudents(sessionId) {
+  const listEl = document.getElementById("manualStudentList");
+  if (!listEl) return;
+  listEl.innerHTML = `<div class="text-muted text-13px p-1rem">Loading students…</div>`;
+  try {
+    const r = await api(`/attendance/sessions/${sessionId}`); if (!r) return;
+    const d = await r.json();
+    const sess = d.session;
+    _manualStudents = sess?.students || [];
+    _renderManualList();
+  } catch { listEl.innerHTML = `<div class="msg err">Failed to load students</div>`; }
+}
+
+function _renderManualList() {
+  const listEl = document.getElementById("manualStudentList"); if (!listEl) return;
+  if (!_manualStudents.length) {
+    listEl.innerHTML = `<div class="text-muted text-13px p-1rem">No students found for this class</div>`;
+    return;
+  }
+  listEl.innerHTML = _manualStudents.map((s, i) => `
+    <div class="manual-student-row" id="msr-${i}">
+      <div class="msr-info">
+        <div class="msr-name">${escapeHtml(s.full_name)}</div>
+        <div class="msr-id">${s.student_id}</div>
+      </div>
+      <div class="msr-toggle">
+        <button class="msr-btn ${s.status==='Present'?'active':''}"
+                onclick="toggleManualStatus(${i},'Present')" id="msrP-${i}">Present</button>
+        <button class="msr-btn msr-absent ${s.status==='Absent'?'active':''}"
+                onclick="toggleManualStatus(${i},'Absent')" id="msrA-${i}">Absent</button>
+      </div>
+    </div>`).join("");
+}
+
+function toggleManualStatus(idx, status) {
+  _manualStudents[idx].status = status;
+  const pBtn = document.getElementById(`msrP-${idx}`);
+  const aBtn = document.getElementById(`msrA-${idx}`);
+  pBtn?.classList.toggle("active", status === "Present");
+  aBtn?.classList.toggle("active", status === "Absent");
+}
+
+function markAllPresent()  { _manualStudents.forEach((_,i) => toggleManualStatus(i,"Present")); }
+function markAllAbsent()   { _manualStudents.forEach((_,i) => toggleManualStatus(i,"Absent")); }
+
+async function submitManualAttendance() {
+  if (!_activeSession) { toast("No active session", "err"); return; }
+  const records = _manualStudents.map(s => ({
+    student_id: s.student_id, status: s.status || "Absent", note: ""
+  }));
+  const r = await api(`/attendance/sessions/${_activeSession.id}/bulk`, {
+    method:"POST", json: { records }
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    toast(`Attendance submitted — ${d.newly_marked} new records`);
+    _activeSession = null;
+    navigate("t-dashboard");
+  } else {
+    toast(d.error || "Submit failed", "err");
+  }
+}
+
+/* ── Photo / Classroom attendance ───────────────────────────────── */
+let _photoDetected = [];
+
+async function startPhotoCamera() {
+  try {
+    if (_photoCamStream) _photoCamStream.getTracks().forEach(t => t.stop());
+    const constraints = { video: { facingMode: _photoCamFacing } };
+    _photoCamStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById("photoAttVideo"); if (!video) return;
+    video.srcObject = _photoCamStream;
+    video.style.display = "block";
+    document.getElementById("photoAttOverlay").style.display = "none";
+    document.getElementById("btnCapturePhoto").style.display = "block";
+    document.getElementById("btnSwitchPhotoCam")?.classList.remove("hidden");
+  } catch (e) { toast("Camera access denied", "err"); }
+}
+
+async function switchPhotoCamera() {
+  _photoCamFacing = _photoCamFacing === "environment" ? "user" : "environment";
+  await startPhotoCamera();
+}
+
+async function captureClassPhoto() {
+  const video  = document.getElementById("photoAttVideo");
+  const canvas = document.getElementById("photoAttCanvas");
+  if (!video || !canvas) return;
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const b64 = canvas.toDataURL("image/jpeg", 0.85).split(",")[1];
+
+  // Stop camera immediately after capture
+  _stopPhotoCamera();
+
+  await _processClassroomImage(b64);
+}
+
+function _stopPhotoCamera() {
+  if (_photoCamStream) {
+    _photoCamStream.getTracks().forEach(t => t.stop());
+    _photoCamStream = null;
+  }
+  const video = document.getElementById("photoAttVideo");
+  if (video) { video.srcObject = null; video.style.display = "none"; }
+  document.getElementById("photoAttOverlay").style.display = "flex";
+  document.getElementById("btnCapturePhoto").style.display = "none";
+  document.getElementById("btnSwitchPhotoCam")?.classList.add("hidden");
+}
+
+function handlePhotoUpload(event) {
+  const file = event.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const b64 = e.target.result.split(",")[1];
+    await _processClassroomImage(b64);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function _processClassroomImage(b64) {
+  const previewEl = document.getElementById("photoAttPreview");
+  const resultEl  = document.getElementById("photoAttResult");
+  if (previewEl) previewEl.innerHTML = `<div class="text-muted text-13px text-center p-1rem">Processing…</div>`;
+  if (resultEl) resultEl.classList.add("hidden");
+  try {
+    const r = await api("/recognize/batch", { method:"POST", json:{ image:b64 } });
+    if (!r) return;
+    const d = await r.json();
+    _photoDetected = d.recognized || [];
+    const countEl = document.getElementById("photoDetectedCount");
+    if (countEl) countEl.textContent = `${_photoDetected.length} identified, ${d.unknown||0} unknown`;
+    const listEl = document.getElementById("photoDetectedList");
+    if (listEl) {
+      if (!_photoDetected.length) {
+        listEl.innerHTML = `<div class="text-muted text-13px p-0-75rem">No students identified</div>`;
+      } else {
+        listEl.innerHTML = _photoDetected.map((s,i) => `
+          <div class="photo-student-row">
+            <div class="msr-info">
+              <div class="msr-name">${escapeHtml(s.name)}</div>
+              <div class="msr-id">${s.student_id} · ${s.confidence}% confidence</div>
+            </div>
+            <div class="msr-toggle">
+              <button class="msr-btn ${s.status==='Present'?'active':''}" onclick="togglePhotoStatus(${i},'Present')">Present</button>
+              <button class="msr-btn msr-absent ${s.status==='Absent'?'active':''}" onclick="togglePhotoStatus(${i},'Absent')">Absent</button>
+            </div>
+          </div>`).join("");
+      }
+    }
+    if (previewEl) previewEl.innerHTML = `<img src="data:image/jpeg;base64,${b64}" style="max-width:100%;border-radius:6px">`;
+    if (resultEl) resultEl.classList.remove("hidden");
+  } catch { toast("Recognition failed", "err"); }
+}
+
+function togglePhotoStatus(idx, status) {
+  _photoDetected[idx].status = status;
+  const rows = document.querySelectorAll(".photo-student-row");
+  const row = rows[idx]; if (!row) return;
+  row.querySelectorAll(".msr-btn").forEach(b => b.classList.remove("active"));
+  row.querySelector(`.msr-btn${status==="Absent"?".msr-absent":""}:not(.msr-absent)`)?.classList.add("active");
+  if (status === "Absent") row.querySelectorAll(".msr-btn")[1]?.classList.add("active");
+  else row.querySelectorAll(".msr-btn")[0]?.classList.add("active");
+}
+
+function retakePhoto() {
+  _stopPhotoCamera();
+  document.getElementById("photoAttResult")?.classList.add("hidden");
+  document.getElementById("photoAttPreview").innerHTML = `<div class="text-muted text-13px text-center p-2rem">Capture or upload a photo to detect faces</div>`;
+  const overlay = document.getElementById("photoAttOverlay");
+  if (overlay) overlay.style.display = "flex";
+  _photoDetected = [];
+}
+
+async function submitPhotoAttendance() {
+  if (!_activeSession) { toast("No active session — start from dashboard", "err"); return; }
+  if (!_photoDetected.length) { toast("No detected students to submit", "err"); return; }
+  const records = _photoDetected.map(s => ({ student_id:s.student_id, status:s.status||"Present" }));
+  const r = await api(`/attendance/sessions/${_activeSession.id}/bulk`, {
+    method:"POST", json:{ records }
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (r.ok) {
+    toast("Attendance submitted successfully");
+    _activeSession = null;
+    navigate("t-dashboard");
+  } else {
+    toast(d.error || "Submit failed", "err");
+  }
+}
+
+/* day_of_week support is built into addTeacherAssignment above */
