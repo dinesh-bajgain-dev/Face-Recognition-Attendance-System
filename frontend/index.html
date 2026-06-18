@@ -98,7 +98,7 @@
           </button>
         </div>
 
-        <!-- Admin/Teacher fields -->
+        <!-- Username field (admin only) -->
         <div id="field-username" class="login-field">
           <div class="form-group">
             <label id="usernameLabel">Username</label>
@@ -109,6 +109,21 @@
               autocomplete="username"
             />
           </div>
+        </div>
+        <!-- Email field (teacher + student) -->
+        <div id="field-email" class="login-field hidden">
+          <div class="form-group">
+            <label id="emailLabel">Registered Email</label>
+            <input
+              type="email"
+              id="loginEmail"
+              placeholder="student@college.edu"
+              onkeydown="if (event.key === 'Enter') doLogin();"
+            />
+          </div>
+        </div>
+        <!-- Password field (admin + teacher, hidden for student) -->
+        <div id="field-password" class="login-field">
           <div class="form-group">
             <label>Password</label>
             <input
@@ -116,18 +131,6 @@
               id="loginPass"
               placeholder="••••••"
               autocomplete="current-password"
-              onkeydown="if (event.key === 'Enter') doLogin();"
-            />
-          </div>
-        </div>
-        <!-- Student field -->
-        <div id="field-email" class="login-field hidden">
-          <div class="form-group">
-            <label>Registered Email</label>
-            <input
-              type="email"
-              id="loginEmail"
-              placeholder="student@college.edu"
               onkeydown="if (event.key === 'Enter') doLogin();"
             />
           </div>
@@ -1039,18 +1042,10 @@
       <section class="page" id="page-manage">
         <header class="page-header"><h1>Manage</h1></header>
         <div class="sub-tabs">
-          <div
-            class="sub-tab active"
-            onclick="switchManageTab('faculties', this)"
-          >
-            Faculties
-          </div>
-          <div class="sub-tab" onclick="switchManageTab('subjects', this)">
-            Subjects
-          </div>
-          <div class="sub-tab" onclick="switchManageTab('timeslots', this)">
-            Time Slots
-          </div>
+          <div class="sub-tab active" onclick="switchManageTab('faculties', this)">Faculties</div>
+          <div class="sub-tab" onclick="switchManageTab('subjects', this)">Subjects</div>
+          <div class="sub-tab" onclick="switchManageTab('timeslots', this)">Time Slots</div>
+          <div class="sub-tab" onclick="switchManageTab('timetable', this)">Timetable</div>
         </div>
 
         <!-- Faculties tab -->
@@ -1112,6 +1107,26 @@
                 <tbody id="subjectTableBody"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <!-- Timetable tab -->
+        <div class="sub-tab-panel" id="mtab-timetable">
+          <div class="toolbar-row">
+            <select id="ttFacultyFilter" class="input-sm w-180px" onchange="loadTimetable()">
+              <option value="">All Faculties</option>
+            </select>
+            <select id="ttSemesterFilter" class="input-sm w-160px" onchange="loadTimetable()">
+              <option value="">All Semesters</option>
+              <option value="1">Semester 1</option><option value="2">Semester 2</option>
+              <option value="3">Semester 3</option><option value="4">Semester 4</option>
+              <option value="5">Semester 5</option><option value="6">Semester 6</option>
+              <option value="7">Semester 7</option><option value="8">Semester 8</option>
+            </select>
+            <button class="btn-primary" onclick="openTimetableModal()">+ Assign Slot</button>
+          </div>
+          <div id="timetableGrid" class="timetable-scroll">
+            <div class="text-muted text-center p-2rem">Select a faculty and semester to view timetable</div>
           </div>
         </div>
 
@@ -1248,49 +1263,127 @@
 
       <!-- Teacher Dashboard -->
       <section class="page" id="page-t-dashboard">
-        <header class="page-header"><h1>Teacher Dashboard</h1></header>
-        <div id="teacherClassBar" class="class-info-bar hidden"></div>
+        <header class="page-header">
+          <div>
+            <h1>Teacher Dashboard</h1>
+            <div id="tDashDay" class="text-secondary text-13px"></div>
+          </div>
+          <button class="btn-secondary btn-sm" onclick="loadTeacherDashboard()">Refresh</button>
+        </header>
+
+        <!-- Stats row -->
         <div class="metrics-grid" id="tDashMetrics"></div>
-        <div class="dash-section-header">
-          <span class="dash-section-title">Today's Class</span>
-          <button class="btn-secondary btn-sm" onclick="loadTeacherDashboard()">
-            Refresh
-          </button>
+
+        <!-- Today's classes -->
+        <div class="dash-section-header mt-1rem">
+          <span class="dash-section-title">Today's Classes</span>
         </div>
-        <div id="tDashTable"></div>
+        <div id="tTodayClasses" class="teacher-class-grid">
+          <div class="text-muted text-center p-2rem text-13px">Loading…</div>
+        </div>
+
+        <!-- Weekly schedule toggle -->
+        <div class="dash-section-header mt-1rem">
+          <span class="dash-section-title">Weekly Schedule</span>
+          <button class="btn-secondary btn-sm" onclick="toggleWeeklySchedule()">Show / Hide</button>
+        </div>
+        <div id="tWeeklySchedule" class="hidden"></div>
       </section>
 
       <!-- Teacher Take Attendance (auto face recognition) -->
       <section class="page" id="page-t-recognize">
         <header class="page-header">
           <h1>Take Attendance</h1>
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 0.5rem;
-              flex-wrap: wrap;
-            "
-          >
-            <span
-              id="sessionMarkedCount"
-              style="
-                font-family: var(--mono);
-                font-size: 13px;
-                color: var(--green);
-                font-weight: 700;
-              "
-            ></span>
-            <span
-              style="font-size: 12px; color: var(--text3)"
-              id="sessionMarkedLabel"
-            ></span>
+          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+            <span id="sessionMarkedCount" style="font-family:var(--mono);font-size:13px;color:var(--green);font-weight:700"></span>
+            <span style="font-size:12px;color:var(--text3)" id="sessionMarkedLabel"></span>
           </div>
         </header>
+
+        <!-- Attendance method selector -->
+        <div class="att-method-bar" id="attMethodBar">
+          <div class="att-method-label">Attendance Method:</div>
+          <button class="att-method-btn active" id="mBtn-camera" onclick="selectAttMethod('camera',this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+            Live Camera
+          </button>
+          <button class="att-method-btn" id="mBtn-photo" onclick="selectAttMethod('photo',this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
+            Classroom Photo
+          </button>
+          <button class="att-method-btn" id="mBtn-manual" onclick="selectAttMethod('manual',this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg>
+            Manual List
+          </button>
+        </div>
+
         <div id="teacherClassBar2" class="class-info-bar hidden"></div>
 
         <!-- Session status bar -->
         <div id="sessionStatusBar" class="hidden session-status-bar"></div>
+
+        <!-- Photo attendance panel -->
+        <div id="photoAttPanel" class="hidden">
+          <div class="card mb-1rem">
+            <div class="section-title mb-0-5rem">Classroom Photo Attendance</div>
+            <p class="text-13px text-secondary mb-0-75rem">Take or upload a photo of the classroom. The system will detect all faces and match them against enrolled students.</p>
+            <div class="photo-att-area">
+              <div class="photo-att-left">
+                <div class="video-wrapper-full" style="position:relative">
+                  <video id="photoAttVideo" autoplay playsinline muted class="video-mirror"></video>
+                  <canvas id="photoAttCanvas" class="hidden"></canvas>
+                  <div id="photoAttOverlay" class="video-overlay-full">
+                    <div class="flex-col-centered gap-0-5rem">
+                      <button class="btn-primary" onclick="startPhotoCamera()">Open Camera</button>
+                      <span class="text-white-50 text-12px">or upload a photo below</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="photo-att-controls mt-0-5rem">
+                  <button class="btn-primary" id="btnCapturePhoto" onclick="captureClassPhoto()" style="display:none">📸 Capture Photo</button>
+                  <button class="btn-secondary hidden" id="btnSwitchPhotoCam" onclick="switchPhotoCamera()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                    Switch Cam
+                  </button>
+                  <label class="btn-secondary" style="cursor:pointer">
+                    Upload Photo <input type="file" id="photoUploadInput" accept="image/*" class="hidden" onchange="handlePhotoUpload(event)">
+                  </label>
+                </div>
+              </div>
+              <div class="photo-att-right">
+                <div id="photoAttPreview" class="photo-att-preview">
+                  <div class="text-muted text-13px text-center p-2rem">Capture or upload a photo to detect faces</div>
+                </div>
+                <div id="photoAttResult" class="hidden">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                    <div class="section-title">Detected Students</div>
+                    <span id="photoDetectedCount" class="pill pill-green"></span>
+                  </div>
+                  <div id="photoDetectedList" style="max-height:240px;overflow-y:auto"></div>
+                  <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+                    <button class="btn-secondary" onclick="retakePhoto()">Retake</button>
+                    <button class="btn-primary" onclick="submitPhotoAttendance()">Submit Attendance</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Manual list panel -->
+        <div id="manualAttPanel" class="hidden">
+          <div class="card mb-1rem">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+              <div class="section-title">Manual Attendance</div>
+              <div style="display:flex;gap:0.5rem">
+                <button class="btn-secondary btn-sm" onclick="markAllPresent()">Mark All Present</button>
+                <button class="btn-secondary btn-sm" onclick="markAllAbsent()">Mark All Absent</button>
+                <button class="btn-primary btn-sm" onclick="submitManualAttendance()">Submit</button>
+              </div>
+            </div>
+            <div id="manualStudentList" style="max-height:60vh;overflow-y:auto"></div>
+          </div>
+        </div>
 
         <div class="teacher-recog-area">
           <!-- Camera column -->
@@ -1299,20 +1392,12 @@
               <div class="teacher-header-flex">
                 <div class="section-title">Camera Feed</div>
                 <div class="flex-wrap-gap-0-5rem">
-                  <button
-                    class="btn-primary"
-                    id="btnTRecogAuto"
-                    onclick="toggleTeacherAuto()"
-                  >
-                    ▶ Start Auto
+                  <button class="btn-secondary hidden" id="btnSwitchCam" onclick="switchCamera()" title="Switch front/back camera">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                    Switch
                   </button>
-                  <button
-                    class="btn-secondary hidden"
-                    id="btnTRecogStop"
-                    onclick="stopTeacherWebcam()"
-                  >
-                    ⏹ Stop Camera
-                  </button>
+                  <button class="btn-primary" id="btnTRecogAuto" onclick="toggleTeacherAuto()">▶ Start Auto</button>
+                  <button class="btn-secondary hidden" id="btnTRecogStop" onclick="stopTeacherWebcam()">⏹ Stop Camera</button>
                 </div>
               </div>
 
@@ -1610,7 +1695,7 @@
           <!-- Add assignment form (shown after teacher is saved) -->
           <div id="addAssignmentForm" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:0.75rem">
             <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:0.5rem">Add Assignment</div>
-            <div class="modal-form-grid" style="gap:0.5rem">
+            <div class="modal-form-grid" style="gap:0.5rem;grid-template-columns:1fr 1fr 1fr">
               <div class="form-group">
                 <label style="font-size:11px">Faculty</label>
                 <select id="taFaculty" onchange="loadSubjectsForAssignment()">
@@ -1621,14 +1706,19 @@
                 <label style="font-size:11px">Semester</label>
                 <select id="taSemester">
                   <option value="">Any</option>
-                  <option value="1">Semester 1</option>
-                  <option value="2">Semester 2</option>
-                  <option value="3">Semester 3</option>
-                  <option value="4">Semester 4</option>
-                  <option value="5">Semester 5</option>
-                  <option value="6">Semester 6</option>
-                  <option value="7">Semester 7</option>
-                  <option value="8">Semester 8</option>
+                  <option value="1">Semester 1</option><option value="2">Semester 2</option>
+                  <option value="3">Semester 3</option><option value="4">Semester 4</option>
+                  <option value="5">Semester 5</option><option value="6">Semester 6</option>
+                  <option value="7">Semester 7</option><option value="8">Semester 8</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label style="font-size:11px">Day</label>
+                <select id="taDay">
+                  <option value="">Any day</option>
+                  <option value="Mon">Monday</option><option value="Tue">Tuesday</option>
+                  <option value="Wed">Wednesday</option><option value="Thu">Thursday</option>
+                  <option value="Fri">Friday</option><option value="Sat">Saturday</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1642,6 +1732,9 @@
                 <select id="taTimeSlot">
                   <option value="">Select time slot</option>
                 </select>
+              </div>
+              <div class="form-group" style="display:flex;align-items:flex-end">
+                <div id="taConflictCheck" class="text-12px" style="padding:0.25rem 0;min-height:20px"></div>
               </div>
             </div>
             <button class="btn-primary btn-sm" style="margin-top:0.5rem" onclick="addTeacherAssignment()">+ Add Assignment</button>
@@ -1954,6 +2047,119 @@
           >
             Delete teacher
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timetable Assign Slot Modal -->
+    <div class="modal-overlay" id="timetableModal">
+      <div class="modal-box" style="width:480px">
+        <div class="modal-title">Assign Timetable Slot</div>
+        <div class="modal-form-grid">
+          <div class="form-group">
+            <label>Faculty *</label>
+            <select id="ttmFaculty" onchange="ttmLoadSubjects()">
+              <option value="">Select faculty</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Semester *</label>
+            <select id="ttmSemester">
+              <option value="">Select semester</option>
+              <option value="1">Semester 1</option><option value="2">Semester 2</option>
+              <option value="3">Semester 3</option><option value="4">Semester 4</option>
+              <option value="5">Semester 5</option><option value="6">Semester 6</option>
+              <option value="7">Semester 7</option><option value="8">Semester 8</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Day *</label>
+            <select id="ttmDay">
+              <option value="">Select day</option>
+              <option value="Mon">Monday</option><option value="Tue">Tuesday</option>
+              <option value="Wed">Wednesday</option><option value="Thu">Thursday</option>
+              <option value="Fri">Friday</option><option value="Sat">Saturday</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Period *</label>
+            <select id="ttmSlot">
+              <option value="">Select period</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Teacher</label>
+            <select id="ttmTeacher">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Subject</label>
+            <select id="ttmSubject">
+              <option value="">Select subject</option>
+            </select>
+          </div>
+        </div>
+        <div id="ttmConflict" class="msg err" style="margin:0.5rem 0"></div>
+        <button class="btn-secondary btn-sm" style="margin-bottom:0.5rem" onclick="checkTimetableConflict()">Check Availability</button>
+        <div id="ttmErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('timetableModal')">Cancel</button>
+          <button class="btn-primary" onclick="saveTimetableEntry()">Save Entry</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Session Start Modal -->
+    <div class="modal-overlay" id="sessionStartModal">
+      <div class="modal-box" style="width:420px">
+        <div class="modal-title" id="sessionStartTitle">Start Attendance Session</div>
+        <div class="form-group">
+          <label>Subject</label>
+          <div id="sessionSubjectDisplay" class="text-13px text-secondary p-0-5rem bg-bg2 border-radius-6px"></div>
+          <input type="hidden" id="sessionSubjectId">
+          <input type="hidden" id="sessionFacultyId">
+          <input type="hidden" id="sessionSemester">
+          <input type="hidden" id="sessionDayOfWeek">
+          <input type="hidden" id="sessionTimeSlotId">
+        </div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="sessionDate">
+        </div>
+        <div class="form-group">
+          <label>Attendance Method</label>
+          <div class="att-method-grid">
+            <label class="att-method-option">
+              <input type="radio" name="sessionMethod" value="manual" checked>
+              <div class="att-method-card">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg>
+                <span>Manual</span>
+                <small>Mark each student</small>
+              </div>
+            </label>
+            <label class="att-method-option">
+              <input type="radio" name="sessionMethod" value="camera">
+              <div class="att-method-card">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                <span>Live Camera</span>
+                <small>Auto face scan</small>
+              </div>
+            </label>
+            <label class="att-method-option">
+              <input type="radio" name="sessionMethod" value="photo">
+              <div class="att-method-card">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
+                <span>Photo</span>
+                <small>Classroom photo</small>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div id="sessionStartErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('sessionStartModal')">Cancel</button>
+          <button class="btn-primary" onclick="confirmStartSession()">Start Session</button>
         </div>
       </div>
     </div>
