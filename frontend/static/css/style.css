@@ -4544,3 +4544,393 @@ select#tmSubject option[value=""]:first-child {
     max-height: 200px !important;
   }
 }
+
+/* ══════════════════════════════════════════════════════════
+   TIMETABLE GRID
+══════════════════════════════════════════════════════════ */
+.timetable-scroll { overflow-x: auto; }
+
+.tt-grid {
+  display: grid;
+  grid-template-columns: 110px repeat(6, 1fr);
+  gap: 2px;
+  min-width: 700px;
+  font-size: 12px;
+}
+
+.tt-head-cell {
+  background: var(--bg2);
+  padding: 8px 6px;
+  font-weight: 600;
+  text-align: center;
+  border-radius: 6px;
+  color: var(--text2);
+  font-size: 11px;
+}
+
+.tt-corner { background: transparent; }
+
+.tt-slot-label {
+  background: var(--bg2);
+  padding: 8px 8px;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.tt-slot-name { font-weight: 600; color: var(--text); font-size: 11px; }
+.tt-slot-time { font-size: 10px; color: var(--text3); font-family: var(--mono); }
+
+.tt-cell {
+  border-radius: 6px;
+  padding: 6px;
+  min-height: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.tt-cell-empty {
+  background: var(--bg2);
+  cursor: pointer;
+  border: 1.5px dashed rgba(255,255,255,0.07);
+}
+.tt-cell-empty:hover { background: var(--bg3); }
+
+.tt-cell-add {
+  font-size: 18px;
+  color: var(--text3);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.tt-cell-empty:hover .tt-cell-add { opacity: 1; }
+
+.tt-cell-filled {
+  background: rgba(99,102,241,0.15);
+  border: 1px solid rgba(99,102,241,0.3);
+  cursor: default;
+}
+
+.tt-cell-subject {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.3;
+}
+.tt-cell-teacher {
+  font-size: 10px;
+  color: var(--text3);
+  text-align: center;
+  margin-top: 2px;
+}
+
+.tt-cell-del {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: none;
+  border: none;
+  color: var(--red);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 2px;
+  line-height: 1;
+}
+.tt-cell-filled:hover .tt-cell-del { opacity: 1; }
+
+/* ══════════════════════════════════════════════════════════
+   TEACHER DASHBOARD — CLASS CARDS
+══════════════════════════════════════════════════════════ */
+.teacher-class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.teacher-class-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tcc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.tcc-subject {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.tcc-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+.tcc-time {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+
+.tcc-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.teacher-no-class {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2.5rem;
+  color: var(--text3);
+  font-size: 13px;
+  background: var(--bg2);
+  border-radius: 10px;
+  border: 1.5px dashed var(--border);
+}
+
+/* ══════════════════════════════════════════════════════════
+   WEEKLY SCHEDULE GRID
+══════════════════════════════════════════════════════════ */
+.weekly-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+  min-width: 600px;
+}
+
+.weekly-day { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.weekly-day-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.3rem 0;
+  border-bottom: 2px solid var(--border);
+}
+
+.weekly-slot {
+  background: var(--bg2);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  border-left: 3px solid var(--accent, #7c6af7);
+}
+
+.weekly-slot-subject { font-size: 11px; font-weight: 600; color: var(--text); }
+.weekly-slot-meta    { font-size: 10px; color: var(--text3); }
+.weekly-slot-time    { font-size: 10px; color: var(--text3); font-family: var(--mono); }
+.weekly-slot-empty   { font-size: 11px; color: var(--text3); padding: 0.3rem; opacity: 0.5; }
+
+/* ══════════════════════════════════════════════════════════
+   ATTENDANCE METHOD BAR
+══════════════════════════════════════════════════════════ */
+.att-method-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0;
+  margin-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.att-method-label {
+  font-size: 12px;
+  color: var(--text3);
+  font-weight: 600;
+  margin-right: 0.25rem;
+}
+
+.att-method-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.att-method-btn.active {
+  background: var(--accent, #7c6af7);
+  border-color: var(--accent, #7c6af7);
+  color: #fff;
+}
+
+/* ══════════════════════════════════════════════════════════
+   SESSION START MODAL — METHOD PICKER
+══════════════════════════════════════════════════════════ */
+.att-method-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.att-method-option { cursor: pointer; }
+.att-method-option input { display: none; }
+
+.att-method-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0.75rem 0.5rem;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--bg2);
+  text-align: center;
+  transition: all 0.15s;
+}
+
+.att-method-card span { font-size: 12px; font-weight: 600; color: var(--text); }
+.att-method-card small { font-size: 10px; color: var(--text3); }
+
+.att-method-option input:checked + .att-method-card {
+  border-color: var(--accent, #7c6af7);
+  background: rgba(124,106,247,0.12);
+}
+
+/* ══════════════════════════════════════════════════════════
+   PHOTO ATTENDANCE PANEL
+══════════════════════════════════════════════════════════ */
+.photo-att-area {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.photo-att-controls {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.photo-att-preview {
+  background: var(--bg3);
+  border-radius: 8px;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.photo-student-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ══════════════════════════════════════════════════════════
+   MANUAL STUDENT LIST
+══════════════════════════════════════════════════════════ */
+.manual-student-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.msr-info { flex: 1; }
+.msr-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.msr-id   { font-size: 11px; color: var(--text3); font-family: var(--mono); }
+
+.msr-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.msr-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1.5px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+
+.msr-btn.active {
+  background: rgba(52,211,153,0.2);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.msr-btn.msr-absent.active {
+  background: rgba(239,68,68,0.15);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* ══════════════════════════════════════════════════════════
+   PILLS
+══════════════════════════════════════════════════════════ */
+.pill-green {
+  background: rgba(52,211,153,0.15);
+  color: var(--green);
+  border: 1px solid var(--green);
+}
+.pill-amber {
+  background: rgba(251,191,36,0.15);
+  color: var(--amber);
+  border: 1px solid var(--amber);
+}
+.pill-blue {
+  background: rgba(96,165,250,0.15);
+  color: var(--blue);
+  border: 1px solid var(--blue);
+}
+
+/* ══════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE
+══════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .photo-att-area     { grid-template-columns: 1fr; }
+  .att-method-grid    { grid-template-columns: repeat(3,1fr); }
+  .tt-grid            { font-size: 10px; }
+  .tt-head-cell       { font-size: 9px; padding: 6px 3px; }
+  .teacher-class-grid { grid-template-columns: 1fr; }
+  .weekly-grid        { grid-template-columns: repeat(3,1fr); }
+}
+
+@media (max-width: 480px) {
+  .att-method-grid { grid-template-columns: 1fr 1fr; }
+  .weekly-grid     { grid-template-columns: repeat(2,1fr); }
+  .att-method-bar  { gap: 0.3rem; }
+}
