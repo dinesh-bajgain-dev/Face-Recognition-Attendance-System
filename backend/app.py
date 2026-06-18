@@ -794,6 +794,10 @@ def require_auth(fn):
         with get_db() as conn:
             user = qone(conn,
                 "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
+            if not user:
+                user = qone(conn,
+                    "SELECT id, full_name AS username, 'teacher' AS role FROM teachers "
+                    "WHERE password_hash=%s AND status='active'",(token,))
         if not user: return jsonify({"error":"Unauthorized"}), 401
         g.user = user
         return fn(*args, **kwargs)
@@ -824,12 +828,27 @@ def health():
 @app.route("/api/auth/login", methods=["POST"])
 def login():
     d = request.json or {}
+    password  = d.get("password", "")
+    email     = d.get("email", "").strip()
+    username  = d.get("username", "").strip()
+
+    # Teacher login — checked against the teachers table by email
+    if email:
+        with get_db() as conn:
+            t = qone(conn,
+                "SELECT id, full_name, password_hash FROM teachers "
+                "WHERE email=%s AND password_hash=%s AND status='active'",
+                (email, _hash(password)))
+        if not t: return jsonify({"error": "Invalid email or password"}), 401
+        return jsonify({"token": t["password_hash"], "role": "teacher", "username": t["full_name"]})
+
+    # Admin / user login — checked against the users table by username
     with get_db() as conn:
         user = qone(conn,
             "SELECT id,username,role,password_hash FROM users WHERE username=%s AND password_hash=%s",
-            (d.get("username",""), _hash(d.get("password",""))))
-    if not user: return jsonify({"error":"Invalid credentials"}), 401
-    return jsonify({"token":user["password_hash"],"role":user["role"],"username":user["username"]})
+            (username, _hash(password)))
+    if not user: return jsonify({"error": "Invalid credentials"}), 401
+    return jsonify({"token": user["password_hash"], "role": user["role"], "username": user["username"]})
 
 @app.route("/api/auth/me")
 @require_auth
@@ -1331,7 +1350,7 @@ def recognize():
                 c.execute("""
                     INSERT INTO attendance (student_id, date, time, status)
                     VALUES (%s,%s,%s,'Present')
-                    ON CONFLICT (student_id, date) DO NOTHING
+                    ON CONFLICT DO NOTHING
                 """, (sid, today, now))
                 marked = c.rowcount == 1
                 c.execute("""
@@ -1731,7 +1750,8 @@ def list_teachers():
                                'subject_name',    s.name,
                                'subject_code',    s.code,
                                'time_slot_id',    ta.time_slot_id,
-                               'time_slot_label', ts.label
+                               'time_slot_label', ts.label,
+                               'day_of_week',     ta.day_of_week
                            ) ORDER BY ta.id
                        ) FILTER (WHERE ta.id IS NOT NULL),
                        '[]'::json
@@ -1832,36 +1852,64 @@ def delete_teacher(tid):
 def get_teacher_assignments(tid):
     with get_db() as conn:
         rows = qall(conn, """
-            SELECT ta.id, ta.faculty_id, f.name AS faculty_name,
+            SELECT ta.id, ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
                    ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
-                   ta.time_slot_id, ts.label AS time_slot_label
+                   ta.time_slot_id, ts.label AS time_slot_label,
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week
             FROM teacher_assignments ta
             LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
             LEFT JOIN subjects   s  ON s.id  = ta.subject_id
             LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
-            WHERE ta.teacher_id = %s ORDER BY ta.id
+            WHERE ta.teacher_id = %s
+            ORDER BY CASE ta.day_of_week
+                WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
+                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                ELSE 6 END, ts.start_time
         """, (tid,))
     return jsonify({"assignments": rows})
 
 @app.route("/api/teachers/<int:tid>/assignments", methods=["POST"])
 @require_auth
 def add_teacher_assignment(tid):
-    d = request.json or {}
+    d            = request.json or {}
+    faculty_id   = d.get("faculty_id")   or None
+    semester     = d.get("semester")     or None
+    subject_id   = d.get("subject_id")   or None
+    time_slot_id = d.get("time_slot_id") or None
+    day_of_week  = d.get("day_of_week")  or None
+
     with get_db() as conn:
-        # verify teacher exists
         if not qone(conn, "SELECT id FROM teachers WHERE id=%s", (tid,)):
             return jsonify({"error": "Teacher not found"}), 404
-        row = qone(conn, """
-            INSERT INTO teacher_assignments
-                (teacher_id, faculty_id, semester, subject_id, time_slot_id, is_primary)
-            VALUES (%s,%s,%s,%s,%s,%s)
-            RETURNING id, faculty_id, semester, subject_id, time_slot_id
-        """, (tid,
-              d.get("faculty_id") or None,
-              d.get("semester") or None,
-              d.get("subject_id") or None,
-              d.get("time_slot_id") or None,
-              d.get("is_primary", False)))
+
+        # Collision check: same faculty+semester+day+timeslot → only one teacher allowed
+        if faculty_id and semester and day_of_week and time_slot_id:
+            conflict = qone(conn, """
+                SELECT ta.id, t.full_name AS teacher_name
+                FROM teacher_assignments ta
+                JOIN teachers t ON t.id = ta.teacher_id
+                WHERE ta.faculty_id=%s AND ta.semester=%s
+                  AND ta.day_of_week=%s AND ta.time_slot_id=%s
+                  AND ta.teacher_id != %s
+            """, (faculty_id, semester, day_of_week, time_slot_id, tid))
+            if conflict:
+                return jsonify({
+                    "error": f"Timetable collision — {conflict['teacher_name']} already assigned to this slot"
+                }), 409
+
+        try:
+            row = qone(conn, """
+                INSERT INTO teacher_assignments
+                    (teacher_id, faculty_id, semester, subject_id, time_slot_id, day_of_week, is_primary)
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+                RETURNING id, faculty_id, semester, subject_id, time_slot_id, day_of_week
+            """, (tid, faculty_id, semester, subject_id, time_slot_id, day_of_week,
+                  d.get("is_primary", False)))
+        except Exception as e:
+            if "unique" in str(e).lower():
+                return jsonify({"error": "This assignment already exists"}), 409
+            raise
+
     _log_activity(g.user["username"], "add_assignment", "teacher", target_id=str(tid))
     return jsonify({"assignment": row}), 201
 
@@ -1952,6 +2000,502 @@ def delete_subject(sid):
     if not row: return jsonify({"error": "Subject not found"}), 404
     _log_activity(g.user["username"], "delete_subject", "subject", target_id=str(sid))
     return jsonify({"deleted": True})
+
+# ══════════════════════════════════════════════════════════════════════════
+#  TIMETABLE  (collision-safe scheduling)
+# ══════════════════════════════════════════════════════════════════════════
+
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+@app.route("/api/timetable")
+@require_auth
+def get_timetable():
+    faculty_id = request.args.get("faculty_id", "")
+    semester   = request.args.get("semester", "")
+    where, vals = [], []
+    if faculty_id: where.append("cs.faculty_id=%s"); vals.append(int(faculty_id))
+    if semester:   where.append("cs.semester=%s");   vals.append(int(semester))
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with get_db() as conn:
+        rows = qall(conn, f"""
+            SELECT cs.id, cs.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   cs.semester, cs.day_of_week, cs.time_slot_id,
+                   ts.label AS time_slot_label,
+                   ts.start_time::text AS start_time, ts.end_time::text AS end_time,
+                   cs.teacher_id, t.full_name AS teacher_name, t.teacher_id AS teacher_code,
+                   cs.subject_id, s.name AS subject_name, s.code AS subject_code
+            FROM class_schedules cs
+            LEFT JOIN faculties  f  ON f.id  = cs.faculty_id
+            LEFT JOIN time_slots ts ON ts.id = cs.time_slot_id
+            LEFT JOIN teachers   t  ON t.id  = cs.teacher_id
+            LEFT JOIN subjects   s  ON s.id  = cs.subject_id
+            {clause}
+            ORDER BY cs.day_of_week, ts.start_time
+        """, vals)
+        slots = qall(conn, "SELECT id, label, start_time::text, end_time::text FROM time_slots ORDER BY start_time")
+        faculties = qall(conn, "SELECT id, name, code FROM faculties ORDER BY name")
+    return jsonify({"timetable": rows, "slots": slots, "faculties": faculties})
+
+@app.route("/api/timetable/check", methods=["POST"])
+@require_auth
+def check_timetable_slot():
+    d = request.json or {}
+    faculty_id   = d.get("faculty_id")
+    semester     = d.get("semester")
+    day_of_week  = d.get("day_of_week")
+    time_slot_id = d.get("time_slot_id")
+    exclude_id   = d.get("exclude_id")   # for edit: skip own entry
+    if not all([faculty_id, semester, day_of_week, time_slot_id]):
+        return jsonify({"error": "faculty_id, semester, day_of_week, time_slot_id required"}), 400
+    sql = """
+        SELECT cs.id, t.full_name AS teacher_name, s.name AS subject_name
+        FROM class_schedules cs
+        LEFT JOIN teachers t ON t.id = cs.teacher_id
+        LEFT JOIN subjects s ON s.id = cs.subject_id
+        WHERE cs.faculty_id=%s AND cs.semester=%s
+          AND cs.day_of_week=%s AND cs.time_slot_id=%s
+    """
+    params = [faculty_id, semester, day_of_week, time_slot_id]
+    if exclude_id:
+        sql += " AND cs.id != %s"; params.append(exclude_id)
+    with get_db() as conn:
+        existing = qone(conn, sql, params)
+    if existing:
+        return jsonify({"available": False, "conflict": existing,
+                        "message": f"Slot taken by {existing.get('teacher_name','?')} — {existing.get('subject_name','?')}"})
+    return jsonify({"available": True})
+
+@app.route("/api/timetable", methods=["POST"])
+@require_auth
+def create_timetable_entry():
+    d = request.json or {}
+    faculty_id   = d.get("faculty_id")
+    semester     = d.get("semester")
+    day_of_week  = d.get("day_of_week")
+    time_slot_id = d.get("time_slot_id")
+    teacher_id   = d.get("teacher_id")
+    subject_id   = d.get("subject_id")
+    if not all([faculty_id, semester, day_of_week, time_slot_id]):
+        return jsonify({"error": "faculty_id, semester, day_of_week, time_slot_id required"}), 400
+    try:
+        with get_db() as conn:
+            row = qone(conn, """
+                INSERT INTO class_schedules
+                    (faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id)
+                VALUES (%s,%s,%s,%s,%s,%s)
+                RETURNING id, faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id
+            """, (faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id))
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Timetable collision — slot already occupied"}), 409
+        raise
+    _log_activity(g.user["username"], "create_timetable", "schedule", target_id=str(row["id"]))
+    return jsonify({"entry": row}), 201
+
+@app.route("/api/timetable/<int:entry_id>", methods=["DELETE"])
+@require_auth
+def delete_timetable_entry(entry_id):
+    with get_db() as conn:
+        row = qone(conn, "DELETE FROM class_schedules WHERE id=%s RETURNING id", (entry_id,))
+    if not row: return jsonify({"error": "Entry not found"}), 404
+    _log_activity(g.user["username"], "delete_timetable", "schedule", target_id=str(entry_id))
+    return jsonify({"deleted": True})
+
+# ══════════════════════════════════════════════════════════════════════════
+#  TEACHER — own profile, schedule, today's classes
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/teacher/me")
+@require_auth
+def teacher_me():
+    if g.user["role"] != "teacher":
+        return jsonify({"error": "Teacher access only"}), 403
+    tid = g.user["id"]
+    with get_db() as conn:
+        t = qone(conn,
+            "SELECT id, teacher_id, full_name, email, phone, status FROM teachers WHERE id=%s", (tid,))
+        if not t: return jsonify({"error": "Not found"}), 404
+        assignments = qall(conn, """
+            SELECT ta.id, ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
+                   ta.time_slot_id, ts.label AS time_slot_label,
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week
+            FROM teacher_assignments ta
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s ORDER BY ta.day_of_week, ts.start_time
+        """, (tid,))
+    t["assignments"] = assignments
+    return jsonify({"teacher": t})
+
+@app.route("/api/teacher/me/today")
+@require_auth
+def teacher_today():
+    if g.user["role"] != "teacher":
+        return jsonify({"error": "Teacher access only"}), 403
+    today_name = datetime.now().strftime("%a")   # Mon, Tue …
+    today_str  = date.today().isoformat()
+    tid        = g.user["id"]
+    with get_db() as conn:
+        classes = qall(conn, """
+            SELECT ta.id AS assignment_id,
+                   ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
+                   ta.time_slot_id, ts.label AS time_slot_label,
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week
+            FROM teacher_assignments ta
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s AND ta.day_of_week = %s
+            ORDER BY ts.start_time
+        """, (tid, today_name))
+        for cls in classes:
+            sess = qone(conn, """
+                SELECT id, status, method,
+                       (SELECT COUNT(*) FROM attendance a
+                        WHERE a.session_id = s2.id AND a.status='Present') AS marked_count
+                FROM attendance_sessions s2
+                WHERE teacher_id=%s AND subject_id=%s AND session_date=%s
+                ORDER BY created_at DESC LIMIT 1
+            """, (tid, cls.get("subject_id"), today_str))
+            cls["session"] = sess
+    return jsonify({"classes": classes, "day": today_name, "date": today_str})
+
+@app.route("/api/teacher/me/schedule")
+@require_auth
+def teacher_schedule():
+    if g.user["role"] != "teacher":
+        return jsonify({"error": "Teacher access only"}), 403
+    tid = g.user["id"]
+    with get_db() as conn:
+        assignments = qall(conn, """
+            SELECT ta.id AS assignment_id,
+                   ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
+                   ta.time_slot_id, ts.label AS time_slot_label,
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week
+            FROM teacher_assignments ta
+            LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
+            LEFT JOIN subjects   s  ON s.id  = ta.subject_id
+            LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
+            WHERE ta.teacher_id = %s
+            ORDER BY CASE ta.day_of_week
+                WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
+                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                ELSE 6 END, ts.start_time
+        """, (tid,))
+    schedule = {d: [] for d in DAYS}
+    for a in assignments:
+        day = a.get("day_of_week")
+        if day in schedule:
+            schedule[day].append(a)
+        else:
+            schedule.setdefault("Other", []).append(a)
+    return jsonify({"schedule": schedule, "days": DAYS, "all": assignments})
+
+@app.route("/api/teacher/me/stats")
+@require_auth
+def teacher_stats():
+    if g.user["role"] != "teacher":
+        return jsonify({"error": "Teacher access only"}), 403
+    tid = g.user["id"]
+    with get_db() as conn:
+        total_sessions = qone(conn,
+            "SELECT COUNT(*) AS n FROM attendance_sessions WHERE teacher_id=%s", (tid,))
+        today_marked = qone(conn, """
+            SELECT COUNT(*) AS n FROM attendance a
+            WHERE a.teacher_id=%s AND a.date=CURRENT_DATE AND a.status='Present'
+        """, (tid,))
+        class_count = qone(conn,
+            "SELECT COUNT(DISTINCT (faculty_id, semester, subject_id)) AS n FROM teacher_assignments WHERE teacher_id=%s",
+            (tid,))
+    return jsonify({
+        "total_sessions": int(total_sessions["n"]) if total_sessions else 0,
+        "today_marked":   int(today_marked["n"])   if today_marked   else 0,
+        "class_count":    int(class_count["n"])     if class_count    else 0,
+    })
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ATTENDANCE SESSIONS
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/attendance/sessions", methods=["POST"])
+@require_auth
+def create_attendance_session():
+    if g.user["role"] not in ("teacher", "admin"):
+        return jsonify({"error": "Access denied"}), 403
+    d          = request.json or {}
+    teacher_id = g.user["id"] if g.user["role"] == "teacher" else (d.get("teacher_id") or g.user["id"])
+    faculty_id = d.get("faculty_id")
+    semester   = d.get("semester")
+    subject_id = d.get("subject_id")
+    if not all([faculty_id, semester, subject_id]):
+        return jsonify({"error": "faculty_id, semester, subject_id required"}), 400
+    sess_date  = d.get("session_date", date.today().isoformat())
+    method     = d.get("method", "manual")
+    with get_db() as conn:
+        existing = qone(conn, """
+            SELECT id, status FROM attendance_sessions
+            WHERE teacher_id=%s AND subject_id=%s AND session_date=%s AND status='open'
+        """, (teacher_id, subject_id, sess_date))
+        if existing:
+            return jsonify({"session": existing, "resumed": True})
+        row = qone(conn, """
+            INSERT INTO attendance_sessions
+                (teacher_id, faculty_id, semester, subject_id, time_slot_id,
+                 day_of_week, session_date, method)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id, teacher_id, faculty_id, semester, subject_id,
+                      session_date::text, method, status
+        """, (teacher_id, faculty_id, semester, subject_id,
+              d.get("time_slot_id"), d.get("day_of_week"), sess_date, method))
+    return jsonify({"session": row}), 201
+
+@app.route("/api/attendance/sessions")
+@require_auth
+def list_attendance_sessions():
+    where, vals = [], []
+    if g.user["role"] == "teacher":
+        where.append("s.teacher_id=%s"); vals.append(g.user["id"])
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with get_db() as conn:
+        rows = qall(conn, f"""
+            SELECT s.id, s.session_date::text, s.method, s.status,
+                   s.semester, s.day_of_week, s.created_at::text,
+                   t.full_name AS teacher_name,
+                   f.name AS faculty_name, f.code AS faculty_code,
+                   sb.name AS subject_name, sb.code AS subject_code,
+                   ts.label AS time_slot_label,
+                   (SELECT COUNT(*) FROM attendance a
+                    WHERE a.session_id=s.id AND a.status='Present') AS present_count,
+                   (SELECT COUNT(*) FROM attendance a WHERE a.session_id=s.id) AS total_count
+            FROM attendance_sessions s
+            LEFT JOIN teachers   t  ON t.id  = s.teacher_id
+            LEFT JOIN faculties  f  ON f.id  = s.faculty_id
+            LEFT JOIN subjects   sb ON sb.id = s.subject_id
+            LEFT JOIN time_slots ts ON ts.id = s.time_slot_id
+            {clause}
+            ORDER BY s.session_date DESC, s.created_at DESC LIMIT 100
+        """, vals)
+    return jsonify({"sessions": rows})
+
+@app.route("/api/attendance/sessions/<int:session_id>")
+@require_auth
+def get_attendance_session(session_id):
+    with get_db() as conn:
+        session = qone(conn, """
+            SELECT s.id, s.teacher_id, t.full_name AS teacher_name,
+                   s.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
+                   s.semester, s.subject_id, sb.name AS subject_name,
+                   s.session_date::text, s.method, s.status,
+                   s.created_at::text, s.closed_at::text
+            FROM attendance_sessions s
+            LEFT JOIN teachers  t  ON t.id  = s.teacher_id
+            LEFT JOIN faculties f  ON f.id  = s.faculty_id
+            LEFT JOIN subjects  sb ON sb.id = s.subject_id
+            WHERE s.id = %s
+        """, (session_id,))
+        if not session: return jsonify({"error": "Session not found"}), 404
+        students = qall(conn, """
+            SELECT st.student_id, st.full_name, st.department, st.semester,
+                   COALESCE(a.status,'Absent') AS status,
+                   a.time::text AS att_time, a.note
+            FROM students st
+            LEFT JOIN attendance a ON a.student_id=st.student_id
+                AND a.date=%s AND a.session_id=%s
+            WHERE st.department=(SELECT name FROM faculties WHERE id=%s)
+              AND st.status='active'
+              AND (%s::text IS NULL OR st.semester=%s::text)
+            ORDER BY st.full_name
+        """, (session["session_date"], session_id, session["faculty_id"],
+              str(session["semester"]), str(session["semester"])))
+    session["students"] = students
+    return jsonify({"session": session})
+
+@app.route("/api/attendance/sessions/<int:session_id>/close", methods=["PUT"])
+@require_auth
+def close_attendance_session(session_id):
+    with get_db() as conn:
+        row = qone(conn, """
+            UPDATE attendance_sessions SET status='closed', closed_at=NOW()
+            WHERE id=%s RETURNING id, status, closed_at::text
+        """, (session_id,))
+    if not row: return jsonify({"error": "Session not found"}), 404
+    return jsonify({"session": row})
+
+@app.route("/api/attendance/sessions/<int:session_id>/mark", methods=["POST"])
+@require_auth
+def mark_session_attendance(session_id):
+    d          = request.json or {}
+    student_id = d.get("student_id")
+    status     = d.get("status", "Present")
+    note       = d.get("note", "")
+    if not student_id:
+        return jsonify({"error": "student_id required"}), 400
+    with get_db() as conn:
+        sess = qone(conn,
+            "SELECT session_date, subject_id, teacher_id, status FROM attendance_sessions WHERE id=%s",
+            (session_id,))
+        if not sess: return jsonify({"error": "Session not found"}), 404
+        if sess["status"] == "closed": return jsonify({"error": "Session closed"}), 400
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
+                VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
+                ON CONFLICT DO NOTHING
+            """, (student_id, sess["session_date"], status, note,
+                  sess["subject_id"], sess["teacher_id"], session_id))
+            if c.rowcount == 0:
+                c.execute("""
+                    UPDATE attendance SET status=%s, note=%s, time=CURRENT_TIME
+                    WHERE student_id=%s AND date=%s AND session_id=%s
+                """, (status, note, student_id, sess["session_date"], session_id))
+    return jsonify({"marked": True, "student_id": student_id, "status": status})
+
+@app.route("/api/attendance/sessions/<int:session_id>/bulk", methods=["POST"])
+@require_auth
+def bulk_mark_session(session_id):
+    d       = request.json or {}
+    records = d.get("records", [])
+    with get_db() as conn:
+        sess = qone(conn,
+            "SELECT session_date, subject_id, teacher_id, status FROM attendance_sessions WHERE id=%s",
+            (session_id,))
+        if not sess: return jsonify({"error": "Session not found"}), 404
+        if sess["status"] == "closed": return jsonify({"error": "Session closed"}), 400
+        newly = 0
+        for rec in records:
+            sid    = rec.get("student_id")
+            status = rec.get("status", "Absent")
+            note   = rec.get("note", "")
+            if not sid: continue
+            with conn.cursor() as c:
+                c.execute("""
+                    INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
+                    VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
+                    ON CONFLICT DO NOTHING
+                """, (sid, sess["session_date"], status, note,
+                      sess["subject_id"], sess["teacher_id"], session_id))
+                if c.rowcount > 0: newly += 1
+                else:
+                    c.execute("""
+                        UPDATE attendance SET status=%s, note=%s, time=CURRENT_TIME
+                        WHERE student_id=%s AND date=%s AND session_id=%s
+                    """, (status, note, sid, sess["session_date"], session_id))
+        qexec(conn, "UPDATE attendance_sessions SET status='closed', closed_at=NOW() WHERE id=%s", (session_id,))
+    return jsonify({"submitted": True, "newly_marked": newly})
+
+# ══════════════════════════════════════════════════════════════════════════
+#  BATCH RECOGNITION  (classroom photo → multiple faces)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/recognize/batch", methods=["POST"])
+@require_auth
+def batch_recognize():
+    data    = request.json or {}
+    img_b64 = data.get("image")
+    if not img_b64: return jsonify({"error": "No image"}), 400
+    frame = decode_image(img_b64)
+    if frame is None: return jsonify({"error": "Cannot decode image"}), 400
+    fa    = get_face_app()
+    rgb   = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    faces = fa.get(rgb)
+    if not faces:
+        return jsonify({"recognized": [], "unknown": 0, "message": "No faces detected"})
+    results, unknown = [], 0
+    with get_db() as conn:
+        for face in faces:
+            emb  = face.normed_embedding
+            bbox = [int(x) for x in face.bbox]
+            sid, name, sim = find_best_match(conn, emb)
+            if sim >= THRESHOLD and sid:
+                results.append({"student_id": sid, "name": name,
+                                "confidence": round(sim*100, 1), "bbox": bbox,
+                                "status": "Present"})
+            else:
+                unknown += 1
+    return jsonify({"recognized": results, "unknown": unknown, "total_faces": len(faces)})
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ROLE-SCOPED REPORTS
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/reports/my-attendance")
+@require_auth
+def my_attendance_report():
+    from_d     = request.args.get("from", date.today().isoformat())
+    to_d       = request.args.get("to",   date.today().isoformat())
+    subject_id = request.args.get("subject_id", "")
+    dept       = request.args.get("department", "")
+
+    sql    = """
+        SELECT s.student_id, s.full_name, s.department, s.semester,
+               COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+               COUNT(a.id) AS total,
+               ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present') /
+                     NULLIF(COUNT(a.id),0), 1) AS pct
+        FROM students s
+        LEFT JOIN attendance a ON a.student_id=s.student_id
+            AND a.date BETWEEN %s AND %s
+    """
+    params = [from_d, to_d]
+    where  = []
+
+    if g.user["role"] == "teacher":
+        tid = g.user["id"]
+        where.append("""s.department IN (
+            SELECT f.name FROM teacher_assignments ta
+            JOIN faculties f ON f.id=ta.faculty_id
+            WHERE ta.teacher_id=%s
+        )""")
+        params.append(tid)
+        if subject_id:
+            where.append("a.subject_id=%s"); params.append(int(subject_id))
+    else:
+        if dept:
+            where.append("s.department=%s"); params.append(dept)
+
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " GROUP BY s.student_id,s.full_name,s.department,s.semester ORDER BY pct DESC NULLS LAST"
+
+    with get_db() as conn:
+        rows = qall(conn, sql, params)
+    return jsonify({"report": rows, "from": from_d, "to": to_d})
+
+@app.route("/api/reports/session-summary")
+@require_auth
+def session_summary_report():
+    """Per-session attendance summary, scoped to teacher."""
+    where, vals = [], []
+    if g.user["role"] == "teacher":
+        where.append("s.teacher_id=%s"); vals.append(g.user["id"])
+    from_d = request.args.get("from", "")
+    to_d   = request.args.get("to", "")
+    if from_d: where.append("s.session_date>=%s"); vals.append(from_d)
+    if to_d:   where.append("s.session_date<=%s"); vals.append(to_d)
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    with get_db() as conn:
+        rows = qall(conn, f"""
+            SELECT s.id, s.session_date::text, s.status, s.method,
+                   t.full_name AS teacher_name,
+                   f.name AS faculty_name, s.semester,
+                   sb.name AS subject_name,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present_count,
+                   COUNT(a.id) AS total_count
+            FROM attendance_sessions s
+            LEFT JOIN teachers   t  ON t.id  = s.teacher_id
+            LEFT JOIN faculties  f  ON f.id  = s.faculty_id
+            LEFT JOIN subjects   sb ON sb.id = s.subject_id
+            LEFT JOIN attendance a  ON a.session_id = s.id
+            {clause}
+            GROUP BY s.id,s.session_date,s.status,s.method,
+                     t.full_name,f.name,s.semester,sb.name
+            ORDER BY s.session_date DESC LIMIT 100
+        """, vals)
+    return jsonify({"sessions": rows})
 
 # ── Boot ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
