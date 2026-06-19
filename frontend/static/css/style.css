@@ -4608,12 +4608,13 @@ select#tmSubject option[value=""]:first-child {
 .tt-cell-empty:hover { background: var(--bg3); }
 
 .tt-cell-add {
-  font-size: 18px;
+  font-size: 20px;
   color: var(--text3);
-  opacity: 0;
+  opacity: 0.35;
   transition: opacity 0.15s;
 }
-.tt-cell-empty:hover .tt-cell-add { opacity: 1; }
+.tt-cell-empty:hover .tt-cell-add { opacity: 1; color: var(--accent); }
+.tt-cell-empty:hover { border-color: var(--accent); }
 
 .tt-cell-filled {
   background: rgba(99,102,241,0.15);
