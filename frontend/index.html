@@ -1202,7 +1202,7 @@
               <div class="card">
                 <div class="section-title section-title-mb">Holidays</div>
                 <table class="data-table">
-                  <thead><tr><th>Date</th><th>Name</th><th style="width:80px">Actions</th></tr></thead>
+                  <thead><tr><th>Date(s)</th><th>Name</th><th style="width:80px">Actions</th></tr></thead>
                   <tbody id="holidaysBody"></tbody>
                 </table>
               </div>
@@ -1833,69 +1833,9 @@
           </div>
         </div>
 
-        <!-- Assignments section -->
-        <div style="margin-top:1.2rem;border-top:1px solid var(--border);padding-top:1rem">
-          <div style="font-weight:600;font-size:13px;margin-bottom:0.75rem;color:var(--text1)">
-            Assignments
-            <span style="font-weight:400;color:var(--text3);font-size:11px;margin-left:0.5rem">Faculty · Semester · Subject · Time Slot</span>
-          </div>
-
-          <!-- Existing assignments list -->
-          <div id="teacherAssignmentsList" style="margin-bottom:0.75rem"></div>
-
-          <!-- Add assignment form (shown after teacher is saved) -->
-          <div id="addAssignmentForm" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:0.75rem">
-            <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:0.5rem">Add Assignment</div>
-            <div class="modal-form-grid" style="gap:0.5rem;grid-template-columns:1fr 1fr 1fr">
-              <div class="form-group">
-                <label style="font-size:11px">Faculty</label>
-                <select id="taFaculty" onchange="loadSubjectsForAssignment()">
-                  <option value="">Select faculty</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label style="font-size:11px">Semester</label>
-                <select id="taSemester" onchange="loadSubjectsForAssignment()">
-                  <option value="">— Select —</option>
-                  <option value="1">Semester 1</option><option value="2">Semester 2</option>
-                  <option value="3">Semester 3</option><option value="4">Semester 4</option>
-                  <option value="5">Semester 5</option><option value="6">Semester 6</option>
-                  <option value="7">Semester 7</option><option value="8">Semester 8</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label style="font-size:11px">Day</label>
-                <select id="taDay">
-                  <option value="">Any day</option>
-                  <option value="Mon">Monday</option><option value="Tue">Tuesday</option>
-                  <option value="Wed">Wednesday</option><option value="Thu">Thursday</option>
-                  <option value="Fri">Friday</option><option value="Sat">Saturday</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label style="font-size:11px">Subject</label>
-                <select id="taSubject">
-                  <option value="">Select subject</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label style="font-size:11px">Time Slot</label>
-                <select id="taTimeSlot">
-                  <option value="">Select time slot</option>
-                </select>
-              </div>
-              <div class="form-group" style="display:flex;align-items:flex-end">
-                <div id="taConflictCheck" class="text-12px" style="padding:0.25rem 0;min-height:20px"></div>
-              </div>
-            </div>
-            <button class="btn-primary btn-sm" style="margin-top:0.5rem" onclick="addTeacherAssignment()">+ Add Assignment</button>
-            <div id="assignmentErr" class="msg err" style="margin-top:0.4rem"></div>
-          </div>
-
-          <p id="assignmentHint" style="font-size:12px;color:var(--text3);margin:0.5rem 0 0">
-            Save the teacher first, then add assignments.
-          </p>
-        </div>
+        <p class="text-13px text-secondary" style="margin-top:1rem">
+          Class and subject assignments are managed from <strong>Manage → Timetable</strong>.
+        </p>
 
         <div id="teacherModalErr" class="msg err" style="margin-top:0.75rem"></div>
         <div class="modal-footer">
@@ -2341,48 +2281,59 @@
 
     <!-- Academic Year Modal -->
     <div class="modal-overlay" id="academicYearModal">
-      <div class="modal-box" style="width:420px">
+      <div class="modal-box" style="width:460px">
         <div class="modal-title" id="acYearTitle">Add Academic Year</div>
         <input type="hidden" id="acYearId">
         <div class="form-group">
-          <label>Name (e.g. 2025-26)</label>
-          <input type="text" id="acYearName" class="input-sm" style="width:100%" placeholder="2025-26">
+          <label>Academic Year Name *</label>
+          <input type="text" id="acYearName" class="input-sm" style="width:100%" placeholder="e.g. 2025-26 or 2025/2026">
         </div>
-        <div class="form-row">
+        <div class="form-row" style="gap:0.75rem">
           <div class="form-group" style="flex:1">
-            <label>Start Date</label>
+            <label>Start Date *</label>
             <input type="date" id="acYearStart" class="input-sm" style="width:100%">
           </div>
           <div class="form-group" style="flex:1">
-            <label>End Date</label>
+            <label>End Date *</label>
             <input type="date" id="acYearEnd" class="input-sm" style="width:100%">
           </div>
         </div>
         <div class="form-group">
-          <label class="flex flex-center gap-0-5rem">
-            <input type="checkbox" id="acYearCurrent"> Mark as current year
+          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+            <input type="checkbox" id="acYearCurrent" style="width:16px;height:16px">
+            <span>Mark as the <strong>current</strong> academic year</span>
           </label>
+          <p class="text-12px text-secondary" style="margin:0.25rem 0 0 1.5rem">
+            Marking as current will unmark any previously current year.
+          </p>
         </div>
         <div id="acYearErr" class="msg err"></div>
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeModal('academicYearModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveAcademicYear()">Save</button>
+          <button class="btn-primary" onclick="saveAcademicYear()">Save Academic Year</button>
         </div>
       </div>
     </div>
 
     <!-- Holiday Modal -->
     <div class="modal-overlay" id="holidayModal">
-      <div class="modal-box" style="width:380px">
+      <div class="modal-box" style="width:440px">
         <div class="modal-title">Add Holiday</div>
         <div class="form-group">
-          <label>Date</label>
-          <input type="date" id="holDate" class="input-sm" style="width:100%">
-        </div>
-        <div class="form-group">
-          <label>Name</label>
+          <label>Holiday Name *</label>
           <input type="text" id="holName" class="input-sm" style="width:100%" placeholder="e.g. Dashain Holiday">
         </div>
+        <div class="form-row" style="gap:0.75rem">
+          <div class="form-group" style="flex:1">
+            <label>From Date *</label>
+            <input type="date" id="holFromDate" class="input-sm" style="width:100%" oninput="_holDateHint()">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>To Date <span style="font-size:11px;color:var(--text3)">(optional — for multi-day)</span></label>
+            <input type="date" id="holToDate" class="input-sm" style="width:100%" oninput="_holDateHint()">
+          </div>
+        </div>
+        <div id="holDateHint" class="text-12px text-secondary" style="margin-top:-0.25rem;margin-bottom:0.5rem"></div>
         <div class="form-group">
           <label>Academic Year (optional)</label>
           <select id="holYearSelect" class="input-sm" style="width:100%"><option value="">— None —</option></select>
@@ -2390,7 +2341,7 @@
         <div id="holErr" class="msg err"></div>
         <div class="modal-footer">
           <button class="btn-secondary" onclick="closeModal('holidayModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveHoliday()">Save</button>
+          <button class="btn-primary" onclick="saveHoliday()">Save Holiday</button>
         </div>
       </div>
     </div>

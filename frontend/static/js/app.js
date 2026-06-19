@@ -1237,6 +1237,13 @@ function renderAttTable(records) {
    REPORTS
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadReports() {
+  // Always reset to Overview tab when Reports page is opened
+  document.querySelectorAll("#page-reports .sub-tab").forEach((t) => t.classList.remove("active"));
+  document.querySelectorAll("#page-reports .sub-tab-panel").forEach((p) => p.classList.remove("active"));
+  document.querySelector("#page-reports .sub-tab")?.classList.add("active");
+  document.getElementById("rtab-overview")?.classList.add("active");
+  // Populate faculty filter (needed by Defaulter List tab)
+  _populateFacultyDropdowns();
   try {
     const [stats, hist] = await Promise.all([
       api("/attendance/stats").then((r) => r.json()),
@@ -3169,6 +3176,8 @@ async function _populateFacultyDropdowns() {
   populate("tmFaculty"); // teacher modal — value = faculty id
   populate("smFaculty"); // subject modal — value = faculty id
   populate("eFaculty"); // enrollment — value = faculty id (backend resolves code for department)
+  populate("defFaculty"); // defaulter list filter
+  populate("ttFacultyFilter"); // timetable filter
 }
 
 async function loadSubjectsForModal() {
@@ -3207,7 +3216,7 @@ function switchManageTab(tab, btn) {
     .forEach((p) => p.classList.remove("active"));
   if (btn) btn.classList.add("active");
   else {
-    const tabs = ["faculties", "subjects", "timeslots", "timetable"];
+    const tabs = ["faculties", "subjects", "timeslots", "timetable", "calendar"];
     const idx = tabs.indexOf(tab);
     document.querySelectorAll(".sub-tab")[idx]?.classList.add("active");
   }
@@ -3668,20 +3677,6 @@ async function openTeacherModal(id) {
     ? t.status || "active"
     : "active";
 
-  // Assignments section: show only when editing existing teacher
-  const assignForm = document.getElementById("addAssignmentForm");
-  const assignHint = document.getElementById("assignmentHint");
-  if (t) {
-    assignForm.style.display = "block";
-    assignHint.style.display = "none";
-    await _populateAssignmentDropdowns();
-    _renderAssignments(t.assignments || []);
-  } else {
-    assignForm.style.display = "none";
-    assignHint.style.display = "block";
-    document.getElementById("teacherAssignmentsList").innerHTML = "";
-  }
-
   setMsg("teacherModalErr", "", "");
   document.getElementById("teacherModal").style.display = "flex";
 }
@@ -4055,19 +4050,8 @@ async function saveTeacher() {
       return;
     }
     if (!id) {
-      // New teacher: get the new ID and switch modal to edit mode so assignments can be added
-      const data = await r.json();
-      const newId = data.teacher?.id;
-      _currentEditTeacherId = newId;
-      document.getElementById("tmId").value = newId;
-      document.getElementById("teacherModalTitle").textContent =
-        `Edit — ${full_name}`;
-      document.getElementById("addAssignmentForm").style.display = "block";
-      document.getElementById("assignmentHint").style.display = "none";
-      document.getElementById("teacherAssignmentsList").innerHTML =
-        `<p style="font-size:12px;color:var(--text3);margin:0 0 0.5rem">No assignments yet.</p>`;
-      await _populateAssignmentDropdowns();
-      toast("Teacher created — now add assignments");
+      toast("Teacher created");
+      closeModal("teacherModal");
       loadTeachers();
       return;
     }
@@ -5024,7 +5008,6 @@ function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
 async function _populateTimetableFacultyFilter() {
   const sel = document.getElementById("ttFacultyFilter");
   if (!sel) return;
-  if (sel.options.length > 1) return; // already populated
   const r = await api("/faculties");
   if (!r) return;
   const d = await r.json();
@@ -6009,7 +5992,7 @@ async function saveAcademicYear() {
   const url = id
     ? `/calendar/academic-years/${id}`
     : "/calendar/academic-years";
-  const res = await api(url, { method, body: JSON.stringify(payload) });
+  const res = await api(url, { method, json: payload });
   const data = await res.json();
   if (data.error) {
     errEl.textContent = data.error;
@@ -6060,10 +6043,30 @@ async function loadHolidays() {
     .join("");
 }
 
+function _holDateHint() {
+  const from = document.getElementById("holFromDate")?.value;
+  const to = document.getElementById("holToDate")?.value;
+  const hint = document.getElementById("holDateHint");
+  if (!hint) return;
+  if (from && to && to > from) {
+    const d1 = new Date(from), d2 = new Date(to);
+    const days = Math.round((d2 - d1) / 86400000) + 1;
+    hint.textContent = `${days} day holiday will be created (${from} to ${to})`;
+  } else if (from && to && to === from) {
+    hint.textContent = "Single-day holiday";
+  } else if (from && (!to || to < from)) {
+    hint.textContent = to ? "To Date must be on or after From Date" : "Single-day holiday";
+  } else {
+    hint.textContent = "";
+  }
+}
+
 function openHolidayModal() {
   document.getElementById("holErr").textContent = "";
-  document.getElementById("holDate").value = "";
+  document.getElementById("holFromDate").value = "";
+  document.getElementById("holToDate").value = "";
   document.getElementById("holName").value = "";
+  document.getElementById("holDateHint").textContent = "";
   document.getElementById("holYearSelect").value =
     document.getElementById("holYearFilter")?.value || "";
   document.getElementById("holidayModal").style.display = "flex";
@@ -6072,18 +6075,23 @@ function openHolidayModal() {
 async function saveHoliday() {
   const errEl = document.getElementById("holErr");
   errEl.textContent = "";
-  const payload = {
-    date: document.getElementById("holDate").value,
-    name: document.getElementById("holName").value.trim(),
-    academic_year_id: document.getElementById("holYearSelect").value || null,
-  };
-  if (!payload.date || !payload.name) {
-    errEl.textContent = "Date and name are required.";
+  const name = document.getElementById("holName").value.trim();
+  const fromDate = document.getElementById("holFromDate").value;
+  const toDate = document.getElementById("holToDate").value;
+  const yearId = document.getElementById("holYearSelect").value || null;
+
+  if (!fromDate || !name) {
+    errEl.textContent = "Holiday name and From Date are required.";
     return;
   }
+  if (toDate && toDate < fromDate) {
+    errEl.textContent = "To Date must be on or after From Date.";
+    return;
+  }
+
   const res = await api("/calendar/holidays", {
     method: "POST",
-    body: JSON.stringify(payload),
+    json: { name, from_date: fromDate, to_date: toDate || fromDate, academic_year_id: yearId },
   });
   const data = await res.json();
   if (data.error) {
@@ -6092,7 +6100,8 @@ async function saveHoliday() {
   }
   closeModal("holidayModal");
   loadHolidays();
-  toast("Holiday added");
+  const added = data.added || 1;
+  toast(added > 1 ? `${added} holiday days added` : "Holiday added");
 }
 
 async function deleteHoliday(id) {

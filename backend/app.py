@@ -3107,21 +3107,50 @@ def create_holiday():
     if g.user.get("role") != "admin":
         return jsonify({"error": "Admin access only"}), 403
     d = request.json or {}
-    if not all([d.get("date"), d.get("name")]):
-        return jsonify({"error": "date and name required"}), 400
+    name = d.get("name", "").strip()
+    # Support both legacy "date" field and new "from_date"/"to_date"
+    from_date = d.get("from_date") or d.get("date")
+    to_date = d.get("to_date") or from_date
+    if not from_date or not name:
+        return jsonify({"error": "name and from_date are required"}), 400
+    if to_date < from_date:
+        return jsonify({"error": "to_date must be on or after from_date"}), 400
+    year_id = d.get("academic_year_id") or None
+
+    from datetime import date as _date, timedelta
     try:
-        with get_db(register_pgvector=False) as conn:
-            row = qone(conn, """
-                INSERT INTO holidays (date, name, academic_year_id)
-                VALUES (%s,%s,%s)
-                RETURNING id, date::text, name, academic_year_id
-            """, (d["date"], d["name"], d.get("academic_year_id") or None))
-    except Exception as e:
-        if "unique" in str(e).lower():
-            return jsonify({"error": "Holiday already exists for that date"}), 409
-        raise
-    _log_activity(g.user["username"], "create_holiday", "calendar", target_id=d["date"])
-    return jsonify({"holiday": row}), 201
+        start = _date.fromisoformat(from_date)
+        end = _date.fromisoformat(to_date)
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
+
+    added = []
+    with get_db(register_pgvector=False) as conn:
+        current = start
+        while current <= end:
+            date_str = current.isoformat()
+            # Check for existing holiday on this date (handle NULL academic_year_id explicitly)
+            if year_id:
+                existing = qone(conn,
+                    "SELECT id FROM holidays WHERE date=%s AND academic_year_id=%s",
+                    (date_str, year_id))
+            else:
+                existing = qone(conn,
+                    "SELECT id FROM holidays WHERE date=%s AND academic_year_id IS NULL",
+                    (date_str,))
+            if not existing:
+                row = qone(conn, """
+                    INSERT INTO holidays (date, name, academic_year_id)
+                    VALUES (%s,%s,%s)
+                    RETURNING id, date::text, name, academic_year_id
+                """, (date_str, name, year_id))
+                if row:
+                    added.append(row)
+            current += timedelta(days=1)
+    if not added:
+        return jsonify({"error": "All dates in the range already have a holiday"}), 409
+    _log_activity(g.user["username"], "create_holiday", "calendar", target_id=f"{from_date}..{to_date}")
+    return jsonify({"holidays": added, "added": len(added)}), 201
 
 @app.route("/api/calendar/holidays/<int:hid>", methods=["DELETE"])
 @require_auth
