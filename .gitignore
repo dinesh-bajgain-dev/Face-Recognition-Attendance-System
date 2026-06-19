@@ -30,3 +30,4 @@ build/
 *.log
 
 CLAUDE.md
+.gstack/

@@ -125,6 +125,12 @@ def init_db():
             ALTER TABLE students ADD COLUMN IF NOT EXISTS sample_count INTEGER NOT NULL DEFAULT 0;
             ALTER TABLE students ADD COLUMN IF NOT EXISTS faculty_id   INTEGER REFERENCES faculties(id);
 
+            -- Normalise department to faculty short code (e.g. "CSIT", "BCA", "BBM")
+            UPDATE students SET department = f.code
+            FROM   faculties f
+            WHERE  students.faculty_id = f.id
+              AND  students.department IS DISTINCT FROM f.code;
+
             CREATE TABLE IF NOT EXISTS attendance (
                 id         SERIAL PRIMARY KEY,
                 student_id TEXT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
@@ -1137,8 +1143,13 @@ def delete_student(sid):
 @app.route("/api/departments")
 def departments():
     with get_db() as conn:
-        rows = qall(conn,
-            "SELECT DISTINCT department FROM students WHERE department IS NOT NULL ORDER BY department")
+        rows = qall(conn, """
+            SELECT DISTINCT COALESCE(f.code, s.department) AS department
+            FROM   students s
+            LEFT   JOIN faculties f ON f.id = s.faculty_id
+            WHERE  COALESCE(f.code, s.department) IS NOT NULL
+            ORDER  BY department
+        """)
     return jsonify({"departments":[r["department"] for r in rows]})
 
 # ── Attendance admin edit ─────────────────────────────────────────────────
@@ -1445,7 +1456,7 @@ def enroll():
         return jsonify({"error":"No faces detected in any image"}), 422
 
     with get_db() as conn:
-        # Resolve department code from faculty_id if provided
+        # Resolve department code from faculty_id (short form, e.g. "CSIT" not "BSc CSIT")
         if faculty_id:
             fac = qone(conn, "SELECT code FROM faculties WHERE id=%s", (faculty_id,))
             if fac:
@@ -1596,13 +1607,14 @@ def faculty_summary():
     with get_db() as conn:
         rows = qall(conn, """
             SELECT s.student_id, s.full_name,
-                   COALESCE(s.department,'Unassigned') AS department,
+                   COALESCE(f.code, s.department, 'Unassigned') AS department,
                    a.time::text AS time,
                    COALESCE(a.status,'Absent') AS status
             FROM   students s
+            LEFT   JOIN faculties f ON f.id = s.faculty_id
             LEFT   JOIN attendance a
                    ON  a.student_id=s.student_id AND a.date=%s
-            ORDER  BY s.department, s.full_name
+            ORDER  BY department, s.full_name
         """, (target,))
     faculty_map = {}
     for r in rows:

@@ -654,30 +654,36 @@
                   />
                 </div>
               </div>
-              <div class="ep-section-label ep-section-label-mt">Optional</div>
               <div class="ep-field-row">
                 <div class="form-group">
-                  <label>Faculty</label>
-                  <select id="eFaculty">
+                  <label>Faculty <span class="req">*</span></label>
+                  <select id="eFaculty" required>
                     <option value="">Select faculty</option>
                   </select>
                 </div>
                 <div class="form-group">
-                  <label>Semester</label>
-                  <input
-                    type="text"
-                    id="eSem"
-                    placeholder="e.g. 4th Semester"
-                  />
+                  <label>Semester <span class="req">*</span></label>
+                  <select id="eSem" required>
+                    <option value="">-- Select Semester --</option>
+                    <option value="1">Semester 1</option>
+                    <option value="2">Semester 2</option>
+                    <option value="3">Semester 3</option>
+                    <option value="4">Semester 4</option>
+                    <option value="5">Semester 5</option>
+                    <option value="6">Semester 6</option>
+                    <option value="7">Semester 7</option>
+                    <option value="8">Semester 8</option>
+                  </select>
                 </div>
               </div>
               <div class="ep-field-row">
                 <div class="form-group">
-                  <label>Email</label>
+                  <label>Email <span class="req">*</span></label>
                   <input
                     type="email"
                     id="eEmail"
                     placeholder="student@college.edu"
+                    required
                   />
                 </div>
                 <div class="form-group">
