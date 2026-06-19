@@ -4158,8 +4158,10 @@ label .req {
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   z-index: 2000;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 1.5rem;
+  overflow-y: auto;
 }
 .modal-overlay.open {
   display: flex;

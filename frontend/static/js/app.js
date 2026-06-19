@@ -2313,7 +2313,15 @@ function _closeEditModal() {
 }
 // Also close on Escape
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") _closeEditModal();
+  if (e.key === "Escape") {
+    _closeEditModal();
+    document.querySelectorAll(".modal-overlay").forEach(m => {
+      if (m.style.display === "flex") {
+        m.style.display = "none";
+        document.body.style.overflow = "";
+      }
+    });
+  }
 });
 
 function switchModalTab(tab, btn) {
