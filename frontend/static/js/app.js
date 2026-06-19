@@ -101,9 +101,13 @@ function showLogin() {
   document.getElementById("loginOverlay").classList.remove("hidden");
   document.getElementById("sidebar").style.display = "none";
   document.querySelector(".main").style.display = "none";
+  const sp = document.getElementById("student-panel");
+  if (sp) sp.style.display = "none";
 }
 function showApp() {
   document.getElementById("loginOverlay").classList.add("hidden");
+  const sp = document.getElementById("student-panel");
+  if (sp && authRole !== "student") sp.style.display = "none";
 
   if (authRole === "student") {
     document.getElementById("sidebar").style.display = "none";
