@@ -4844,18 +4844,30 @@ function _renderTimetableGrid(facId, sem) {
     </div>`;
 }
 
-function openTimetableModal() {
+async function openTimetableModal() {
   document.getElementById("ttmConflict").textContent = "";
   document.getElementById("ttmErr").textContent = "";
-  // Populate teachers and slots
-  _loadTimetableModalDropdowns();
+  await _loadTimetableModalDropdowns();
   document.getElementById("timetableModal").classList.add("open");
 }
 
 async function _loadTimetableModalDropdowns() {
+  // Faculties — rebuild every time (HTML ships with 1 placeholder option that blocks the guard)
+  const facSel = document.getElementById("ttmFaculty");
+  if (facSel) {
+    const faculties = await _loadFaculties();
+    const prev = facSel.value;
+    facSel.innerHTML =
+      `<option value="">Select faculty</option>` +
+      faculties
+        .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
+        .join("");
+    if (prev) facSel.value = prev;
+  }
   // Slots
   const slotSel = document.getElementById("ttmSlot");
   if (slotSel && _ttSlots.length) {
+    const prev = slotSel.value;
     slotSel.innerHTML =
       `<option value="">Select period</option>` +
       _ttSlots
@@ -4864,32 +4876,26 @@ async function _loadTimetableModalDropdowns() {
             `<option value="${s.id}">${s.label} (${(s.start_time || "").slice(0, 5)}–${(s.end_time || "").slice(0, 5)})</option>`,
         )
         .join("");
+    if (prev) slotSel.value = prev;
   }
   // Teachers
   const teachSel = document.getElementById("ttmTeacher");
   if (teachSel) {
-    const r = await api("/teachers");
-    if (!r) return;
-    const d = await r.json();
-    teachSel.innerHTML =
-      `<option value="">Unassigned</option>` +
-      (d.teachers || [])
-        .map(
-          (t) => `<option value="${t.id}">${escapeHtml(t.full_name)}</option>`,
-        )
-        .join("");
-  }
-  // Faculties
-  const facSel = document.getElementById("ttmFaculty");
-  if (facSel && !facSel.options.length) {
-    const r = await api("/faculties");
-    if (!r) return;
-    const d = await r.json();
-    facSel.innerHTML =
-      `<option value="">Select faculty</option>` +
-      (d.faculties || [])
-        .map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`)
-        .join("");
+    const prev = teachSel.value;
+    try {
+      const r = await api("/teachers");
+      if (r && r.ok) {
+        const d = await r.json();
+        teachSel.innerHTML =
+          `<option value="">Unassigned</option>` +
+          (d.teachers || [])
+            .map(
+              (t) => `<option value="${t.id}">${escapeHtml(t.full_name)}</option>`,
+            )
+            .join("");
+        if (prev) teachSel.value = prev;
+      }
+    } catch (_) {}
   }
 }
 
@@ -4898,10 +4904,13 @@ async function ttmLoadSubjects() {
   const sem = document.getElementById("ttmSemester")?.value || "";
   const sel = document.getElementById("ttmSubject");
   if (!sel) return;
+  if (!fid) {
+    sel.innerHTML = `<option value="">— select faculty first —</option>`;
+    return;
+  }
   sel.innerHTML = `<option value="">Loading…</option>`;
-  const r = await api(
-    `/subjects?faculty_id=${fid}${sem ? "&semester=" + sem : ""}`,
-  );
+  const qs = `faculty_id=${fid}${sem ? "&semester=" + sem : ""}`;
+  const r = await api(`/subjects?${qs}`);
   if (!r) return;
   const d = await r.json();
   sel.innerHTML =
@@ -4988,17 +4997,16 @@ async function deleteTimetableEntry(id) {
   } else toast("Delete failed", "err");
 }
 
-function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
-  // Pre-fill the modal and open it
-  document.getElementById("ttmDay").value = day;
-  document.getElementById("ttmFaculty").value = facId;
-  document.getElementById("ttmSemester").value = sem;
-  _loadTimetableModalDropdowns().then(() => {
-    document.getElementById("ttmSlot").value = slotId;
-    ttmLoadSubjects();
-  });
+async function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
   document.getElementById("ttmConflict").textContent = "";
   document.getElementById("ttmErr").textContent = "";
+  // Load dropdowns first, then set pre-filled values (innerHTML rebuild wipes .value)
+  await _loadTimetableModalDropdowns();
+  document.getElementById("ttmFaculty").value = facId;
+  document.getElementById("ttmSemester").value = sem;
+  document.getElementById("ttmDay").value = day;
+  document.getElementById("ttmSlot").value = slotId;
+  await ttmLoadSubjects();
   document.getElementById("timetableModal").classList.add("open");
 }
 
@@ -5008,10 +5016,12 @@ function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
 async function _populateTimetableFacultyFilter() {
   const sel = document.getElementById("ttFacultyFilter");
   if (!sel) return;
-  const r = await api("/faculties");
-  if (!r) return;
-  const d = await r.json();
-  (d.faculties || []).forEach((f) => {
+  // _populateFacultyDropdowns() already handles ttFacultyFilter — just ensure
+  // it's populated if the cache is available, without a second API call.
+  if (sel.options.length > 1) return; // already populated
+  const faculties = await _loadFaculties();
+  while (sel.options.length > 1) sel.remove(1);
+  faculties.forEach((f) => {
     const o = document.createElement("option");
     o.value = f.id;
     o.textContent = f.name;
