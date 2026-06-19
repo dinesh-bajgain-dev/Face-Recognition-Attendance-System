@@ -767,6 +767,7 @@ async function enrollStudent() {
   form.append("student_id", sid);
   form.append("full_name", name);
   if (faculty_id) form.append("faculty_id", faculty_id);
+  if (sem) form.append("semester", sem);
   if (email) form.append("email", email);
   if (phone) form.append("phone", phone);
   allFiles.forEach((f) => form.append("images", f));
@@ -796,8 +797,8 @@ async function enrollStudent() {
     webcamFiles = [];
     const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eFaculty", "eEmail", "ePhone"].forEach(
-      (id) => (document.getElementById(id).value = ""),
+    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach(
+      (id) => { const el = document.getElementById(id); if (el) el.value = ""; },
     );
   } catch (e) {
     setMsg("enrollMsg", "Error: " + e.message, "err");
@@ -1631,6 +1632,7 @@ window.enrollStudent = async function () {
           student_id: sid,
           full_name: name,
           faculty_id: faculty_id ? parseInt(faculty_id) : null,
+          semester: sem || null,
           email: email || null,
           phone: phone || null,
           frames,
@@ -1645,6 +1647,7 @@ window.enrollStudent = async function () {
       form.append("student_id", sid);
       form.append("full_name", name);
       if (faculty_id) form.append("faculty_id", faculty_id);
+      if (sem) form.append("semester", sem);
       if (email) form.append("email", email);
       if (phone) form.append("phone", phone);
       selectedFiles.forEach((f) => form.append("images", f));
@@ -1678,8 +1681,8 @@ window.enrollStudent = async function () {
     webcamFiles = [];
     const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eFaculty", "eEmail", "ePhone"].forEach(
-      (id) => (document.getElementById(id).value = ""),
+    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach(
+      (id) => { const el = document.getElementById(id); if (el) el.value = ""; },
     );
   } catch (e) {
     setMsg("enrollMsg", "Error: " + e.message, "err");
@@ -5838,6 +5841,7 @@ async function adminReviewCorrection(id, status) {
     status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
   const res = await api(`/corrections/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status, review_note: note }),
   });
   const data = await res.json();
@@ -5881,7 +5885,7 @@ async function submitStudentImport() {
   const form = new FormData();
   form.append("file", fileEl.files[0]);
 
-  const res = await fetch("/api/students/import", {
+  const res = await fetch(`${API}/students/import`, {
     method: "POST",
     headers: { Authorization: `Bearer ${authToken}` },
     body: form,

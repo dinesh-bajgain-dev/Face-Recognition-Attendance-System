@@ -860,7 +860,7 @@ def _mark_attendance_and_broadcast(student_id, name, confidence):
             c.execute("""
                 INSERT INTO attendance (student_id, date, time, status)
                 VALUES (%s,%s,%s,'Present')
-                ON CONFLICT (student_id, date) DO NOTHING
+                ON CONFLICT (student_id, date) WHERE subject_id IS NULL DO NOTHING
             """, (student_id, today, now))
             marked = c.rowcount == 1
             c.execute("""
@@ -994,14 +994,22 @@ def change_password():
     if not new_pw or len(new_pw) < 6:
         return jsonify({"error":"New password must be at least 6 characters"}), 400
     with get_db() as conn:
-        user = qone(conn,
-            "SELECT id FROM users WHERE id=%s AND password_hash=%s",
-            (g.user["id"], _hash(old_pw)))
-        if not user: return jsonify({"error":"Current password is incorrect"}), 401
-        qexec(conn,
-            "UPDATE users SET password_hash=%s WHERE id=%s",
-            (_hash(new_pw), g.user["id"]))
-    _log_activity(g.user["username"], "change_password", "user", str(g.user["id"]))
+        if g.user.get("role") == "teacher":
+            tid = _tid()
+            teacher = qone(conn,
+                "SELECT id FROM teachers WHERE id=%s AND password_hash=%s",
+                (tid, _hash(old_pw)))
+            if not teacher: return jsonify({"error":"Current password is incorrect"}), 401
+            qexec(conn, "UPDATE teachers SET password_hash=%s WHERE id=%s",
+                  (_hash(new_pw), tid))
+        else:
+            user = qone(conn,
+                "SELECT id FROM users WHERE id=%s AND password_hash=%s",
+                (g.user["id"], _hash(old_pw)))
+            if not user: return jsonify({"error":"Current password is incorrect"}), 401
+            qexec(conn, "UPDATE users SET password_hash=%s WHERE id=%s",
+                  (_hash(new_pw), g.user["id"]))
+    _log_activity(g.user.get("username","?"), "change_password", "user", str(g.user["id"]))
     return jsonify({"updated": True})
 
 # ── Students ──────────────────────────────────────────────────────────────
@@ -1102,11 +1110,8 @@ def student_photo(sid):
 @app.route("/api/students/<sid>", methods=["PUT"])
 @require_auth
 def update_student(sid):
-    """
-    Full profile update. Accepts all editable fields.
-    Allowed: full_name, department, email, phone, semester, status
-    Also supports changing student_id (with duplicate check).
-    """
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     d = request.json or {}
     ALLOWED = {"full_name","department","email","phone","semester","status"}
     fields  = {k:d[k] for k in ALLOWED if k in d}
@@ -1135,6 +1140,8 @@ def update_student(sid):
 @app.route("/api/students/<sid>", methods=["DELETE"])
 @require_auth
 def delete_student(sid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     with get_db() as conn:
         rows = qexec(conn,"DELETE FROM students WHERE student_id=%s",(sid,))
     _log_activity(g.user["username"],"delete_student","student",sid)
@@ -1156,23 +1163,33 @@ def departments():
 @app.route("/api/attendance/<sid>/<att_date>", methods=["PUT"])
 @require_auth
 def update_attendance(sid, att_date):
-    """
-    Admin can manually set attendance status for a student on a specific date.
-    Body: { "status": "Present"|"Absent", "note": "optional reason" }
-    """
-    d      = request.json or {}
-    status = d.get("status","")
-    note   = d.get("note","")
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    d          = request.json or {}
+    status     = d.get("status","")
+    note       = d.get("note","")
+    subject_id = d.get("subject_id")
     if status not in ("Present","Absent"):
         return jsonify({"error":"status must be Present or Absent"}), 400
+    try:
+        from datetime import date as _date; _date.fromisoformat(att_date)
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
     with get_db() as conn:
-        # Upsert: works whether the row exists or not
-        qexec(conn, """
-            INSERT INTO attendance (student_id, date, time, status, note)
-            VALUES (%s, %s, CURRENT_TIME, %s, %s)
-            ON CONFLICT (student_id, date) DO UPDATE
-                SET status=%s, note=%s
-        """, (sid, att_date, status, note, status, note))
+        if subject_id:
+            qexec(conn, """
+                INSERT INTO attendance (student_id, date, time, status, note, subject_id)
+                VALUES (%s, %s, CURRENT_TIME, %s, %s, %s)
+                ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note
+            """, (sid, att_date, status, note, int(subject_id)))
+        else:
+            qexec(conn, """
+                INSERT INTO attendance (student_id, date, time, status, note)
+                VALUES (%s, %s, CURRENT_TIME, %s, %s)
+                ON CONFLICT (student_id, date) WHERE subject_id IS NULL
+                DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note
+            """, (sid, att_date, status, note))
     _log_activity(
         g.user["username"], "edit_attendance", "attendance", sid,
         f"Set {att_date} to {status}" + (f" — {note}" if note else "")
@@ -1183,10 +1200,18 @@ def update_attendance(sid, att_date):
 @require_auth
 def delete_attendance(sid, att_date):
     """Remove a specific attendance record (admin only)."""
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
+    subject_id = request.args.get("subject_id")
     with get_db() as conn:
-        rows = qexec(conn,
-            "DELETE FROM attendance WHERE student_id=%s AND date=%s",
-            (sid, att_date))
+        if subject_id:
+            rows = qexec(conn,
+                "DELETE FROM attendance WHERE student_id=%s AND date=%s AND subject_id=%s",
+                (sid, att_date, int(subject_id)))
+        else:
+            rows = qexec(conn,
+                "DELETE FROM attendance WHERE student_id=%s AND date=%s AND subject_id IS NULL",
+                (sid, att_date))
     _log_activity(g.user["username"],"delete_attendance","attendance",sid,
                   f"Deleted {att_date}")
     return jsonify({"deleted": rows > 0})
@@ -1195,7 +1220,8 @@ def delete_attendance(sid, att_date):
 @app.route("/api/activity-logs")
 @require_auth
 def get_activity_logs():
-    limit  = int(request.args.get("limit", 50))
+    try:    limit = min(max(1, int(request.args.get("limit", 50))), 2000)
+    except: limit = 50
     target = request.args.get("target_id","").strip()
     with get_db() as conn:
         if target:
@@ -1237,6 +1263,7 @@ def _smooth_pose(raw_pose: str) -> str:
 
 # ── Frame quality validation ──────────────────────────────────────────────
 @app.route("/api/capture/validate-frame", methods=["POST"])
+@require_auth
 def validate_frame():
     """
     Called by the auto-capture UI for each candidate frame.
@@ -1405,6 +1432,7 @@ def validate_frame():
 
 # ── Enroll ────────────────────────────────────────────────────────────────
 @app.route("/api/enroll", methods=["POST"])
+@require_auth
 def enroll():
     if request.content_type and "application/json" in request.content_type:
         data       = request.json or {}
@@ -1488,6 +1516,7 @@ def enroll():
 
 # ── Recognize ─────────────────────────────────────────────────────────────
 @app.route("/api/recognize", methods=["POST"])
+@require_auth
 def recognize():
     data    = request.json or {}
     img_b64 = data.get("image")
@@ -1543,18 +1572,21 @@ def recognize():
 
 # ── Camera ────────────────────────────────────────────────────────────────
 @app.route("/api/camera/start", methods=["POST"])
+@require_auth
 def start_camera():
     if camera_state["active"]: return jsonify({"status":"already_running"})
     camera_state["active"] = True
     return jsonify({"status":"started"})
 
 @app.route("/api/camera/stop", methods=["POST"])
+@require_auth
 def stop_camera():
     camera_state["active"] = False
     if camera_state["cap"]: camera_state["cap"].release()
     return jsonify({"status":"stopped"})
 
 @app.route("/api/stream")
+@require_auth
 def stream():
     if not camera_state["active"]: return jsonify({"error":"Camera not started"}), 400
     return Response(_gen_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
@@ -1578,6 +1610,7 @@ def sse_events():
 
 # ── Attendance ────────────────────────────────────────────────────────────
 @app.route("/api/attendance")
+@require_auth
 def get_attendance():
     target = request.args.get("date", date.today().isoformat())
     dept   = request.args.get("department","").strip()
@@ -1602,6 +1635,7 @@ def get_attendance():
                     "absent": sum(1 for r in records if r["status"]=="Absent")})
 
 @app.route("/api/attendance/faculty-summary")
+@require_auth
 def faculty_summary():
     target = request.args.get("date", date.today().isoformat())
     with get_db() as conn:
@@ -1637,6 +1671,7 @@ def faculty_summary():
                                "rate":round(op/ot*100,1) if ot else 0}})
 
 @app.route("/api/attendance/history")
+@require_auth
 def attendance_history():
     dept = request.args.get("department","").strip()
     with get_db() as conn:
@@ -1658,6 +1693,7 @@ def attendance_history():
                                 "absent":max(0,total-r["present"])} for r in rows]})
 
 @app.route("/api/attendance/stats")
+@require_auth
 def attendance_stats():
     dept = request.args.get("department","").strip()
     with get_db() as conn:
@@ -1677,6 +1713,7 @@ def attendance_stats():
     return jsonify({"stats": rows})
 
 @app.route("/api/attendance/export")
+@require_auth
 def export_csv():
     from_d = request.args.get("from", date.today().isoformat())
     to_d   = request.args.get("to",   date.today().isoformat())
@@ -1714,8 +1751,10 @@ def export_csv():
 
 # ── Logs ──────────────────────────────────────────────────────────────────
 @app.route("/api/logs")
+@require_auth
 def get_logs():
-    limit = int(request.args.get("limit", 50))
+    try:    limit = min(max(1, int(request.args.get("limit", 50))), 2000)
+    except: limit = 50
     with get_db() as conn:
         rows = qall(conn, """
             SELECT DISTINCT ON (student_id, logged_at::date)
@@ -1786,6 +1825,7 @@ def _load_settings_from_db():
         print(f"[settings] Could not load from DB: {e}")
 
 @app.route("/api/settings")
+@require_auth
 def get_settings():
     with get_db(register_pgvector=False) as conn:
         rows = qall(conn, "SELECT key, value FROM system_settings ORDER BY key")
@@ -1802,6 +1842,8 @@ def get_settings():
 @app.route("/api/settings", methods=["PUT"])
 @require_auth
 def update_settings():
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     global THRESHOLD, SKIP
     d = request.json or {}
     updates = {}
@@ -1897,7 +1939,8 @@ def delete_faculty_db(fid):
 @require_auth
 def list_timeslots():
     search = request.args.get("search", "").strip()
-    limit  = int(request.args.get("limit", 0))   # 0 = no limit (for dropdowns)
+    try:    limit = min(max(0, int(request.args.get("limit", 0))), 2000)
+    except: limit = 0   # 0 = no limit (for dropdowns)
     where  = "WHERE label ILIKE %s" if search else ""
     vals   = ([f"%{search}%"] if search else [])
     lim    = f"LIMIT {limit}" if limit else ""
@@ -2015,6 +2058,8 @@ def get_teacher(tid):
 @app.route("/api/teachers", methods=["POST"])
 @require_auth
 def create_teacher():
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     d = request.json or {}
     if not d.get("teacher_id"): return jsonify({"error": "teacher_id is required"}), 400
     if not d.get("full_name"):  return jsonify({"error": "full_name is required"}), 400
@@ -2039,6 +2084,8 @@ def create_teacher():
 @app.route("/api/teachers/<int:tid>", methods=["PUT"])
 @require_auth
 def update_teacher(tid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     d = request.json or {}
     fields, values = [], []
     for col in ["teacher_id", "full_name", "email", "phone", "status"]:
@@ -2062,6 +2109,8 @@ def update_teacher(tid):
 @app.route("/api/teachers/<int:tid>", methods=["DELETE"])
 @require_auth
 def delete_teacher(tid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     with get_db() as conn:
         # Nullify FK references that are NO ACTION (not cascaded)
         qexec(conn, "UPDATE recognition_logs SET teacher_id = NULL WHERE teacher_id = %s", (tid,))
@@ -2107,7 +2156,16 @@ def add_teacher_assignment(tid):
         if not qone(conn, "SELECT id FROM teachers WHERE id=%s", (tid,)):
             return jsonify({"error": "Teacher not found"}), 404
 
-        # Collision check: same faculty+semester+day+timeslot → only one teacher allowed
+        # Collision checks: (1) same teacher can't be in two slots at once;
+        # (2) same faculty/semester/slot can only have one teacher
+        if day_of_week and time_slot_id:
+            self_conflict = qone(conn, """
+                SELECT ta.id FROM teacher_assignments ta
+                WHERE ta.teacher_id=%s AND ta.day_of_week=%s AND ta.time_slot_id=%s
+            """, (tid, day_of_week, time_slot_id))
+            if self_conflict:
+                return jsonify({"error": "This teacher already has a class in this time slot"}), 409
+
         if faculty_id and semester and day_of_week and time_slot_id:
             conflict = qone(conn, """
                 SELECT ta.id, t.full_name AS teacher_name
@@ -2258,7 +2316,13 @@ def update_subject(sid):
 @app.route("/api/subjects/<int:sid>", methods=["DELETE"])
 @require_auth
 def delete_subject(sid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access required"}), 403
     with get_db() as conn:
+        att_n  = (qone(conn, "SELECT COUNT(*) AS n FROM attendance WHERE subject_id=%s", (sid,)) or {}).get("n", 0)
+        sess_n = (qone(conn, "SELECT COUNT(*) AS n FROM attendance_sessions WHERE subject_id=%s", (sid,)) or {}).get("n", 0)
+        if att_n or sess_n:
+            return jsonify({"error": f"Cannot delete: {att_n} attendance records and {sess_n} sessions reference this subject. Remove them first."}), 409
         row = qone(conn, "DELETE FROM subjects WHERE id=%s RETURNING id", (sid,))
     if not row: return jsonify({"error": "Subject not found"}), 404
     _log_activity(g.user["username"], "delete_subject", "subject", target_id=str(sid))
