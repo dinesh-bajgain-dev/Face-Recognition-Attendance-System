@@ -278,6 +278,7 @@ function navigate(page) {
       loadManualAttendance();
     },
     "t-logs": loadTeacherLogs,
+    "t-reports": loadTeacherReports,
     profile: () => {},
     enroll: () => { _ensureDefaultData(); _populateFacultyDropdowns(); },
   };
@@ -703,12 +704,12 @@ function updateWebcamCount() {
 }
 
 async function enrollStudent() {
-  const sid = document.getElementById("eId").value.trim();
-  const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eFaculty").value.trim();
-  const email = document.getElementById("eEmail").value.trim();
-  const phone = document.getElementById("ePhone").value.trim();
-  const msg = document.getElementById("enrollMsg");
+  const sid        = document.getElementById("eId").value.trim();
+  const name       = document.getElementById("eName").value.trim();
+  const faculty_id = document.getElementById("eFaculty").value.trim();
+  const email      = document.getElementById("eEmail").value.trim();
+  const phone      = document.getElementById("ePhone").value.trim();
+  const msg        = document.getElementById("enrollMsg");
 
   if (!sid || !name) {
     setMsg("enrollMsg", "Student ID and full name are required.", "err");
@@ -730,7 +731,7 @@ async function enrollStudent() {
   const form = new FormData();
   form.append("student_id", sid);
   form.append("full_name", name);
-  if (dept) form.append("department", dept);
+  if (faculty_id) form.append("faculty_id", faculty_id);
   if (email) form.append("email", email);
   if (phone) form.append("phone", phone);
   allFiles.forEach((f) => form.append("images", f));
@@ -1529,11 +1530,11 @@ window.showApp = function () {
 
 // Override the original enrollStudent to support JSON mode (webcam)
 window.enrollStudent = async function () {
-  const sid = document.getElementById("eId").value.trim();
-  const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eFaculty").value.trim();
-  const email = document.getElementById("eEmail").value.trim();
-  const phone = document.getElementById("ePhone").value.trim();
+  const sid        = document.getElementById("eId").value.trim();
+  const name       = document.getElementById("eName").value.trim();
+  const faculty_id = document.getElementById("eFaculty").value.trim();
+  const email      = document.getElementById("eEmail").value.trim();
+  const phone      = document.getElementById("ePhone").value.trim();
 
   if (!sid || !name) {
     setMsg("enrollMsg", "Student ID and full name are required.", "err");
@@ -1580,10 +1581,10 @@ window.enrollStudent = async function () {
         method: "POST",
         json: {
           student_id: sid,
-          full_name: name,
-          department: dept || null,
-          email: email || null,
-          phone: phone || null,
+          full_name:  name,
+          faculty_id: faculty_id ? parseInt(faculty_id) : null,
+          email:      email || null,
+          phone:      phone || null,
           frames,
         },
       });
@@ -1595,7 +1596,7 @@ window.enrollStudent = async function () {
       const form = new FormData();
       form.append("student_id", sid);
       form.append("full_name", name);
-      if (dept) form.append("department", dept);
+      if (faculty_id) form.append("faculty_id", faculty_id);
       if (email) form.append("email", email);
       if (phone) form.append("phone", phone);
       selectedFiles.forEach((f) => form.append("images", f));
@@ -2158,12 +2159,12 @@ function _drawOverlay(ctx, w, h) {
    frames and uploaded files.
 ═══════════════════════════════════════════════════════════════════════ */
 window.enrollStudent = async function () {
-  const sid = document.getElementById("eId").value.trim();
-  const name = document.getElementById("eName").value.trim();
-  const dept = document.getElementById("eFaculty").value.trim();
-  const sem = document.getElementById("eSem")?.value.trim() || "";
-  const email = document.getElementById("eEmail").value.trim();
-  const phone = document.getElementById("ePhone").value.trim();
+  const sid        = document.getElementById("eId").value.trim();
+  const name       = document.getElementById("eName").value.trim();
+  const faculty_id = document.getElementById("eFaculty").value.trim();
+  const sem        = document.getElementById("eSem")?.value.trim() || "";
+  const email      = document.getElementById("eEmail").value.trim();
+  const phone      = document.getElementById("ePhone").value.trim();
 
   if (!sid || !name) {
     setMsg("enrollMsg", "Student ID and Full Name are required.", "err");
@@ -2201,11 +2202,11 @@ window.enrollStudent = async function () {
         method: "POST",
         json: {
           student_id: sid,
-          full_name: name,
-          department: dept || null,
-          email: email || null,
-          phone: phone || null,
-          semester: sem || null,
+          full_name:  name,
+          faculty_id: faculty_id ? parseInt(faculty_id) : null,
+          email:      email || null,
+          phone:      phone || null,
+          semester:   sem   || null,
           frames,
         },
       });
@@ -2214,10 +2215,10 @@ window.enrollStudent = async function () {
       const form = new FormData();
       form.append("student_id", sid);
       form.append("full_name", name);
-      if (dept) form.append("department", dept);
-      if (sem) form.append("semester", sem);
-      if (email) form.append("email", email);
-      if (phone) form.append("phone", phone);
+      if (faculty_id) form.append("faculty_id", faculty_id);
+      if (sem)        form.append("semester",  sem);
+      if (email)      form.append("email",     email);
+      if (phone)      form.append("phone",     phone);
       files.forEach((f) => form.append("images", f));
       response = await api("/enroll", { method: "POST", body: form });
     }
@@ -2588,7 +2589,7 @@ function goToStep3() {
   const fields = [
     ["Student ID", document.getElementById("eId").value.trim()],
     ["Full Name", document.getElementById("eName").value.trim()],
-    ["Department", document.getElementById("eFaculty").value.trim()],
+    ["Faculty", document.getElementById("eFaculty").selectedOptions?.[0]?.text || ""],
     ["Semester", document.getElementById("eSem")?.value.trim() || ""],
     ["Email", document.getElementById("eEmail").value.trim()],
     ["Phone", document.getElementById("ePhone").value.trim()],
@@ -3051,9 +3052,9 @@ async function _populateFacultyDropdowns() {
     sel.value = cur;
   };
 
-  populate("tmFaculty");       // teacher modal — value = faculty id
-  populate("smFaculty");       // subject modal — value = faculty id
-  populate("eFaculty", true);  // enrollment — value = faculty name (stored as text in students)
+  populate("tmFaculty");   // teacher modal — value = faculty id
+  populate("smFaculty");   // subject modal — value = faculty id
+  populate("eFaculty");    // enrollment — value = faculty id (backend resolves code for department)
 }
 
 async function loadSubjectsForModal() {
@@ -3098,11 +3099,11 @@ function switchManageTab(tab, btn) {
   else if (tab === "timetable")  _populateTimetableFacultyFilter();
 }
 
-function loadFaculties() {
-  _ensureDefaultData();
-  const faculties = getFaculties();
+async function loadFaculties() {
   const tbody = document.getElementById("facultyTableBody");
   if (!tbody) return;
+  tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+  const faculties = await _loadFaculties();   // always fetches from API, updates _cachedFaculties
   if (!faculties.length) {
     tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--text3);padding:2rem">No faculties yet.</td></tr>`;
     return;
@@ -3122,7 +3123,8 @@ function loadFaculties() {
 }
 
 function openFacultyModal(id) {
-  const f = id ? getFaculties().find((x) => x.id === id) : null;
+  // Read from _cachedFaculties (populated by _loadFaculties via API)
+  const f = id ? _cachedFaculties.find((x) => x.id === id) : null;
   document.getElementById("facultyModalTitle").textContent = f ? "Edit Faculty" : "Add Faculty";
   document.getElementById("fmId").value = f ? f.id : "";
   document.getElementById("fmName").value = f ? f.name : "";
@@ -3131,28 +3133,43 @@ function openFacultyModal(id) {
   document.getElementById("facultyModal").style.display = "flex";
 }
 
-function saveFaculty() {
-  const id = parseInt(document.getElementById("fmId").value) || null;
+async function saveFaculty() {
+  const id   = parseInt(document.getElementById("fmId").value) || null;
   const name = document.getElementById("fmName").value.trim();
   const code = document.getElementById("fmCode").value.trim();
   if (!name) { setMsg("facultyModalErr", "Faculty name is required.", "err"); return; }
-  const faculties = getFaculties();
-  if (id) {
-    const idx = faculties.findIndex((f) => f.id === id);
-    if (idx !== -1) faculties[idx] = { id, name, code };
-  } else {
-    faculties.push({ id: _nextId(faculties), name, code });
+  try {
+    const r = id
+      ? await api(`/faculties/${id}`, { method: "PUT",  json: { name, code } })
+      : await api("/faculties",        { method: "POST", json: { name, code } });
+    if (!r || !r.ok) {
+      const d = await r?.json().catch(() => ({}));
+      setMsg("facultyModalErr", d.error || "Save failed.", "err");
+      return;
+    }
+  } catch (e) {
+    setMsg("facultyModalErr", "Network error.", "err");
+    return;
   }
-  setFaculties(faculties);
   closeModal("facultyModal");
-  loadFaculties();
+  await loadFaculties();
   toast(id ? "Faculty updated" : "Faculty added");
 }
 
-function deleteFaculty(id) {
-  if (!confirm("Delete this faculty?")) return;
-  setFaculties(getFaculties().filter((f) => f.id !== id));
-  loadFaculties();
+async function deleteFaculty(id) {
+  if (!confirm("Delete this faculty? This will fail if subjects, students, or assignments still reference it.")) return;
+  try {
+    const r = await api(`/faculties/${id}`, { method: "DELETE" });
+    const d = await r?.json().catch(() => ({}));
+    if (!r || !r.ok) {
+      toast(d.error || "Delete failed", "err");
+      return;
+    }
+  } catch (e) {
+    toast("Network error", "err");
+    return;
+  }
+  await loadFaculties();
   toast("Faculty deleted");
 }
 
@@ -3182,7 +3199,7 @@ async function loadSubjects() {
   const semFilter = document.getElementById("subjSemesterFilter")?.value || "";
   const tbody = document.getElementById("subjectTableBody");
   if (!tbody) return;
-  tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+  tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
   try {
     const params = new URLSearchParams();
     if (facFilter) params.set("faculty_id", facFilter);
@@ -3488,41 +3505,186 @@ async function _populateAssignmentDropdowns() {
 
 async function loadSubjectsForAssignment() {
   const faculty_id = document.getElementById("taFaculty")?.value || "";
+  const semester   = document.getElementById("taSemester")?.value || "";
   const sel = document.getElementById("taSubject");
   if (!sel) return;
-  const cur = sel.value;
-  while (sel.options.length > 1) sel.remove(1);
+  sel.innerHTML = '<option value="">— Select Subject —</option>';
+  if (!faculty_id || !semester) {
+    const o = document.createElement("option");
+    o.disabled = true;
+    o.text = faculty_id ? "Select a semester first" : "Select faculty & semester first";
+    sel.add(o);
+    return;
+  }
   try {
-    const params = faculty_id ? `?faculty_id=${encodeURIComponent(faculty_id)}` : "";
+    const params = `?faculty_id=${encodeURIComponent(faculty_id)}&semester=${encodeURIComponent(semester)}`;
     const r = await api(`/subjects${params}`);
     if (r && r.ok) {
       const data = await r.json();
-      (data.subjects || []).forEach((s) => {
+      const subjects = data.subjects || [];
+      if (!subjects.length) {
+        const o = document.createElement("option");
+        o.disabled = true;
+        o.text = "No subjects for this faculty/semester";
+        sel.add(o);
+        return;
+      }
+      subjects.forEach((s) => {
         const o = document.createElement("option");
         o.value = s.id; o.text = `${s.name} (${s.code})`; sel.add(o);
       });
     }
   } catch (_) {}
-  sel.value = cur;
 }
+
+let _editAssignmentCache = {};
 
 function _renderAssignments(assignments) {
   const el = document.getElementById("teacherAssignmentsList");
   if (!el) return;
+  // Cache all assignment data so edit can pre-populate
+  assignments.forEach(a => { _editAssignmentCache[a.id] = a; });
   if (!assignments.length) {
     el.innerHTML = `<p style="font-size:12px;color:var(--text3);margin:0 0 0.5rem">No assignments yet.</p>`;
     return;
   }
   el.innerHTML = assignments.map((a) => `
-    <div style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.6rem;background:var(--bg2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:12px">
-      <span style="flex:1">
-        <strong>${escapeHtml(a.faculty_name || "—")}</strong>
-        · Sem <strong>${a.semester || "?"}</strong>
-        · ${escapeHtml(a.subject_name || "—")} <span style="color:var(--text3)">(${escapeHtml(a.subject_code || "")})</span>
-        · <span style="color:var(--text3)">${escapeHtml(a.time_slot_label || "—")}</span>
+    <div id="arow-${a.id}" style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.75rem;background:var(--bg2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:12px">
+      <span style="flex:1;line-height:1.7">
+        <span style="color:var(--text2);font-size:11px;font-weight:600">${escapeHtml(a.faculty_name || "—")}</span>
+        <span style="color:var(--text3);margin:0 4px">·</span>
+        <span>Sem ${a.semester || "?"}</span>
+        <span style="color:var(--text3);margin:0 4px">·</span>
+        <span>${escapeHtml(a.subject_name || "—")} <span style="color:var(--text3);font-size:11px">${escapeHtml(a.subject_code || "")}</span></span>
+        ${a.day_of_week ? `<span style="color:var(--text3);margin:0 4px">·</span><span style="color:var(--blue);font-size:11px">${escapeHtml(a.day_of_week)}</span>` : ""}
+        ${a.time_slot_label ? `<span style="color:var(--text3);margin:0 4px">·</span><span style="color:var(--text3);font-size:11px">${escapeHtml(a.time_slot_label)}</span>` : ""}
       </span>
+      <button class="btn-secondary btn-sm" onclick="openEditAssignment(${a.id})" style="padding:2px 10px;font-size:11px">Edit</button>
       <button class="btn-danger btn-sm" onclick="removeTeacherAssignment(${a.id})" style="padding:2px 8px;font-size:11px">×</button>
     </div>`).join("");
+}
+
+async function openEditAssignment(aid) {
+  const current = _editAssignmentCache[aid] || {};
+  const row = document.getElementById(`arow-${aid}`);
+  if (!row) return;
+
+  // Show a loading state in the row while data loads
+  row.innerHTML = `<span style="color:var(--text3);font-size:11px;padding:0.25rem 0">Loading…</span>`;
+
+  const [faculties, tsR] = await Promise.all([
+    _loadFaculties(),
+    api("/timeslots")
+  ]);
+  const slots = (tsR && tsR.ok ? (await tsR.json()).time_slots : null) || [];
+
+  // Load subjects for the current faculty+semester so the subject dropdown is pre-filled
+  let subjects = [];
+  if (current.faculty_id && current.semester) {
+    const sR = await api(`/subjects?faculty_id=${current.faculty_id}&semester=${current.semester}`);
+    if (sR && sR.ok) subjects = (await sR.json()).subjects || [];
+  }
+
+  const sel = (opts, val) => opts.map(o =>
+    `<option value="${o.v}"${String(o.v) === String(val) ? " selected" : ""}>${escapeHtml(o.l)}</option>`
+  ).join("");
+
+  const facOpts  = sel(faculties.map(f => ({ v: f.id, l: f.name })), current.faculty_id);
+  const semOpts  = sel([1,2,3,4,5,6,7,8].map(n => ({ v: n, l: `Semester ${n}` })), current.semester);
+  const subOpts  = sel(subjects.map(s => ({ v: s.id, l: `${s.name} (${s.code})` })), current.subject_id);
+  const dayOpts  = sel(["Mon","Tue","Wed","Thu","Fri","Sat"].map(d => ({ v: d, l: d })), current.day_of_week);
+  const slotOpts = sel(slots.map(s => ({ v: s.id, l: s.label + (s.start_time ? ` (${s.start_time})` : "") })), current.time_slot_id);
+
+  row.innerHTML = `
+    <div style="flex:1;width:100%">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.4rem;margin-bottom:0.4rem">
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Faculty</div>
+          <select id="eaFaculty-${aid}" onchange="editLoadSubjects(${aid})" style="font-size:12px;width:100%">
+            <option value="">Select faculty</option>${facOpts}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Semester</div>
+          <select id="eaSemester-${aid}" onchange="editLoadSubjects(${aid})" style="font-size:12px;width:100%">
+            <option value="">Select semester</option>${semOpts}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Subject</div>
+          <select id="eaSubject-${aid}" style="font-size:12px;width:100%">
+            <option value="">Select subject</option>${subOpts}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Day</div>
+          <select id="eaDay-${aid}" style="font-size:12px;width:100%">
+            <option value="">Any day</option>${dayOpts}
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--text3);margin-bottom:2px">Time Slot</div>
+          <select id="eaSlot-${aid}" style="font-size:12px;width:100%">
+            <option value="">Select time slot</option>${slotOpts}
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:0.4rem">
+          <button class="btn-primary btn-sm" onclick="saveAssignmentEdit(${aid})" style="font-size:12px;flex:1">Save</button>
+          <button class="btn-secondary btn-sm" onclick="_reloadAssignments()" style="font-size:12px;flex:1">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function editLoadSubjects(aid) {
+  const fid  = document.getElementById(`eaFaculty-${aid}`)?.value || "";
+  const sem  = document.getElementById(`eaSemester-${aid}`)?.value || "";
+  const sel  = document.getElementById(`eaSubject-${aid}`);
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Select subject</option>';
+  if (!fid || !sem) return;
+  const r = await api(`/subjects?faculty_id=${encodeURIComponent(fid)}&semester=${encodeURIComponent(sem)}`);
+  if (r && r.ok) {
+    const data = await r.json();
+    (data.subjects || []).forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.id; o.text = `${s.name} (${s.code})`;
+      if (String(s.id) === String(prev)) o.selected = true;
+      sel.add(o);
+    });
+  }
+}
+
+async function saveAssignmentEdit(aid) {
+  const faculty_id   = parseInt(document.getElementById(`eaFaculty-${aid}`)?.value)  || null;
+  const semester     = parseInt(document.getElementById(`eaSemester-${aid}`)?.value) || null;
+  const subject_id   = parseInt(document.getElementById(`eaSubject-${aid}`)?.value)  || null;
+  const time_slot_id = parseInt(document.getElementById(`eaSlot-${aid}`)?.value)     || null;
+  const day_of_week  = document.getElementById(`eaDay-${aid}`)?.value || null;
+
+  try {
+    const r = await api(`/teacher-assignments/${aid}`, {
+      method: "PUT",
+      json: { faculty_id, semester, subject_id, time_slot_id, day_of_week }
+    });
+    if (!r || !r.ok) {
+      const err = await r?.json().catch(() => ({}));
+      toast(err.error || "Failed to save", "err"); return;
+    }
+    toast("Assignment updated");
+    _reloadAssignments();
+    loadTeachers();
+  } catch (e) { toast(String(e), "err"); }
+}
+
+async function _reloadAssignments() {
+  if (!_currentEditTeacherId) return;
+  const r = await api(`/teachers/${_currentEditTeacherId}`);
+  if (r && r.ok) {
+    const data = await r.json();
+    _renderAssignments(data.teacher?.assignments || []);
+  }
 }
 
 async function addTeacherAssignment() {
@@ -3730,8 +3892,97 @@ async function loadTeacherDashboard() {
           </div>`).join("")}
       </div>`;
     }
+
+    // My Assigned Classes — uses /teacher/me which already has full assignments list
+    _loadAssignedClasses();
   } catch (e) {
     console.error("loadTeacherDashboard:", e);
+  }
+}
+
+async function _loadAssignedClasses() {
+  const cardEl  = document.getElementById("tAssignedCards");
+  const tableEl = document.getElementById("tAssignedTable");
+  if (!cardEl) return;
+  cardEl.innerHTML = `<div class="text-muted text-center p-2rem text-13px">Loading…</div>`;
+
+  try {
+    const r = await api("/teacher/me");
+    if (!r?.ok) return;
+    const data = await r.json();
+    const assignments = data.teacher?.assignments || data.assignments || [];
+
+    if (!assignments.length) {
+      cardEl.innerHTML = `<div class="teacher-no-class">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".4"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        <div>No classes assigned yet</div>
+      </div>`;
+      if (tableEl) tableEl.innerHTML = "";
+      return;
+    }
+
+    // Card view
+    cardEl.innerHTML = assignments.map(a => `
+      <div class="teacher-class-card">
+        <div class="tcc-header">
+          <div>
+            <div class="tcc-subject">${escapeHtml(a.subject_name || "—")}</div>
+            <div class="tcc-meta">${escapeHtml(a.faculty_code || "")}  ·  Semester ${a.semester}</div>
+          </div>
+          ${a.student_count != null
+            ? `<span class="pill" style="background:var(--blue-bg,#eef4ff);color:var(--blue)">${a.student_count} students</span>`
+            : ""}
+        </div>
+        ${a.day_of_week || a.time_slot_label ? `<div class="tcc-time">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          ${a.day_of_week ? escapeHtml(a.day_of_week) + " · " : ""}${escapeHtml(a.time_slot_label || "")}
+          ${a.start_time ? `· ${a.start_time.slice(0,5)}–${(a.end_time||"").slice(0,5)}` : ""}
+        </div>` : ""}
+        <div style="font-size:11px;color:var(--text3);margin-top:0.25rem">${escapeHtml(a.faculty_name || "")}</div>
+      </div>`).join("");
+
+    // Timetable view (Mon–Sat grid)
+    if (tableEl) {
+      const days = ["Mon","Tue","Wed","Thu","Fri","Sat"];
+      const grouped = {};
+      days.forEach(d => grouped[d] = []);
+      assignments.forEach(a => {
+        if (a.day_of_week && grouped[a.day_of_week]) grouped[a.day_of_week].push(a);
+      });
+      const maxRows = Math.max(1, ...days.map(d => grouped[d].length));
+      tableEl.innerHTML = `<table class="data-table" style="min-width:600px">
+        <thead><tr>${days.map(d => `<th style="text-align:center;min-width:120px">${d}</th>`).join("")}</tr></thead>
+        <tbody>
+          ${Array.from({length: maxRows}, (_, i) => `
+            <tr>${days.map(d => {
+              const a = grouped[d][i];
+              return a ? `<td style="vertical-align:top;padding:0.5rem 0.75rem">
+                <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name||"—")}</div>
+                <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code||"")} Sem ${a.semester}</div>
+                <div style="font-size:11px;color:var(--blue)">${a.time_slot_label||""}</div>
+                ${a.student_count != null ? `<div style="font-size:11px;color:var(--text3)">${a.student_count} students</div>` : ""}
+              </td>` : `<td></td>`;
+            }).join("")}</tr>`).join("")}
+        </tbody>
+      </table>`;
+    }
+  } catch (e) {
+    console.error("_loadAssignedClasses:", e);
+    if (cardEl) cardEl.innerHTML = `<div class="text-muted text-13px p-1rem">Failed to load assignments</div>`;
+  }
+}
+
+function switchAssignedView(view, btn) {
+  const cardEl  = document.getElementById("tAssignedCards");
+  const tableEl = document.getElementById("tAssignedTable");
+  document.querySelectorAll("#acViewCard, #acViewTable").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  if (view === "card") {
+    cardEl?.classList.remove("hidden");
+    tableEl?.classList.add("hidden");
+  } else {
+    cardEl?.classList.add("hidden");
+    tableEl?.classList.remove("hidden");
   }
 }
 
@@ -4554,3 +4805,201 @@ async function submitPhotoAttendance() {
 }
 
 /* day_of_week support is built into addTeacherAssignment above */
+
+/* ── Teacher Reports ──────────────────────────────────────────────────── */
+
+let _rptData = [];
+
+async function loadTeacherReports() {
+  // Set default date range if empty
+  const fromEl = document.getElementById("rptFrom");
+  const toEl   = document.getElementById("rptTo");
+  if (fromEl && !fromEl.value) {
+    const d = new Date(); d.setDate(d.getDate() - 30);
+    fromEl.value = d.toISOString().slice(0, 10);
+  }
+  if (toEl && !toEl.value) toEl.value = new Date().toISOString().slice(0, 10);
+
+  const params = new URLSearchParams({
+    from:       fromEl?.value || "",
+    to:         toEl?.value   || "",
+    faculty_id: document.getElementById("rptFaculty")?.value  || "",
+    semester:   document.getElementById("rptSemester")?.value || "",
+    subject_id: document.getElementById("rptSubject")?.value  || "",
+  });
+
+  const body = document.getElementById("rptBody");
+  if (body) body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>`;
+
+  try {
+    const r = await api(`/reports/teacher-performance?${params}`);
+    if (!r || !r.ok) { toast("Failed to load report", "err"); return; }
+    const data = await r.json();
+    _rptData = data.students || [];
+
+    // Populate Faculty filter (from teacher's assigned faculties only)
+    const facSel = document.getElementById("rptFaculty");
+    if (facSel && data.faculties?.length) {
+      const cur = facSel.value;
+      facSel.innerHTML = '<option value="">All Faculties</option>';
+      data.faculties.forEach(f => {
+        const o = document.createElement("option");
+        o.value = f.id; o.text = `${f.code} — ${f.name}`;
+        if (String(f.id) === String(cur)) o.selected = true;
+        facSel.add(o);
+      });
+    }
+
+    // Populate Subject filter (from teacher's assigned subjects only)
+    const subSel = document.getElementById("rptSubject");
+    if (subSel && data.subjects?.length) {
+      const cur = subSel.value;
+      subSel.innerHTML = '<option value="">All Subjects</option>';
+      data.subjects.forEach(s => {
+        const o = document.createElement("option");
+        o.value = s.id; o.text = `${s.name} (${s.code})`;
+        if (String(s.id) === String(cur)) o.selected = true;
+        subSel.add(o);
+      });
+    }
+
+    _renderRptTable(_rptData);
+    _renderRptMetrics(_rptData);
+    _renderRptRiskSummary(_rptData);
+  } catch (e) {
+    console.error("loadTeacherReports:", e);
+    toast("Report error", "err");
+  }
+}
+
+function _riskLabel(pct) {
+  if (pct === null || pct === undefined) return { label: "No Data", cls: "risk-nodata" };
+  if (pct < 60)  return { label: "Critical",  cls: "risk-critical" };
+  if (pct < 75)  return { label: "At Risk",   cls: "risk-atrisk"  };
+  return               { label: "Good",      cls: "risk-good"    };
+}
+
+function _renderRptTable(rows) {
+  const body = document.getElementById("rptBody");
+  if (!body) return;
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:2rem">No students found for the selected filters.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(s => {
+    const pct  = s.pct !== null ? parseFloat(s.pct) : null;
+    const risk = _riskLabel(pct);
+    const barW = pct !== null ? Math.round(pct) : 0;
+    const barColor = pct === null ? "var(--text3)" : pct < 60 ? "var(--red)" : pct < 75 ? "var(--amber)" : "var(--green)";
+    return `<tr>
+      <td style="font-weight:500">${escapeHtml(s.full_name)}<br><span style="font-size:11px;color:var(--text3)">${escapeHtml(s.student_id)}</span></td>
+      <td>${escapeHtml(s.department)}<br><span style="font-size:11px;color:var(--text3)">Sem ${s.semester}</span></td>
+      <td style="color:var(--green);font-weight:600">${s.present}</td>
+      <td style="color:var(--red)">${s.absent}</td>
+      <td>${s.total}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          <div style="flex:1;height:6px;background:var(--bg3);border-radius:3px;min-width:60px">
+            <div style="height:100%;width:${barW}%;background:${barColor};border-radius:3px;transition:width 0.3s"></div>
+          </div>
+          <span style="font-size:12px;font-weight:600;color:${barColor};min-width:36px">${pct !== null ? pct + "%" : "—"}</span>
+        </div>
+      </td>
+      <td><span class="risk-badge ${risk.cls}">${risk.label}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+function _renderRptMetrics(rows) {
+  const el = document.getElementById("rptMetrics");
+  if (!el) return;
+  const total  = rows.length;
+  const withAtt= rows.filter(r => r.total > 0);
+  const avgPct = withAtt.length
+    ? Math.round(withAtt.reduce((s, r) => s + parseFloat(r.pct || 0), 0) / withAtt.length)
+    : 0;
+  const critical = rows.filter(r => r.pct !== null && parseFloat(r.pct) < 60).length;
+  const atRisk   = rows.filter(r => r.pct !== null && parseFloat(r.pct) >= 60 && parseFloat(r.pct) < 75).length;
+  const good     = rows.filter(r => r.pct !== null && parseFloat(r.pct) >= 75).length;
+
+  el.innerHTML = `
+    <div class="metric-card">
+      <div class="metric-label">Total Students</div>
+      <div class="metric-val">${total}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Avg Attendance</div>
+      <div class="metric-val" style="color:var(--blue)">${avgPct}%</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Critical (&lt;60%)</div>
+      <div class="metric-val" style="color:var(--red)">${critical}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">At Risk (&lt;75%)</div>
+      <div class="metric-val" style="color:var(--amber)">${atRisk}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Good (≥75%)</div>
+      <div class="metric-val" style="color:var(--green)">${good}</div>
+    </div>`;
+}
+
+function _renderRptRiskSummary(rows) {
+  const el = document.getElementById("rptRiskSummary");
+  if (!el) return;
+  const critical = rows.filter(r => r.pct !== null && parseFloat(r.pct) < 60);
+  const atRisk   = rows.filter(r => r.pct !== null && parseFloat(r.pct) >= 60 && parseFloat(r.pct) < 75);
+  if (!critical.length && !atRisk.length) { el.innerHTML = ""; return; }
+
+  const makeCard = (students, title, cls) => students.length ? `
+    <div class="risk-card ${cls}">
+      <div class="risk-card-title">${title} (${students.length})</div>
+      <div class="risk-card-list">
+        ${students.slice(0, 5).map(s =>
+          `<div class="risk-card-row">
+            <span>${escapeHtml(s.full_name)}</span>
+            <span style="font-weight:600">${s.pct !== null ? s.pct + "%" : "—"}</span>
+          </div>`).join("")}
+        ${students.length > 5 ? `<div style="font-size:11px;color:var(--text3);padding-top:0.25rem">+${students.length - 5} more…</div>` : ""}
+      </div>
+    </div>` : "";
+
+  el.innerHTML =
+    makeCard(critical, "⚠ Critical — Below 60%", "risk-card-critical") +
+    makeCard(atRisk,   "At Risk — Below 75%",    "risk-card-atrisk");
+}
+
+function _filterRptTable() {
+  const q = (
+    document.getElementById("rptSearch")?.value ||
+    document.getElementById("rptStudentFilter")?.value || ""
+  ).toLowerCase();
+  const filtered = q
+    ? _rptData.filter(r =>
+        (r.full_name || "").toLowerCase().includes(q) ||
+        (r.student_id || "").toLowerCase().includes(q) ||
+        (r.department || "").toLowerCase().includes(q))
+    : _rptData;
+  _renderRptTable(filtered);
+}
+
+function exportReportCSV() {
+  if (!_rptData.length) { toast("No data to export", "err"); return; }
+  const rows = [
+    ["Student ID", "Name", "Department", "Semester", "Present", "Absent", "Total", "Attendance %", "Status"],
+    ..._rptData.map(s => {
+      const pct  = s.pct !== null ? s.pct : "";
+      const risk = _riskLabel(s.pct !== null ? parseFloat(s.pct) : null).label;
+      return [s.student_id, s.full_name, s.department, s.semester,
+              s.present, s.absent, s.total, pct, risk];
+    }),
+  ];
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `attendance_report_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast("CSV downloaded");
+}

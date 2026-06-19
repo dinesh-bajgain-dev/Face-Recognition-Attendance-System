@@ -109,6 +109,7 @@ def init_db():
             ALTER TABLE students ADD COLUMN IF NOT EXISTS face_image   BYTEA;
             ALTER TABLE students ADD COLUMN IF NOT EXISTS embedding    vector(512);
             ALTER TABLE students ADD COLUMN IF NOT EXISTS sample_count INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE students ADD COLUMN IF NOT EXISTS faculty_id   INTEGER REFERENCES faculties(id);
 
             CREATE TABLE IF NOT EXISTS attendance (
                 id         SERIAL PRIMARY KEY,
@@ -795,13 +796,24 @@ def require_auth(fn):
             user = qone(conn,
                 "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
             if not user:
+                # Authenticated directly from teachers table — id is already teachers.id
                 user = qone(conn,
                     "SELECT id, full_name AS username, 'teacher' AS role FROM teachers "
                     "WHERE password_hash=%s AND status='active'",(token,))
+            elif user.get("role") == "teacher":
+                # Authenticated from users table — resolve the real teachers.id
+                t = qone(conn,
+                    "SELECT id FROM teachers WHERE password_hash=%s AND status='active'", (token,))
+                if t:
+                    user["_tid"] = t["id"]
         if not user: return jsonify({"error":"Unauthorized"}), 401
         g.user = user
         return fn(*args, **kwargs)
     return wrapper
+
+def _tid():
+    """Return teachers.id for the currently authenticated teacher."""
+    return g.user.get("_tid", g.user["id"])
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  ROUTES
@@ -1257,6 +1269,7 @@ def enroll():
         data       = request.json or {}
         student_id = data.get("student_id","").strip()
         full_name  = data.get("full_name","").strip()
+        faculty_id = data.get("faculty_id") or None
         department = data.get("department") or None
         email      = data.get("email")      or None
         phone      = data.get("phone")      or None
@@ -1265,12 +1278,20 @@ def enroll():
     else:
         student_id = request.form.get("student_id","").strip()
         full_name  = request.form.get("full_name","").strip()
+        faculty_id = request.form.get("faculty_id") or None
         department = request.form.get("department") or None
         email      = request.form.get("email")      or None
         phone      = request.form.get("phone")      or None
         semester   = request.form.get("semester")   or None
         frames_b64 = [base64.b64encode(f.read()).decode()
                       for f in request.files.getlist("images")]
+
+    # Resolve department from faculty_id if provided (ensures department = faculty.code)
+    if faculty_id:
+        try:
+            faculty_id = int(faculty_id)
+        except (ValueError, TypeError):
+            faculty_id = None
 
     if not student_id or not full_name:
         return jsonify({"error":"student_id and full_name required"}), 400
@@ -1294,21 +1315,27 @@ def enroll():
         return jsonify({"error":"No faces detected in any image"}), 422
 
     with get_db() as conn:
+        # Resolve department code from faculty_id if provided
+        if faculty_id:
+            fac = qone(conn, "SELECT code FROM faculties WHERE id=%s", (faculty_id,))
+            if fac:
+                department = fac["code"]
         qexec(conn, """
             INSERT INTO students
-                (student_id, full_name, department, email, phone, semester,
+                (student_id, full_name, department, faculty_id, email, phone, semester,
                  embedding, face_image, sample_count)
-            VALUES (%s,%s,%s,%s,%s,%s, %s::vector, %s, %s)
+            VALUES (%s,%s,%s,%s,%s,%s,%s, %s::vector, %s, %s)
             ON CONFLICT (student_id) DO UPDATE SET
                 full_name    = EXCLUDED.full_name,
                 department   = EXCLUDED.department,
+                faculty_id   = EXCLUDED.faculty_id,
                 email        = EXCLUDED.email,
                 phone        = EXCLUDED.phone,
                 semester     = EXCLUDED.semester,
                 embedding    = EXCLUDED.embedding,
                 face_image   = EXCLUDED.face_image,
                 sample_count = EXCLUDED.sample_count
-        """, (student_id, full_name, department, email, phone, semester,
+        """, (student_id, full_name, department, faculty_id, email, phone, semester,
               mean_emb.tolist(), thumbnail, len(frames_b64)))
 
     return jsonify({
@@ -1549,9 +1576,13 @@ def get_logs():
     limit = int(request.args.get("limit", 50))
     with get_db() as conn:
         rows = qall(conn, """
-            SELECT student_id,full_name,confidence,recognized,logged_at::text
-            FROM recognition_logs ORDER BY logged_at DESC LIMIT %s
-        """, (limit,))
+            SELECT DISTINCT ON (student_id, logged_at::date)
+                   student_id, full_name, confidence, recognized, logged_at::text
+            FROM recognition_logs
+            WHERE student_id IS NOT NULL
+            ORDER BY student_id, logged_at::date, logged_at ASC
+        """)
+    rows = sorted(rows, key=lambda r: r["logged_at"], reverse=True)[:limit]
     return jsonify({"logs": rows})
 
 # ── Email ─────────────────────────────────────────────────────────────────
@@ -1661,8 +1692,25 @@ def update_faculty(fid):
 @app.route("/api/faculties/<int:fid>", methods=["DELETE"])
 @require_auth
 def delete_faculty_db(fid):
-    with get_db() as conn:
-        row = qone(conn, "DELETE FROM faculties WHERE id=%s RETURNING id", (fid,))
+    import psycopg2
+    try:
+        with get_db() as conn:
+            # Check what's still referencing this faculty before attempting delete
+            refs = {}
+            refs["subjects"]     = (qone(conn, "SELECT COUNT(*) AS n FROM subjects WHERE faculty_id=%s", (fid,)) or {}).get("n", 0)
+            refs["assignments"]  = (qone(conn, "SELECT COUNT(*) AS n FROM teacher_assignments WHERE faculty_id=%s", (fid,)) or {}).get("n", 0)
+            refs["students"]     = (qone(conn, "SELECT COUNT(*) AS n FROM students WHERE faculty_id=%s", (fid,)) or {}).get("n", 0)
+            refs["schedules"]    = (qone(conn, "SELECT COUNT(*) AS n FROM class_schedules WHERE faculty_id=%s", (fid,)) or {}).get("n", 0)
+            refs["sessions"]     = (qone(conn, "SELECT COUNT(*) AS n FROM attendance_sessions WHERE faculty_id=%s", (fid,)) or {}).get("n", 0)
+
+            blocking = {k: v for k, v in refs.items() if v > 0}
+            if blocking:
+                parts = [f"{v} {k}" for k, v in blocking.items()]
+                return jsonify({"error": f"Cannot delete: faculty is used by {', '.join(parts)}. Remove them first."}), 409
+
+            row = qone(conn, "DELETE FROM faculties WHERE id=%s RETURNING id", (fid,))
+    except psycopg2.errors.ForeignKeyViolation as e:
+        return jsonify({"error": "Cannot delete: faculty is still referenced by other records."}), 409
     if not row: return jsonify({"error": "Faculty not found"}), 404
     _log_activity(g.user["username"], "delete_faculty", "faculty", target_id=str(fid))
     return jsonify({"deleted": True})
@@ -1913,6 +1961,44 @@ def add_teacher_assignment(tid):
     _log_activity(g.user["username"], "add_assignment", "teacher", target_id=str(tid))
     return jsonify({"assignment": row}), 201
 
+@app.route("/api/teacher-assignments/<int:aid>", methods=["PUT"])
+@require_auth
+def update_teacher_assignment(aid):
+    d            = request.json or {}
+    faculty_id   = d.get("faculty_id")   or None
+    semester     = d.get("semester")     or None
+    subject_id   = d.get("subject_id")   or None
+    time_slot_id = d.get("time_slot_id") or None
+    day_of_week  = d.get("day_of_week")  or None
+
+    with get_db() as conn:
+        existing = qone(conn, "SELECT id, teacher_id FROM teacher_assignments WHERE id=%s", (aid,))
+        if not existing: return jsonify({"error": "Assignment not found"}), 404
+
+        if faculty_id and semester and day_of_week and time_slot_id:
+            conflict = qone(conn, """
+                SELECT ta.id, t.full_name AS teacher_name
+                FROM teacher_assignments ta
+                JOIN teachers t ON t.id = ta.teacher_id
+                WHERE ta.faculty_id=%s AND ta.semester=%s
+                  AND ta.day_of_week=%s AND ta.time_slot_id=%s
+                  AND ta.id != %s
+            """, (faculty_id, semester, day_of_week, time_slot_id, aid))
+            if conflict:
+                return jsonify({
+                    "error": f"Timetable collision — {conflict['teacher_name']} already has this slot"
+                }), 409
+
+        row = qone(conn, """
+            UPDATE teacher_assignments
+            SET faculty_id=%s, semester=%s, subject_id=%s, time_slot_id=%s, day_of_week=%s
+            WHERE id=%s
+            RETURNING id, teacher_id, faculty_id, semester, subject_id, time_slot_id, day_of_week
+        """, (faculty_id, semester, subject_id, time_slot_id, day_of_week, aid))
+
+    _log_activity(g.user["username"], "update_assignment", "teacher", target_id=str(aid))
+    return jsonify({"assignment": row})
+
 @app.route("/api/teacher-assignments/<int:aid>", methods=["DELETE"])
 @require_auth
 def delete_teacher_assignment(aid):
@@ -2110,7 +2196,7 @@ def delete_timetable_entry(entry_id):
 def teacher_me():
     if g.user["role"] != "teacher":
         return jsonify({"error": "Teacher access only"}), 403
-    tid = g.user["id"]
+    tid = _tid()
     with get_db() as conn:
         t = qone(conn,
             "SELECT id, teacher_id, full_name, email, phone, status FROM teachers WHERE id=%s", (tid,))
@@ -2119,12 +2205,20 @@ def teacher_me():
             SELECT ta.id, ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
                    ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
                    ta.time_slot_id, ts.label AS time_slot_label,
-                   ts.start_time::text, ts.end_time::text, ta.day_of_week
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week,
+                   (SELECT COUNT(*) FROM students st
+                    WHERE st.faculty_id = ta.faculty_id
+                      AND st.semester::text = ta.semester::text
+                      AND st.status = 'active') AS student_count
             FROM teacher_assignments ta
             LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
             LEFT JOIN subjects   s  ON s.id  = ta.subject_id
             LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
-            WHERE ta.teacher_id = %s ORDER BY ta.day_of_week, ts.start_time
+            WHERE ta.teacher_id = %s
+            ORDER BY CASE ta.day_of_week
+                WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
+                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                ELSE 6 END, ts.start_time
         """, (tid,))
     t["assignments"] = assignments
     return jsonify({"teacher": t})
@@ -2136,14 +2230,18 @@ def teacher_today():
         return jsonify({"error": "Teacher access only"}), 403
     today_name = datetime.now().strftime("%a")   # Mon, Tue …
     today_str  = date.today().isoformat()
-    tid        = g.user["id"]
+    tid        = _tid()
     with get_db() as conn:
         classes = qall(conn, """
             SELECT ta.id AS assignment_id,
                    ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
                    ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
                    ta.time_slot_id, ts.label AS time_slot_label,
-                   ts.start_time::text, ts.end_time::text, ta.day_of_week
+                   ts.start_time::text, ts.end_time::text, ta.day_of_week,
+                   (SELECT COUNT(*) FROM students st
+                    WHERE st.faculty_id = ta.faculty_id
+                      AND st.semester::text = ta.semester::text
+                      AND st.status = 'active') AS student_count
             FROM teacher_assignments ta
             LEFT JOIN faculties  f  ON f.id  = ta.faculty_id
             LEFT JOIN subjects   s  ON s.id  = ta.subject_id
@@ -2168,7 +2266,7 @@ def teacher_today():
 def teacher_schedule():
     if g.user["role"] != "teacher":
         return jsonify({"error": "Teacher access only"}), 403
-    tid = g.user["id"]
+    tid = _tid()
     with get_db() as conn:
         assignments = qall(conn, """
             SELECT ta.id AS assignment_id,
@@ -2200,7 +2298,7 @@ def teacher_schedule():
 def teacher_stats():
     if g.user["role"] != "teacher":
         return jsonify({"error": "Teacher access only"}), 403
-    tid = g.user["id"]
+    tid = _tid()
     with get_db() as conn:
         total_sessions = qone(conn,
             "SELECT COUNT(*) AS n FROM attendance_sessions WHERE teacher_id=%s", (tid,))
@@ -2227,7 +2325,7 @@ def create_attendance_session():
     if g.user["role"] not in ("teacher", "admin"):
         return jsonify({"error": "Access denied"}), 403
     d          = request.json or {}
-    teacher_id = g.user["id"] if g.user["role"] == "teacher" else (d.get("teacher_id") or g.user["id"])
+    teacher_id = _tid() if g.user["role"] == "teacher" else (d.get("teacher_id") or g.user["id"])
     faculty_id = d.get("faculty_id")
     semester   = d.get("semester")
     subject_id = d.get("subject_id")
@@ -2258,7 +2356,7 @@ def create_attendance_session():
 def list_attendance_sessions():
     where, vals = [], []
     if g.user["role"] == "teacher":
-        where.append("s.teacher_id=%s"); vals.append(g.user["id"])
+        where.append("s.teacher_id=%s"); vals.append(_tid())
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     with get_db() as conn:
         rows = qall(conn, f"""
@@ -2305,7 +2403,7 @@ def get_attendance_session(session_id):
             FROM students st
             LEFT JOIN attendance a ON a.student_id=st.student_id
                 AND a.date=%s AND a.session_id=%s
-            WHERE st.department=(SELECT name FROM faculties WHERE id=%s)
+            WHERE st.faculty_id=%s
               AND st.status='active'
               AND (%s::text IS NULL OR st.semester=%s::text)
             ORDER BY st.full_name
@@ -2444,10 +2542,9 @@ def my_attendance_report():
     where  = []
 
     if g.user["role"] == "teacher":
-        tid = g.user["id"]
-        where.append("""s.department IN (
-            SELECT f.name FROM teacher_assignments ta
-            JOIN faculties f ON f.id=ta.faculty_id
+        tid = _tid()
+        where.append("""s.faculty_id IN (
+            SELECT DISTINCT ta.faculty_id FROM teacher_assignments ta
             WHERE ta.teacher_id=%s
         )""")
         params.append(tid)
@@ -2471,7 +2568,7 @@ def session_summary_report():
     """Per-session attendance summary, scoped to teacher."""
     where, vals = [], []
     if g.user["role"] == "teacher":
-        where.append("s.teacher_id=%s"); vals.append(g.user["id"])
+        where.append("s.teacher_id=%s"); vals.append(_tid())
     from_d = request.args.get("from", "")
     to_d   = request.args.get("to", "")
     if from_d: where.append("s.session_date>=%s"); vals.append(from_d)
@@ -2496,6 +2593,102 @@ def session_summary_report():
             ORDER BY s.session_date DESC LIMIT 100
         """, vals)
     return jsonify({"sessions": rows})
+
+@app.route("/api/reports/teacher-performance")
+@require_auth
+def teacher_performance_report():
+    """Per-student attendance with risk detection, scoped to teacher's assigned faculty."""
+    if g.user["role"] not in ("teacher", "admin"):
+        return jsonify({"error": "Access denied"}), 403
+
+    from_d     = request.args.get("from",
+                    (date.today() - __import__("datetime").timedelta(days=30)).isoformat())
+    to_d       = request.args.get("to",   date.today().isoformat())
+    subject_id = request.args.get("subject_id", "")
+    semester   = request.args.get("semester", "")
+    faculty_id = request.args.get("faculty_id", "")
+
+    student_where = ["s.status='active'"]
+    att_where     = ["a.date BETWEEN %s AND %s"]
+    # Keep JOIN-clause params and WHERE-clause params separate so they bind
+    # in the correct positional order when the query is assembled.
+    att_params = [from_d, to_d]   # extra params for att_where (JOIN clause)
+    sw_params  = []                # params for student_where (WHERE clause)
+
+    if g.user["role"] == "teacher":
+        tid = _tid()
+        if faculty_id:
+            student_where.append("s.faculty_id=%s")
+            sw_params.append(int(faculty_id))
+        else:
+            student_where.append("""s.faculty_id IN (
+                SELECT DISTINCT ta.faculty_id FROM teacher_assignments ta
+                WHERE ta.teacher_id=%s
+            )""")
+            sw_params.append(tid)
+    else:
+        if faculty_id:
+            student_where.append("s.faculty_id=%s")
+            sw_params.append(int(faculty_id))
+
+    if semester:
+        student_where.append("s.semester::text=%s")
+        sw_params.append(str(semester))
+    if subject_id:
+        att_where.append("a.subject_id=%s")
+        att_params.append(int(subject_id))
+
+    # Final params must follow SQL order: JOIN conditions first, WHERE conditions second
+    params = att_params + sw_params
+
+    sw = " AND ".join(student_where)
+    aw = " AND ".join(att_where)
+
+    with get_db() as conn:
+        rows = qall(conn, f"""
+            SELECT s.student_id, s.full_name, s.department, s.semester,
+                   COALESCE(SUM(CASE WHEN a.status='Present' THEN 1 ELSE 0 END), 0) AS present,
+                   COALESCE(SUM(CASE WHEN a.status='Absent'  THEN 1 ELSE 0 END), 0) AS absent,
+                   COALESCE(COUNT(a.id), 0) AS total,
+                   CASE WHEN COUNT(a.id) = 0 THEN NULL
+                        ELSE ROUND(100.0 * SUM(CASE WHEN a.status='Present' THEN 1 ELSE 0 END)
+                             / COUNT(a.id), 1)
+                   END AS pct,
+                   MAX(CASE WHEN a.status='Absent' THEN a.date::text END) AS last_absent
+            FROM students s
+            LEFT JOIN attendance a
+                ON a.student_id = s.student_id AND {aw}
+            WHERE {sw}
+            GROUP BY s.student_id, s.full_name, s.department, s.semester
+            ORDER BY pct ASC NULLS LAST, s.full_name
+        """, params)
+
+        # Faculties and subjects for this teacher (for filter dropdowns)
+        faculties = []
+        subjects  = []
+        if g.user["role"] == "teacher":
+            faculties = qall(conn, """
+                SELECT DISTINCT f.id, f.name, f.code
+                FROM teacher_assignments ta
+                JOIN faculties f ON f.id = ta.faculty_id
+                WHERE ta.teacher_id = %s
+                ORDER BY f.name
+            """, (_tid(),))
+            subjects = qall(conn, """
+                SELECT DISTINCT sb.id, sb.name, sb.code
+                FROM teacher_assignments ta
+                JOIN subjects sb ON sb.id = ta.subject_id
+                WHERE ta.teacher_id = %s
+                ORDER BY sb.name
+            """, (_tid(),))
+
+    return jsonify({
+        "students":  rows,
+        "from":      from_d,
+        "to":        to_d,
+        "faculties": faculties,
+        "subjects":  subjects,
+    })
 
 # ── Boot ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
