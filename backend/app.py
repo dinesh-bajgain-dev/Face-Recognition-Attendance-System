@@ -1,14 +1,15 @@
-import os, cv2, json, base64, hashlib, threading, queue, time, re
+import os, cv2, json, base64, hashlib, hmac, secrets, threading, queue, time, re, csv, io
 import urllib.request, urllib.error
 import numpy as np
 from contextlib import contextmanager
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from flask import Flask, request, jsonify, Response, g
 from flask_cors import CORS
 from dotenv import load_dotenv
 import psycopg2, psycopg2.extras
+from psycopg2.pool import ThreadedConnectionPool
 from pgvector.psycopg2 import register_vector
 
 load_dotenv()
@@ -19,6 +20,7 @@ CORS(app, supports_credentials=True)
 PG_DSN    = os.getenv("DATABASE_URL", "postgresql://frs_user:frs123@localhost:5432/frs")
 THRESHOLD = float(os.getenv("RECOGNITION_THRESHOLD", "0.80"))
 SKIP      = int(os.getenv("FRAME_SKIP", "2"))
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))  # QR HMAC signing key
 
 # Email config — uses BREVO API (more reliable than raw SMTP)
 # Sign up free at brevo.com, verify a sender address, generate an API key.
@@ -34,9 +36,21 @@ BREVO_HEADERS = {
 }
 
 # ── DB ────────────────────────────────────────────────────────────────────
+_pool: ThreadedConnectionPool | None = None
+_pool_lock = threading.Lock()
+
+def _get_pool() -> ThreadedConnectionPool:
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = ThreadedConnectionPool(minconn=2, maxconn=20, dsn=PG_DSN)
+    return _pool
+
 @contextmanager
 def get_db(register_pgvector=True):
-    conn = psycopg2.connect(PG_DSN)
+    pool = _get_pool()
+    conn = pool.getconn()
     if register_pgvector:
         register_vector(conn)
     try:
@@ -46,7 +60,7 @@ def get_db(register_pgvector=True):
         conn.rollback()
         raise
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 def qone(conn, sql, p=()):
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as c:
@@ -117,11 +131,13 @@ def init_db():
                 date       DATE NOT NULL DEFAULT CURRENT_DATE,
                 time       TIME NOT NULL DEFAULT CURRENT_TIME,
                 status     TEXT NOT NULL DEFAULT 'Present',
-                note       TEXT,
-                UNIQUE (student_id, date)
+                note       TEXT
             );
 
-            ALTER TABLE attendance ADD COLUMN IF NOT EXISTS note TEXT;
+            ALTER TABLE attendance ADD COLUMN IF NOT EXISTS note       TEXT;
+            ALTER TABLE attendance ADD COLUMN IF NOT EXISTS subject_id INTEGER REFERENCES subjects(id);
+            ALTER TABLE attendance ADD COLUMN IF NOT EXISTS teacher_id INTEGER REFERENCES teachers(id);
+            ALTER TABLE attendance ADD COLUMN IF NOT EXISTS session_id INTEGER;
 
             CREATE TABLE IF NOT EXISTS recognition_logs (
                 id         SERIAL PRIMARY KEY,
@@ -164,11 +180,81 @@ def init_db():
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
 
+            -- Settings persisted to DB (survives restarts)
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- Academic calendar
+            CREATE TABLE IF NOT EXISTS academic_years (
+                id         SERIAL PRIMARY KEY,
+                name       TEXT NOT NULL,
+                start_date DATE NOT NULL,
+                end_date   DATE NOT NULL,
+                is_current BOOLEAN NOT NULL DEFAULT false
+            );
+
+            CREATE TABLE IF NOT EXISTS holidays (
+                id               SERIAL PRIMARY KEY,
+                date             DATE NOT NULL,
+                name             TEXT NOT NULL,
+                academic_year_id INTEGER REFERENCES academic_years(id) ON DELETE CASCADE,
+                UNIQUE (date, academic_year_id)
+            );
+
+            -- Attendance audit trail (before/after for every manual change)
+            CREATE TABLE IF NOT EXISTS attendance_history (
+                id            SERIAL PRIMARY KEY,
+                attendance_id INTEGER,
+                student_id    TEXT,
+                subject_id    INTEGER REFERENCES subjects(id),
+                date          DATE,
+                old_status    TEXT,
+                new_status    TEXT,
+                changed_by    TEXT NOT NULL,
+                reason        TEXT,
+                changed_at    TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- Attendance correction requests from students
+            CREATE TABLE IF NOT EXISTS correction_requests (
+                id           SERIAL PRIMARY KEY,
+                student_id   TEXT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+                subject_id   INTEGER REFERENCES subjects(id),
+                date         DATE NOT NULL,
+                reason       TEXT NOT NULL,
+                status       TEXT NOT NULL DEFAULT 'pending',
+                reviewed_by  INTEGER REFERENCES teachers(id),
+                review_note  TEXT,
+                reviewed_at  TIMESTAMPTZ,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            );
+
+            -- Automated attendance warning log
+            CREATE TABLE IF NOT EXISTS attendance_warnings (
+                id         SERIAL PRIMARY KEY,
+                student_id TEXT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+                subject_id INTEGER REFERENCES subjects(id),
+                percentage NUMERIC(5,2) NOT NULL,
+                threshold  NUMERIC(5,2) NOT NULL DEFAULT 75.00,
+                sent_via   TEXT NOT NULL DEFAULT 'email',
+                sent_at    TIMESTAMPTZ DEFAULT NOW()
+            );
+
             INSERT INTO users (username, password_hash, role)
             VALUES ('admin',
                     '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
                     'admin')
             ON CONFLICT DO NOTHING;
+
+            INSERT INTO system_settings (key, value) VALUES
+                ('recognition_threshold', '0.80'),
+                ('frame_skip', '2'),
+                ('min_attendance_pct', '75'),
+                ('qr_expiry_seconds', '90')
+            ON CONFLICT (key) DO NOTHING;
             """)
         # Non-destructive migrations for subjects table (may pre-exist without these columns)
         with conn.cursor() as c:
@@ -198,6 +284,33 @@ def init_db():
                     c.execute(col_sql)
                 except Exception:
                     pass
+        # ── Fix per-subject attendance unique constraint ────────────────────
+        # Drop the old (student_id, date) constraint that prevented a student
+        # from being marked in more than one subject per day.
+        with conn.cursor() as c:
+            c.execute("""
+                ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_student_id_date_key;
+
+                -- Records WITH a subject: unique per student+subject+date
+                CREATE UNIQUE INDEX IF NOT EXISTS attendance_student_subject_date_uniq
+                    ON attendance(student_id, subject_id, date)
+                    WHERE subject_id IS NOT NULL;
+
+                -- Legacy records WITHOUT a subject (daily attendance): unique per student+date
+                CREATE UNIQUE INDEX IF NOT EXISTS attendance_student_date_null_uniq
+                    ON attendance(student_id, date)
+                    WHERE subject_id IS NULL;
+
+                -- Performance indexes
+                CREATE INDEX IF NOT EXISTS idx_attendance_date           ON attendance(date);
+                CREATE INDEX IF NOT EXISTS idx_attendance_subject        ON attendance(subject_id);
+                CREATE INDEX IF NOT EXISTS idx_attendance_session        ON attendance(session_id);
+                CREATE INDEX IF NOT EXISTS idx_sessions_teacher_date     ON attendance_sessions(teacher_id, session_date);
+                CREATE INDEX IF NOT EXISTS idx_recognition_logged_at     ON recognition_logs(logged_at);
+                CREATE INDEX IF NOT EXISTS idx_warnings_student          ON attendance_warnings(student_id);
+                CREATE INDEX IF NOT EXISTS idx_corrections_student       ON correction_requests(student_id, status);
+            """)
+
         with conn.cursor() as c:
             c.execute("""
                 CREATE INDEX IF NOT EXISTS students_embedding_hnsw
@@ -943,9 +1056,25 @@ def get_student(sid):
         """, (sid,))
 
         att_records = qall(conn, """
-            SELECT date::text, time::text, status, note
-            FROM attendance WHERE student_id=%s
-            ORDER BY date DESC LIMIT 60
+            SELECT a.date::text, a.time::text, a.status, a.note,
+                   sb.name AS subject_name, sb.code AS subject_code
+            FROM attendance a
+            LEFT JOIN subjects sb ON sb.id = a.subject_id
+            WHERE a.student_id=%s
+            ORDER BY a.date DESC, a.time DESC LIMIT 90
+        """, (sid,))
+
+        by_subject = qall(conn, """
+            SELECT sb.id AS subject_id, sb.name AS subject_name, sb.code AS subject_code,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+                   COUNT(a.id) AS total,
+                   ROUND(100.0*COUNT(a.id) FILTER(WHERE a.status='Present')
+                         /NULLIF(COUNT(a.id),0),1) AS pct
+            FROM attendance a
+            JOIN subjects sb ON sb.id=a.subject_id
+            WHERE a.student_id=%s AND a.date >= NOW()-INTERVAL '6 months'
+            GROUP BY sb.id, sb.name, sb.code
+            ORDER BY pct ASC NULLS LAST
         """, (sid,))
 
     return jsonify({
@@ -954,6 +1083,7 @@ def get_student(sid):
         "monthly":     monthly,
         "logs":        logs,
         "attendance":  att_records,
+        "by_subject":  by_subject,
     })
 
 @app.route("/api/students/<sid>/photo")
@@ -1629,13 +1759,32 @@ def send_attendance_summary():
     return jsonify({"queued": True, "date": att_date})
 
 # ── Settings ──────────────────────────────────────────────────────────────
+def _load_settings_from_db():
+    """Load persisted settings from system_settings table into globals."""
+    global THRESHOLD, SKIP
+    try:
+        with get_db(register_pgvector=False) as conn:
+            rows = qall(conn, "SELECT key, value FROM system_settings")
+            for row in rows:
+                if row["key"] == "recognition_threshold":
+                    THRESHOLD = float(row["value"])
+                elif row["key"] == "frame_skip":
+                    SKIP = int(row["value"])
+    except Exception as e:
+        print(f"[settings] Could not load from DB: {e}")
+
 @app.route("/api/settings")
 def get_settings():
+    with get_db(register_pgvector=False) as conn:
+        rows = qall(conn, "SELECT key, value FROM system_settings ORDER BY key")
+    extra = {r["key"]: r["value"] for r in rows}
     return jsonify({
         "recognition_threshold": THRESHOLD,
         "frame_skip":            SKIP,
         "email_enabled":         EMAIL_ENABLED,
-        "brevo_from": BREVO_FROM if BREVO_FROM else "",
+        "brevo_from":            BREVO_FROM if BREVO_FROM else "",
+        "min_attendance_pct":    float(extra.get("min_attendance_pct", 75)),
+        "qr_expiry_seconds":     int(extra.get("qr_expiry_seconds", 90)),
     })
 
 @app.route("/api/settings", methods=["PUT"])
@@ -1643,10 +1792,26 @@ def get_settings():
 def update_settings():
     global THRESHOLD, SKIP
     d = request.json or {}
-    if "recognition_threshold" in d: THRESHOLD = float(d["recognition_threshold"])
-    if "frame_skip" in d:            SKIP      = int(d["frame_skip"])
-    _log_activity(g.user["username"],"update_settings","system",detail=str(d))
-    return jsonify({"recognition_threshold":THRESHOLD,"frame_skip":SKIP})
+    updates = {}
+    if "recognition_threshold" in d:
+        THRESHOLD = float(d["recognition_threshold"])
+        updates["recognition_threshold"] = str(THRESHOLD)
+    if "frame_skip" in d:
+        SKIP = int(d["frame_skip"])
+        updates["frame_skip"] = str(SKIP)
+    for k in ("min_attendance_pct", "qr_expiry_seconds"):
+        if k in d:
+            updates[k] = str(d[k])
+    if updates:
+        with get_db(register_pgvector=False) as conn:
+            for k, v in updates.items():
+                qexec(conn,
+                    "INSERT INTO system_settings (key, value, updated_at) VALUES (%s,%s,NOW()) "
+                    "ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=NOW()",
+                    (k, v, v))
+    _log_activity(g.user["username"], "update_settings", "system", detail=str(d))
+    return jsonify({"recognition_threshold": THRESHOLD, "frame_skip": SKIP,
+                    "updated": list(updates.keys())})
 
 # ── Faculties ─────────────────────────────────────────────────────────────
 @app.route("/api/faculties")
@@ -2439,17 +2604,23 @@ def mark_session_attendance(session_id):
         if not sess: return jsonify({"error": "Session not found"}), 404
         if sess["status"] == "closed": return jsonify({"error": "Session closed"}), 400
         with conn.cursor() as c:
-            c.execute("""
-                INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
-                VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
-                ON CONFLICT DO NOTHING
-            """, (student_id, sess["session_date"], status, note,
-                  sess["subject_id"], sess["teacher_id"], session_id))
-            if c.rowcount == 0:
+            # Use per-subject unique index when subject_id is known
+            if sess.get("subject_id"):
                 c.execute("""
-                    UPDATE attendance SET status=%s, note=%s, time=CURRENT_TIME
-                    WHERE student_id=%s AND date=%s AND session_id=%s
-                """, (status, note, student_id, sess["session_date"], session_id))
+                    INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
+                    VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
+                    ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                    DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note, time=EXCLUDED.time
+                """, (student_id, sess["session_date"], status, note,
+                      sess["subject_id"], sess["teacher_id"], session_id))
+            else:
+                c.execute("""
+                    INSERT INTO attendance (student_id, date, time, status, note, teacher_id, session_id)
+                    VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s)
+                    ON CONFLICT (student_id, date) WHERE subject_id IS NULL
+                    DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note, time=EXCLUDED.time
+                """, (student_id, sess["session_date"], status, note,
+                      sess["teacher_id"], session_id))
     return jsonify({"marked": True, "student_id": student_id, "status": status})
 
 @app.route("/api/attendance/sessions/<int:session_id>/bulk", methods=["POST"])
@@ -2470,18 +2641,26 @@ def bulk_mark_session(session_id):
             note   = rec.get("note", "")
             if not sid: continue
             with conn.cursor() as c:
-                c.execute("""
-                    INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
-                    VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
-                    ON CONFLICT DO NOTHING
-                """, (sid, sess["session_date"], status, note,
-                      sess["subject_id"], sess["teacher_id"], session_id))
-                if c.rowcount > 0: newly += 1
+                if sess.get("subject_id"):
+                    c.execute("""
+                        INSERT INTO attendance (student_id, date, time, status, note, subject_id, teacher_id, session_id)
+                        VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s,%s)
+                        ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                        DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note, time=EXCLUDED.time
+                        RETURNING (xmax = 0) AS inserted
+                    """, (sid, sess["session_date"], status, note,
+                          sess["subject_id"], sess["teacher_id"], session_id))
                 else:
                     c.execute("""
-                        UPDATE attendance SET status=%s, note=%s, time=CURRENT_TIME
-                        WHERE student_id=%s AND date=%s AND session_id=%s
-                    """, (status, note, sid, sess["session_date"], session_id))
+                        INSERT INTO attendance (student_id, date, time, status, note, teacher_id, session_id)
+                        VALUES (%s,%s,CURRENT_TIME,%s,%s,%s,%s)
+                        ON CONFLICT (student_id, date) WHERE subject_id IS NULL
+                        DO UPDATE SET status=EXCLUDED.status, note=EXCLUDED.note, time=EXCLUDED.time
+                        RETURNING (xmax = 0) AS inserted
+                    """, (sid, sess["session_date"], status, note,
+                          sess["teacher_id"], session_id))
+                row = c.fetchone()
+                if row and row[0]: newly += 1
         qexec(conn, "UPDATE attendance_sessions SET status='closed', closed_at=NOW() WHERE id=%s", (session_id,))
     return jsonify({"submitted": True, "newly_marked": newly})
 
@@ -2690,9 +2869,583 @@ def teacher_performance_report():
         "subjects":  subjects,
     })
 
+# ══════════════════════════════════════════════════════════════════════════
+#  BULK STUDENT IMPORT  (CSV upload)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/students/import", methods=["POST"])
+@require_auth
+def import_students():
+    """
+    Accept a CSV file or JSON array of student records.
+    CSV columns: student_id, full_name, email, phone, department, faculty_id, semester, status
+    Returns: { created, updated, failed: [{row, reason}] }
+    """
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+
+    # Accept both multipart file and raw JSON
+    if request.content_type and "multipart" in request.content_type:
+        f = request.files.get("file")
+        if not f:
+            return jsonify({"error": "No file uploaded"}), 400
+        raw = f.read().decode("utf-8-sig")   # strip BOM if present
+        reader = csv.DictReader(io.StringIO(raw))
+        rows = list(reader)
+    else:
+        rows = request.json or []
+
+    created, updated, failed = 0, 0, []
+    ALLOWED_STATUS = {"active", "inactive", "graduated", "suspended"}
+
+    with get_db(register_pgvector=False) as conn:
+        for i, row in enumerate(rows, start=2):   # row 1 = header
+            sid = (row.get("student_id") or "").strip()
+            name = (row.get("full_name") or "").strip()
+            if not sid or not name:
+                failed.append({"row": i, "reason": "student_id and full_name are required"})
+                continue
+
+            email  = (row.get("email") or "").strip() or None
+            phone  = (row.get("phone") or "").strip() or None
+            dept   = (row.get("department") or "").strip() or None
+            sem    = (row.get("semester") or "").strip() or None
+            status = (row.get("status") or "active").strip().lower()
+            fid    = row.get("faculty_id") or None
+
+            if status not in ALLOWED_STATUS:
+                status = "active"
+            if fid:
+                try: fid = int(fid)
+                except ValueError: fid = None
+
+            if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+                failed.append({"row": i, "sid": sid, "reason": "Invalid email format"})
+                continue
+
+            try:
+                r = qone(conn, """
+                    INSERT INTO students (student_id, full_name, email, phone, department, faculty_id, semester, status)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (student_id) DO UPDATE SET
+                        full_name  = EXCLUDED.full_name,
+                        email      = COALESCE(EXCLUDED.email, students.email),
+                        phone      = COALESCE(EXCLUDED.phone, students.phone),
+                        department = COALESCE(EXCLUDED.department, students.department),
+                        faculty_id = COALESCE(EXCLUDED.faculty_id, students.faculty_id),
+                        semester   = COALESCE(EXCLUDED.semester, students.semester),
+                        status     = EXCLUDED.status
+                    RETURNING (xmax = 0) AS inserted
+                """, (sid, name, email, phone, dept, fid, sem, status))
+                if r and r["inserted"]: created += 1
+                else: updated += 1
+            except Exception as e:
+                failed.append({"row": i, "sid": sid, "reason": str(e)})
+
+    _log_activity(g.user["username"], "bulk_import_students", "student",
+                  detail=f"created={created} updated={updated} failed={len(failed)}")
+    return jsonify({"created": created, "updated": updated,
+                    "failed": failed, "total": len(rows)})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ACADEMIC CALENDAR — Holidays + Academic Years
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/calendar/academic-years")
+@require_auth
+def list_academic_years():
+    with get_db(register_pgvector=False) as conn:
+        rows = qall(conn,
+            "SELECT id, name, start_date::text, end_date::text, is_current "
+            "FROM academic_years ORDER BY start_date DESC")
+    return jsonify({"academic_years": rows})
+
+@app.route("/api/calendar/academic-years", methods=["POST"])
+@require_auth
+def create_academic_year():
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+    d = request.json or {}
+    if not all([d.get("name"), d.get("start_date"), d.get("end_date")]):
+        return jsonify({"error": "name, start_date, end_date required"}), 400
+    with get_db(register_pgvector=False) as conn:
+        if d.get("is_current"):
+            qexec(conn, "UPDATE academic_years SET is_current=false")
+        row = qone(conn, """
+            INSERT INTO academic_years (name, start_date, end_date, is_current)
+            VALUES (%s,%s,%s,%s)
+            RETURNING id, name, start_date::text, end_date::text, is_current
+        """, (d["name"], d["start_date"], d["end_date"], bool(d.get("is_current"))))
+    _log_activity(g.user["username"], "create_academic_year", "calendar", target_id=d["name"])
+    return jsonify({"academic_year": row}), 201
+
+@app.route("/api/calendar/academic-years/<int:yid>", methods=["PUT"])
+@require_auth
+def update_academic_year(yid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+    d = request.json or {}
+    with get_db(register_pgvector=False) as conn:
+        if d.get("is_current"):
+            qexec(conn, "UPDATE academic_years SET is_current=false")
+        fields, vals = [], []
+        for col in ["name", "start_date", "end_date", "is_current"]:
+            if col in d:
+                fields.append(f"{col}=%s"); vals.append(d[col])
+        if not fields: return jsonify({"error": "Nothing to update"}), 400
+        vals.append(yid)
+        row = qone(conn,
+            f"UPDATE academic_years SET {','.join(fields)} WHERE id=%s "
+            "RETURNING id, name, start_date::text, end_date::text, is_current", vals)
+    if not row: return jsonify({"error": "Not found"}), 404
+    return jsonify({"academic_year": row})
+
+@app.route("/api/calendar/academic-years/<int:yid>", methods=["DELETE"])
+@require_auth
+def delete_academic_year(yid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+    with get_db(register_pgvector=False) as conn:
+        row = qone(conn, "DELETE FROM academic_years WHERE id=%s RETURNING id", (yid,))
+    if not row: return jsonify({"error": "Not found"}), 404
+    return jsonify({"deleted": True})
+
+@app.route("/api/calendar/holidays")
+@require_auth
+def list_holidays():
+    year_id = request.args.get("academic_year_id", "")
+    with get_db(register_pgvector=False) as conn:
+        if year_id:
+            rows = qall(conn,
+                "SELECT id, date::text, name, academic_year_id FROM holidays "
+                "WHERE academic_year_id=%s ORDER BY date", (int(year_id),))
+        else:
+            rows = qall(conn,
+                "SELECT id, date::text, name, academic_year_id FROM holidays ORDER BY date")
+    return jsonify({"holidays": rows})
+
+@app.route("/api/calendar/holidays", methods=["POST"])
+@require_auth
+def create_holiday():
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+    d = request.json or {}
+    if not all([d.get("date"), d.get("name")]):
+        return jsonify({"error": "date and name required"}), 400
+    try:
+        with get_db(register_pgvector=False) as conn:
+            row = qone(conn, """
+                INSERT INTO holidays (date, name, academic_year_id)
+                VALUES (%s,%s,%s)
+                RETURNING id, date::text, name, academic_year_id
+            """, (d["date"], d["name"], d.get("academic_year_id") or None))
+    except Exception as e:
+        if "unique" in str(e).lower():
+            return jsonify({"error": "Holiday already exists for that date"}), 409
+        raise
+    _log_activity(g.user["username"], "create_holiday", "calendar", target_id=d["date"])
+    return jsonify({"holiday": row}), 201
+
+@app.route("/api/calendar/holidays/<int:hid>", methods=["DELETE"])
+@require_auth
+def delete_holiday(hid):
+    if g.user.get("role") != "admin":
+        return jsonify({"error": "Admin access only"}), 403
+    with get_db(register_pgvector=False) as conn:
+        row = qone(conn, "DELETE FROM holidays WHERE id=%s RETURNING id", (hid,))
+    if not row: return jsonify({"error": "Not found"}), 404
+    return jsonify({"deleted": True})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  DEFAULTER LIST
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/reports/defaulters")
+@require_auth
+def defaulter_list():
+    """
+    Students below the minimum attendance threshold, per subject.
+    Query params: threshold (default 75), faculty_id, semester, subject_id, academic_year_id
+    """
+    threshold  = float(request.args.get("threshold", 75))
+    faculty_id = request.args.get("faculty_id", "")
+    semester   = request.args.get("semester", "")
+    subject_id = request.args.get("subject_id", "")
+    year_id    = request.args.get("academic_year_id", "")
+
+    # Build working-day count (total class days minus holidays)
+    holiday_clause = ""
+    holiday_params: list = []
+    if year_id:
+        holiday_clause = "AND a.date NOT IN (SELECT date FROM holidays WHERE academic_year_id=%s)"
+        holiday_params = [int(year_id)]
+
+    student_where = ["s.status='active'"]
+    sw_params: list = []
+    if faculty_id:
+        student_where.append("s.faculty_id=%s"); sw_params.append(int(faculty_id))
+    if semester:
+        student_where.append("s.semester::text=%s"); sw_params.append(str(semester))
+
+    att_where = ["1=1"]
+    att_params: list = []
+    if subject_id:
+        att_where.append("a.subject_id=%s"); att_params.append(int(subject_id))
+
+    sw = " AND ".join(student_where)
+    aw = " AND ".join(att_where)
+
+    params = att_params + holiday_params + sw_params + [threshold]
+
+    with get_db(register_pgvector=False) as conn:
+        rows = qall(conn, f"""
+            SELECT s.student_id, s.full_name, s.department, s.semester,
+                   sb.id AS subject_id, sb.name AS subject_name, sb.code AS subject_code,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+                   COUNT(a.id) AS total,
+                   ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) AS pct
+            FROM students s
+            JOIN teacher_assignments ta ON ta.faculty_id=s.faculty_id
+                AND ta.semester::text=s.semester::text
+            JOIN subjects sb ON sb.id=ta.subject_id
+            LEFT JOIN attendance a ON a.student_id=s.student_id
+                AND a.subject_id=sb.id
+                AND {aw} {holiday_clause}
+            WHERE {sw}
+            GROUP BY s.student_id, s.full_name, s.department, s.semester, sb.id, sb.name, sb.code
+            HAVING COUNT(a.id) > 0
+               AND ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                   / NULLIF(COUNT(a.id),0), 1) < %s
+            ORDER BY pct ASC, s.full_name
+        """, params)
+    return jsonify({"defaulters": rows, "threshold": threshold, "count": len(rows)})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  QR CODE ATTENDANCE
+# ══════════════════════════════════════════════════════════════════════════
+
+def _qr_sign(payload: str) -> str:
+    """HMAC-SHA256 signature over the payload string."""
+    return hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+def _qr_verify(payload: str, sig: str) -> bool:
+    expected = _qr_sign(payload)
+    return hmac.compare_digest(expected, sig)
+
+@app.route("/api/attendance/sessions/<int:session_id>/qr", methods=["POST"])
+@require_auth
+def generate_session_qr(session_id):
+    """
+    Generate a time-limited QR code token for a session.
+    Returns: { token, expires_at, qr_data }  where qr_data is what the student scans.
+    The QR payload is:  "SID:<session_id>:EXP:<unix_ts>"  + HMAC signature.
+    """
+    with get_db(register_pgvector=False) as conn:
+        sess = qone(conn,
+            "SELECT id, status FROM attendance_sessions WHERE id=%s", (session_id,))
+    if not sess: return jsonify({"error": "Session not found"}), 404
+    if sess["status"] == "closed": return jsonify({"error": "Session is closed"}), 400
+
+    expiry_s = int(request.json.get("expiry_seconds", 90) if request.json else 90)
+    expires_at = int(time.time()) + expiry_s
+    payload = f"SID:{session_id}:EXP:{expires_at}"
+    sig     = _qr_sign(payload)
+    token   = base64.urlsafe_b64encode(f"{payload}:{sig}".encode()).decode()
+
+    return jsonify({
+        "token":      token,
+        "expires_at": expires_at,
+        "session_id": session_id,
+        "qr_data":    f"vedanetram://checkin/{token}",
+    })
+
+@app.route("/api/attendance/qr-checkin", methods=["POST"])
+@require_auth
+def qr_checkin():
+    """
+    Student scans QR → sends token + their auth.
+    Marks Present for the session's subject on the session's date.
+    """
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+
+    d     = request.json or {}
+    token = d.get("token", "").strip()
+    if not token: return jsonify({"error": "token required"}), 400
+
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode()).decode()
+        # Format: "SID:<session_id>:EXP:<unix_ts>:<hmac_sig>"
+        payload, sig = decoded.rsplit(":", 1)
+        segs    = payload.split(":")   # ["SID", id, "EXP", ts]
+        sid_val = segs[1]
+        exp_val = int(segs[3])
+    except Exception:
+        return jsonify({"error": "Invalid QR token"}), 400
+
+    if not _qr_verify(payload, sig):
+        return jsonify({"error": "Invalid QR signature"}), 400
+    if int(time.time()) > exp_val:
+        return jsonify({"error": "QR code has expired"}), 400
+
+    session_id = int(sid_val)
+    student_id = g.user.get("student_id") or g.user.get("username")
+
+    with get_db() as conn:
+        sess = qone(conn,
+            "SELECT session_date, subject_id, teacher_id, status, faculty_id FROM attendance_sessions WHERE id=%s",
+            (session_id,))
+        if not sess: return jsonify({"error": "Session not found"}), 404
+        if sess["status"] == "closed": return jsonify({"error": "Session is closed"}), 400
+
+        # Verify student belongs to this faculty
+        stu = qone(conn, "SELECT faculty_id, semester FROM students WHERE student_id=%s", (student_id,))
+        if not stu: return jsonify({"error": "Student not found"}), 404
+        if stu["faculty_id"] != sess["faculty_id"]:
+            return jsonify({"error": "You are not enrolled in this faculty"}), 403
+
+        with conn.cursor() as c:
+            if sess.get("subject_id"):
+                c.execute("""
+                    INSERT INTO attendance (student_id, date, time, status, subject_id, teacher_id, session_id)
+                    VALUES (%s,%s,CURRENT_TIME,'Present',%s,%s,%s)
+                    ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                    DO NOTHING
+                """, (student_id, sess["session_date"],
+                      sess["subject_id"], sess["teacher_id"], session_id))
+                marked = c.rowcount == 1
+            else:
+                c.execute("""
+                    INSERT INTO attendance (student_id, date, time, status, teacher_id, session_id)
+                    VALUES (%s,%s,CURRENT_TIME,'Present',%s,%s)
+                    ON CONFLICT (student_id, date) WHERE subject_id IS NULL
+                    DO NOTHING
+                """, (student_id, sess["session_date"], sess["teacher_id"], session_id))
+                marked = c.rowcount == 1
+
+    return jsonify({
+        "marked":     marked,
+        "already":    not marked,
+        "session_id": session_id,
+        "date":       str(sess["session_date"]),
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ATTENDANCE CORRECTION REQUESTS  (student → teacher approval)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/corrections", methods=["GET"])
+@require_auth
+def list_corrections():
+    role = g.user.get("role")
+    with get_db(register_pgvector=False) as conn:
+        if role == "student":
+            student_id = g.user.get("student_id") or g.user.get("username")
+            rows = qall(conn, """
+                SELECT cr.id, cr.student_id, cr.date::text, cr.reason, cr.status,
+                       cr.review_note, cr.reviewed_at::text, cr.created_at::text,
+                       s.name AS subject_name, s.code AS subject_code
+                FROM correction_requests cr
+                LEFT JOIN subjects s ON s.id=cr.subject_id
+                WHERE cr.student_id=%s ORDER BY cr.created_at DESC
+            """, (student_id,))
+        elif role == "teacher":
+            tid = _tid()
+            rows = qall(conn, """
+                SELECT cr.id, cr.student_id, st.full_name AS student_name,
+                       cr.date::text, cr.reason, cr.status,
+                       cr.review_note, cr.reviewed_at::text, cr.created_at::text,
+                       s.name AS subject_name, s.code AS subject_code
+                FROM correction_requests cr
+                JOIN students st ON st.student_id=cr.student_id
+                LEFT JOIN subjects s ON s.id=cr.subject_id
+                WHERE cr.subject_id IN (
+                    SELECT subject_id FROM teacher_assignments WHERE teacher_id=%s
+                )
+                ORDER BY cr.status='pending' DESC, cr.created_at DESC
+            """, (tid,))
+        else:  # admin
+            rows = qall(conn, """
+                SELECT cr.id, cr.student_id, st.full_name AS student_name,
+                       cr.date::text, cr.reason, cr.status,
+                       cr.review_note, cr.reviewed_at::text, cr.created_at::text,
+                       s.name AS subject_name, s.code AS subject_code
+                FROM correction_requests cr
+                JOIN students st ON st.student_id=cr.student_id
+                LEFT JOIN subjects s ON s.id=cr.subject_id
+                ORDER BY cr.status='pending' DESC, cr.created_at DESC LIMIT 200
+            """)
+    return jsonify({"corrections": rows})
+
+@app.route("/api/corrections", methods=["POST"])
+@require_auth
+def create_correction():
+    """Student submits a correction request."""
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    d          = request.json or {}
+    date_val   = d.get("date", "").strip()
+    reason     = d.get("reason", "").strip()
+    subject_id = d.get("subject_id")
+    student_id = g.user.get("student_id") or g.user.get("username")
+    if not date_val or not reason:
+        return jsonify({"error": "date and reason required"}), 400
+    with get_db(register_pgvector=False) as conn:
+        existing = qone(conn, """
+            SELECT id FROM correction_requests
+            WHERE student_id=%s AND date=%s AND (subject_id=%s OR (%s IS NULL AND subject_id IS NULL))
+              AND status='pending'
+        """, (student_id, date_val, subject_id, subject_id))
+        if existing:
+            return jsonify({"error": "A pending correction request already exists for this date/subject"}), 409
+        row = qone(conn, """
+            INSERT INTO correction_requests (student_id, subject_id, date, reason)
+            VALUES (%s,%s,%s,%s)
+            RETURNING id, student_id, subject_id, date::text, reason, status, created_at::text
+        """, (student_id, subject_id or None, date_val, reason))
+    return jsonify({"correction": row}), 201
+
+@app.route("/api/corrections/<int:cid>", methods=["PUT"])
+@require_auth
+def review_correction(cid):
+    """Teacher or admin approves/rejects a correction request."""
+    if g.user.get("role") not in ("teacher", "admin"):
+        return jsonify({"error": "Teacher or admin access only"}), 403
+    d      = request.json or {}
+    status = d.get("status", "").strip()
+    note   = d.get("review_note", "").strip()
+    if status not in ("approved", "rejected"):
+        return jsonify({"error": "status must be approved or rejected"}), 400
+
+    reviewer_id = _tid() if g.user.get("role") == "teacher" else g.user["id"]
+
+    with get_db() as conn:
+        cr = qone(conn, """
+            SELECT id, student_id, subject_id, date FROM correction_requests
+            WHERE id=%s AND status='pending'
+        """, (cid,))
+        if not cr: return jsonify({"error": "Request not found or already reviewed"}), 404
+
+        qexec(conn, """
+            UPDATE correction_requests
+            SET status=%s, review_note=%s, reviewed_by=%s, reviewed_at=NOW()
+            WHERE id=%s
+        """, (status, note, reviewer_id, cid))
+
+        if status == "approved":
+            # Apply the correction: mark Present for that date/subject
+            if cr.get("subject_id"):
+                qexec(conn, """
+                    INSERT INTO attendance (student_id, date, time, status, note, subject_id)
+                    VALUES (%s,%s,CURRENT_TIME,'Present',%s,%s)
+                    ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                    DO UPDATE SET status='Present', note=EXCLUDED.note
+                """, (cr["student_id"], cr["date"],
+                      f"Correction approved (ID:{cid})", cr["subject_id"]))
+            else:
+                qexec(conn, """
+                    INSERT INTO attendance (student_id, date, time, status, note)
+                    VALUES (%s,%s,CURRENT_TIME,'Present',%s)
+                    ON CONFLICT (student_id, date) WHERE subject_id IS NULL
+                    DO UPDATE SET status='Present', note=EXCLUDED.note
+                """, (cr["student_id"], cr["date"], f"Correction approved (ID:{cid})"))
+
+            # Audit trail
+            qexec(conn, """
+                INSERT INTO attendance_history
+                    (student_id, subject_id, date, old_status, new_status, changed_by, reason)
+                VALUES (%s,%s,%s,'Absent','Present',%s,%s)
+            """, (cr["student_id"], cr.get("subject_id"), cr["date"],
+                  g.user["username"], f"Correction request #{cid} approved"))
+
+    _log_activity(g.user["username"], f"correction_{status}", "attendance", str(cid))
+    return jsonify({"updated": True, "status": status})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  STUDENT SELF-SERVICE (per-subject attendance view)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/student/me/attendance")
+@require_auth
+def student_my_attendance():
+    """Student's own per-subject attendance breakdown."""
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    student_id = g.user.get("student_id") or g.user.get("username")
+    from_d = request.args.get("from", (date.today() - timedelta(days=90)).isoformat())
+    to_d   = request.args.get("to", date.today().isoformat())
+
+    with get_db(register_pgvector=False) as conn:
+        by_subject = qall(conn, """
+            SELECT sb.id AS subject_id, sb.name AS subject_name, sb.code AS subject_code,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+                   COUNT(a.id) AS total,
+                   ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) AS pct
+            FROM subjects sb
+            JOIN attendance a ON a.subject_id=sb.id
+                AND a.student_id=%s AND a.date BETWEEN %s AND %s
+            GROUP BY sb.id, sb.name, sb.code
+            ORDER BY pct ASC NULLS LAST
+        """, (student_id, from_d, to_d))
+
+        recent = qall(conn, """
+            SELECT a.date::text, a.time::text, a.status, a.note,
+                   sb.name AS subject_name, sb.code AS subject_code
+            FROM attendance a
+            LEFT JOIN subjects sb ON sb.id=a.subject_id
+            WHERE a.student_id=%s AND a.date BETWEEN %s AND %s
+            ORDER BY a.date DESC, a.time DESC LIMIT 60
+        """, (student_id, from_d, to_d))
+
+        overall = qone(conn, """
+            SELECT COUNT(*) FILTER(WHERE status='Present') AS present,
+                   COUNT(*) AS total,
+                   ROUND(100.0 * COUNT(*) FILTER(WHERE status='Present')
+                         / NULLIF(COUNT(*),0), 1) AS pct
+            FROM attendance
+            WHERE student_id=%s AND date BETWEEN %s AND %s
+        """, (student_id, from_d, to_d))
+
+    return jsonify({
+        "by_subject": by_subject,
+        "recent":     recent,
+        "overall":    overall,
+        "from":       from_d,
+        "to":         to_d,
+    })
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  ADMIN — Attendance history (audit trail for a student)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/attendance/history/<sid>")
+@require_auth
+def attendance_change_history(sid):
+    """Full audit trail of manual attendance changes for a student."""
+    with get_db(register_pgvector=False) as conn:
+        rows = qall(conn, """
+            SELECT ah.id, ah.date::text, ah.old_status, ah.new_status,
+                   ah.changed_by, ah.reason, ah.changed_at::text,
+                   s.name AS subject_name, s.code AS subject_code
+            FROM attendance_history ah
+            LEFT JOIN subjects s ON s.id=ah.subject_id
+            WHERE ah.student_id=%s ORDER BY ah.changed_at DESC LIMIT 100
+        """, (sid,))
+    return jsonify({"history": rows})
+
+
 # ── Boot ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
+    _load_settings_from_db()   # restore persisted threshold / frame_skip
     # Start background email worker thread
     _email_thread = threading.Thread(target=_email_worker, daemon=True)
     _email_thread.start()

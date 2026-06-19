@@ -3883,22 +3883,31 @@ async function loadTeacherDashboard() {
     if (weekEl && schedData) {
       const days = schedData.days || ["Mon","Tue","Wed","Thu","Fri","Sat"];
       const sched = schedData.schedule || {};
+      const otherSlots = sched["Other"] || [];
+      const slotHtml = cls => `
+        <div class="weekly-slot">
+          <div class="weekly-slot-subject">${escapeHtml(cls.subject_name || "—")}</div>
+          <div class="weekly-slot-meta">${cls.faculty_code || ""} Sem ${cls.semester}</div>
+          ${cls.time_slot_label ? `<div class="weekly-slot-time">${cls.time_slot_label}</div>` : ""}
+        </div>`;
+      const otherHtml = otherSlots.length ? `
+        <div style="margin-top:1rem;padding:0.75rem 1rem;background:var(--bg2);border-radius:8px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:0.5rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em">No day assigned</div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+            ${otherSlots.map(slotHtml).join("")}
+          </div>
+        </div>` : "";
       weekEl.innerHTML = `<div class="weekly-grid">
         ${days.map(day => `
           <div class="weekly-day">
             <div class="weekly-day-label">${day}</div>
             <div class="weekly-day-slots">
               ${(sched[day] || []).length
-                ? (sched[day] || []).map(cls => `
-                    <div class="weekly-slot">
-                      <div class="weekly-slot-subject">${escapeHtml(cls.subject_name || "—")}</div>
-                      <div class="weekly-slot-meta">${cls.faculty_code || ""} Sem ${cls.semester}</div>
-                      ${cls.time_slot_label ? `<div class="weekly-slot-time">${cls.time_slot_label}</div>` : ""}
-                    </div>`).join("")
+                ? (sched[day] || []).map(slotHtml).join("")
                 : `<div class="weekly-slot-empty">—</div>`}
             </div>
           </div>`).join("")}
-      </div>`;
+      </div>${otherHtml}`;
     }
 
     // My Assigned Classes — uses /teacher/me which already has full assignments list
@@ -3954,25 +3963,39 @@ async function _loadAssignedClasses() {
       const days = ["Mon","Tue","Wed","Thu","Fri","Sat"];
       const grouped = {};
       days.forEach(d => grouped[d] = []);
+      const unscheduled = [];
       assignments.forEach(a => {
         if (a.day_of_week && grouped[a.day_of_week]) grouped[a.day_of_week].push(a);
+        else unscheduled.push(a);
       });
       const maxRows = Math.max(1, ...days.map(d => grouped[d].length));
+      const cellHtml = a => `<td style="vertical-align:top;padding:0.5rem 0.75rem">
+        <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name||"—")}</div>
+        <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code||"")} Sem ${a.semester}</div>
+        <div style="font-size:11px;color:var(--blue)">${a.time_slot_label||""}</div>
+        ${a.student_count != null ? `<div style="font-size:11px;color:var(--text3)">${a.student_count} students</div>` : ""}
+      </td>`;
+      const unscheduledHtml = unscheduled.length ? `
+        <div style="margin-top:1rem;padding:0.75rem 1rem;background:var(--bg2);border-radius:8px">
+          <div style="font-size:11px;color:var(--text3);margin-bottom:0.5rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em">No day assigned</div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+            ${unscheduled.map(a => `<div style="background:var(--bg3,#222);border-radius:6px;padding:0.4rem 0.6rem">
+              <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name||"—")}</div>
+              <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code||"")} Sem ${a.semester}</div>
+              <div style="font-size:11px;color:var(--blue)">${a.time_slot_label||""}</div>
+            </div>`).join("")}
+          </div>
+        </div>` : "";
       tableEl.innerHTML = `<table class="data-table" style="min-width:600px">
         <thead><tr>${days.map(d => `<th style="text-align:center;min-width:120px">${d}</th>`).join("")}</tr></thead>
         <tbody>
           ${Array.from({length: maxRows}, (_, i) => `
             <tr>${days.map(d => {
               const a = grouped[d][i];
-              return a ? `<td style="vertical-align:top;padding:0.5rem 0.75rem">
-                <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name||"—")}</div>
-                <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code||"")} Sem ${a.semester}</div>
-                <div style="font-size:11px;color:var(--blue)">${a.time_slot_label||""}</div>
-                ${a.student_count != null ? `<div style="font-size:11px;color:var(--text3)">${a.student_count} students</div>` : ""}
-              </td>` : `<td></td>`;
+              return a ? cellHtml(a) : `<td></td>`;
             }).join("")}</tr>`).join("")}
         </tbody>
-      </table>`;
+      </table>${unscheduledHtml}`;
     }
   } catch (e) {
     console.error("_loadAssignedClasses:", e);
@@ -4018,7 +4041,8 @@ function _renderClassCard(cls) {
     </div>` : ""}
     <div class="tcc-actions">
       ${sessStatus === "open"
-        ? `<button class="btn-primary btn-sm" onclick="continueSession(${sess.id}, '${escapeHtml(cls.subject_name||"")}')">Continue Session</button>`
+        ? `<button class="btn-primary btn-sm" onclick="continueSession(${sess.id}, '${escapeHtml(cls.subject_name||"")}')">Continue</button>
+           <button class="btn-secondary btn-sm" onclick="openQRModal(${sess.id})" title="Show QR code for students to scan">QR Code</button>`
         : sessStatus === "closed"
         ? `<button class="btn-secondary btn-sm" onclick="viewSessionReport(${sess.id})">View Report</button>`
         : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.assignment_id})">Start Attendance</button>`}
@@ -4298,14 +4322,29 @@ async function loadStudentPortal() {
     const sc = document.getElementById("sStat-pct");
     if (sc) { sc.textContent = `${pct}%`; sc.style.color = color; }
 
+    // Per-subject breakdown
     const subjectEl = document.getElementById("studentSubjectSummary");
-    if (subjectEl)
-      subjectEl.innerHTML = `
-        <div style="margin-bottom:4px;font-size:13px;color:var(--text2)">Overall Attendance</div>
-        <div style="height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin:6px 0">
-          <div style="width:${Math.min(pct,100)}%;height:100%;background:${color};border-radius:3px"></div>
-        </div>
-        <div style="font-size:12px;color:${color};font-weight:600">${pct}%</div>`;
+    if (subjectEl) {
+      const subs = p.by_subject || [];
+      if (!subs.length) {
+        subjectEl.innerHTML = `<div class="text-muted text-12px p-1rem">No subject-wise records yet. (Overall: ${pct}%)</div>`;
+      } else {
+        subjectEl.innerHTML = subs.map(s => {
+          const sp = s.pct !== null ? parseFloat(s.pct) : null;
+          const sc = sp === null ? "var(--text3)" : sp < 60 ? "var(--danger)" : sp < 75 ? "var(--amber)" : "var(--green)";
+          return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+              <span class="text-13px"><span class="subject-tag" style="font-size:11px">${escapeHtml(s.subject_code)}</span> ${escapeHtml(s.subject_name)}</span>
+              <span style="font-size:12px;font-weight:600;color:${sc}">${sp !== null ? sp + "%" : "—"}</span>
+            </div>
+            <div style="height:4px;background:var(--border);border-radius:2px">
+              <div style="height:4px;width:${sp ?? 0}%;background:${sc};border-radius:2px;transition:width .4s"></div>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.present}/${s.total} classes</div>
+          </div>`;
+        }).join("");
+      }
+    }
 
     const attBody = document.getElementById("studentAttBody");
     if (attBody) {
@@ -4313,15 +4352,18 @@ async function loadStudentPortal() {
       if (!records.length) {
         attBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted p-2rem">No records yet.</td></tr>`;
       } else {
-        attBody.innerHTML = records
-          .map((rec) => `
-            <tr>
-              <td style="font-family:var(--mono);font-size:11px">${rec.date}</td>
-              <td style="color:var(--text3);font-size:11px">—</td>
-              <td style="color:var(--text3);font-size:11px">—</td>
-              <td>${badge(rec.status)}</td>
-            </tr>`)
-          .join("");
+        attBody.innerHTML = records.map(rec => {
+          const sc = rec.status === "Present" ? "color:var(--green)" : "color:var(--danger)";
+          const sub = rec.subject_code
+            ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(rec.subject_code)}</span>`
+            : `<span style="color:var(--text3)">—</span>`;
+          return `<tr>
+            <td style="font-family:var(--mono);font-size:11px">${rec.date}</td>
+            <td style="font-size:11px">${sub}</td>
+            <td style="color:var(--text3);font-size:11px">—</td>
+            <td style="${sc};font-weight:600;font-size:12px">${rec.status}</td>
+          </tr>`;
+        }).join("");
       }
     }
   } catch (e) {
@@ -5011,3 +5053,504 @@ function exportReportCSV() {
   a.click(); URL.revokeObjectURL(url);
   toast("CSV downloaded");
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+//  REPORT TABS  (Overview / Defaulters / Corrections)
+// ══════════════════════════════════════════════════════════════════════════
+
+function switchReportTab(tab, btn) {
+  document.querySelectorAll("#page-reports .sub-tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll("#page-reports .sub-tab-panel").forEach(p => p.classList.remove("active"));
+  if (btn) btn.classList.add("active");
+  const panel = document.getElementById(`rtab-${tab}`);
+  if (panel) panel.classList.add("active");
+  if (tab === "defaulters")  loadDefaulters();
+  if (tab === "corrections") loadAdminCorrections();
+}
+
+// ── Defaulter List ────────────────────────────────────────────────────────
+
+let _defData = [];
+
+async function loadDefaulters() {
+  const faculty   = document.getElementById("defFaculty")?.value   || "";
+  const semester  = document.getElementById("defSemester")?.value  || "";
+  const subject   = document.getElementById("defSubject")?.value   || "";
+  const threshold = document.getElementById("defThreshold")?.value || 75;
+  const body      = document.getElementById("defBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="8" class="text-center text-muted p-2rem">Loading…</td></tr>`;
+
+  const qs = new URLSearchParams({ threshold });
+  if (faculty)  qs.set("faculty_id", faculty);
+  if (semester) qs.set("semester",   semester);
+  if (subject)  qs.set("subject_id", subject);
+
+  const res  = await api(`/reports/defaulters?${qs}`);
+  const data = await res.json();
+  _defData = data.defaulters || [];
+
+  const summary = document.getElementById("defSummary");
+  if (summary) summary.textContent = `${_defData.length} student-subject combinations below ${threshold}%`;
+
+  // Populate subject dropdown from result
+  const subs = [...new Map(_defData.map(r => [r.subject_id, r])).values()];
+  const subjEl = document.getElementById("defSubject");
+  if (subjEl && subjEl.options.length <= 1 && subs.length) {
+    subs.forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.subject_id; o.textContent = `${s.subject_code} — ${s.subject_name}`;
+      subjEl.appendChild(o);
+    });
+  }
+
+  if (!_defData.length) {
+    body.innerHTML = `<tr><td colspan="8" class="text-center text-muted p-2rem">No defaulters — all students meet the threshold.</td></tr>`;
+    return;
+  }
+  body.innerHTML = _defData.map(r => {
+    const pct = r.pct !== null ? parseFloat(r.pct) : null;
+    const cls = pct === null ? "" : pct < 60 ? "color:var(--danger);font-weight:700" : pct < 75 ? "color:var(--amber);font-weight:600" : "";
+    return `<tr>
+      <td><span class="mono text-12px">${escapeHtml(r.student_id)}</span></td>
+      <td>${escapeHtml(r.full_name)}</td>
+      <td>${escapeHtml(r.department || "—")}</td>
+      <td>${r.semester || "—"}</td>
+      <td><span class="subject-tag">${escapeHtml(r.subject_code)}</span> ${escapeHtml(r.subject_name)}</td>
+      <td>${r.present}</td>
+      <td>${r.total}</td>
+      <td style="text-align:center;${cls}">${pct !== null ? pct + "%" : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function exportDefaultersCSV() {
+  if (!_defData.length) { toast("No data to export", "err"); return; }
+  const rows = [
+    ["Student ID", "Name", "Department", "Semester", "Subject Code", "Subject", "Present", "Total", "%"],
+    ..._defData.map(r => [r.student_id, r.full_name, r.department || "", r.semester || "",
+                          r.subject_code, r.subject_name, r.present, r.total, r.pct ?? ""])
+  ];
+  const csv  = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `defaulters_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast("Defaulters CSV downloaded");
+}
+
+// ── Admin Corrections View ────────────────────────────────────────────────
+
+async function loadAdminCorrections() {
+  const status = document.getElementById("corrStatusFilter")?.value || "";
+  const body   = document.getElementById("corrBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr>`;
+  const res  = await api("/corrections");
+  const data = await res.json();
+  let rows   = data.corrections || [];
+  if (status) rows = rows.filter(r => r.status === status);
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">No correction requests found.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r => {
+    const badge = r.status === "pending"  ? `<span class="risk-badge risk-atrisk">Pending</span>`
+                : r.status === "approved" ? `<span class="risk-badge risk-good">Approved</span>`
+                :                           `<span class="risk-badge risk-critical">Rejected</span>`;
+    const actions = r.status === "pending"
+      ? `<button class="btn-sm btn-primary"    onclick="adminReviewCorrection(${r.id},'approved')">Approve</button>
+         <button class="btn-sm btn-danger ml-4" onclick="adminReviewCorrection(${r.id},'rejected')">Reject</button>`
+      : "—";
+    return `<tr>
+      <td>${escapeHtml(r.student_name || r.student_id)}</td>
+      <td>${r.subject_code ? `<span class="subject-tag">${escapeHtml(r.subject_code)}</span>` : "—"}</td>
+      <td class="mono text-12px">${r.date || "—"}</td>
+      <td class="text-13px">${escapeHtml(r.reason)}</td>
+      <td>${badge}</td>
+      <td class="text-13px text-secondary">${r.reviewed_at ? r.reviewed_at.slice(0,10) : "—"}</td>
+      <td>${actions}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function adminReviewCorrection(id, status) {
+  const note = status === "rejected" ? (prompt("Rejection reason (optional):") || "") : "";
+  const res  = await api(`/corrections/${id}`, { method: "PUT", body: JSON.stringify({ status, review_note: note }) });
+  const data = await res.json();
+  if (data.error) { toast(data.error, "err"); return; }
+  toast(status === "approved" ? "Approved — attendance updated" : "Rejected");
+  loadAdminCorrections();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  BULK STUDENT IMPORT
+// ══════════════════════════════════════════════════════════════════════════
+
+function openImportStudentsModal() {
+  document.getElementById("importCsvFile").value = "";
+  document.getElementById("importErr").textContent = "";
+  document.getElementById("importResult").style.display = "none";
+  document.getElementById("importProgress").style.display = "none";
+  document.getElementById("importStudentsModal").style.display = "flex";
+}
+
+async function submitStudentImport() {
+  const fileEl = document.getElementById("importCsvFile");
+  const errEl  = document.getElementById("importErr");
+  const prog   = document.getElementById("importProgress");
+  const result = document.getElementById("importResult");
+  errEl.textContent = "";
+  result.style.display = "none";
+
+  if (!fileEl.files[0]) { errEl.textContent = "Please select a CSV file."; return; }
+
+  prog.style.display = "block";
+  document.getElementById("importProgressMsg").textContent = "Uploading and processing…";
+
+  const form = new FormData();
+  form.append("file", fileEl.files[0]);
+
+  const res  = await fetch("/api/students/import", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${authToken}` },
+    body: form,
+  });
+  prog.style.display = "none";
+  const data = await res.json();
+
+  if (data.error) { errEl.textContent = data.error; return; }
+
+  result.style.display = "block";
+  const failHtml = data.failed?.length
+    ? `<div style="margin-top:0.5rem;max-height:120px;overflow-y:auto;font-size:11px;color:var(--danger)">
+        ${data.failed.map(f => `Row ${f.row}: ${escapeHtml(f.reason)}`).join("<br>")}
+       </div>`
+    : "";
+  result.innerHTML = `
+    <div class="msg ok">
+      ✓ Import complete — <strong>${data.created}</strong> created,
+      <strong>${data.updated}</strong> updated,
+      <strong>${data.failed?.length || 0}</strong> failed (of ${data.total} total)
+    </div>${failHtml}`;
+  loadStudents();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  ACADEMIC CALENDAR (Admin — Manage → Calendar tab)
+// ══════════════════════════════════════════════════════════════════════════
+
+let _academicYears = [];
+
+async function loadAcademicYears() {
+  const body = document.getElementById("academicYearsBody");
+  if (!body) return;
+  const res  = await api("/calendar/academic-years");
+  const data = await res.json();
+  _academicYears = data.academic_years || [];
+
+  // Populate holiday year filter selects
+  ["holYearFilter", "holYearSelect"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const cur = el.value;
+    el.innerHTML = `<option value="">— None —</option>`;
+    _academicYears.forEach(y => {
+      const o = document.createElement("option");
+      o.value = y.id; o.textContent = y.name + (y.is_current ? " (current)" : "");
+      el.appendChild(o);
+    });
+    el.value = cur;
+  });
+
+  if (!_academicYears.length) {
+    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-2rem">No academic years added yet.</td></tr>`;
+    return;
+  }
+  body.innerHTML = _academicYears.map(y => `<tr>
+    <td>${escapeHtml(y.name)}</td>
+    <td class="mono text-12px">${y.start_date}</td>
+    <td class="mono text-12px">${y.end_date}</td>
+    <td style="text-align:center">${y.is_current ? "✓" : ""}</td>
+    <td>
+      <button class="btn-sm btn-secondary" onclick="openAcademicYearModal(${y.id})">Edit</button>
+      <button class="btn-sm btn-danger ml-4" onclick="deleteAcademicYear(${y.id})">Delete</button>
+    </td>
+  </tr>`).join("");
+}
+
+function openAcademicYearModal(id) {
+  document.getElementById("acYearErr").textContent = "";
+  document.getElementById("acYearId").value = id || "";
+  document.getElementById("acYearTitle").textContent = id ? "Edit Academic Year" : "Add Academic Year";
+  if (id) {
+    const y = _academicYears.find(y => y.id === id);
+    if (y) {
+      document.getElementById("acYearName").value    = y.name;
+      document.getElementById("acYearStart").value   = y.start_date;
+      document.getElementById("acYearEnd").value     = y.end_date;
+      document.getElementById("acYearCurrent").checked = y.is_current;
+    }
+  } else {
+    document.getElementById("acYearName").value    = "";
+    document.getElementById("acYearStart").value   = "";
+    document.getElementById("acYearEnd").value     = "";
+    document.getElementById("acYearCurrent").checked = false;
+  }
+  document.getElementById("academicYearModal").style.display = "flex";
+}
+
+async function saveAcademicYear() {
+  const id      = document.getElementById("acYearId").value;
+  const errEl   = document.getElementById("acYearErr");
+  errEl.textContent = "";
+  const payload = {
+    name:       document.getElementById("acYearName").value.trim(),
+    start_date: document.getElementById("acYearStart").value,
+    end_date:   document.getElementById("acYearEnd").value,
+    is_current: document.getElementById("acYearCurrent").checked,
+  };
+  if (!payload.name || !payload.start_date || !payload.end_date) {
+    errEl.textContent = "Name, start date, and end date are required."; return;
+  }
+  const method = id ? "PUT" : "POST";
+  const url    = id ? `/calendar/academic-years/${id}` : "/calendar/academic-years";
+  const res    = await api(url, { method, body: JSON.stringify(payload) });
+  const data   = await res.json();
+  if (data.error) { errEl.textContent = data.error; return; }
+  closeModal("academicYearModal");
+  loadAcademicYears();
+  toast(id ? "Academic year updated" : "Academic year created");
+}
+
+async function deleteAcademicYear(id) {
+  if (!confirm("Delete this academic year? All associated holidays will also be deleted.")) return;
+  const res  = await api(`/calendar/academic-years/${id}`, { method: "DELETE" });
+  const data = await res.json();
+  if (data.error) { toast(data.error, "err"); return; }
+  toast("Deleted"); loadAcademicYears();
+}
+
+async function loadHolidays() {
+  const body   = document.getElementById("holidaysBody");
+  if (!body) return;
+  const yearId = document.getElementById("holYearFilter")?.value || "";
+  const qs     = yearId ? `?academic_year_id=${yearId}` : "";
+  const res    = await api(`/calendar/holidays${qs}`);
+  const data   = await res.json();
+  const rows   = data.holidays || [];
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="3" class="text-center text-muted p-2rem">No holidays added yet.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(h => `<tr>
+    <td class="mono text-12px">${h.date}</td>
+    <td>${escapeHtml(h.name)}</td>
+    <td><button class="btn-sm btn-danger" onclick="deleteHoliday(${h.id})">Delete</button></td>
+  </tr>`).join("");
+}
+
+function openHolidayModal() {
+  document.getElementById("holErr").textContent = "";
+  document.getElementById("holDate").value = "";
+  document.getElementById("holName").value = "";
+  document.getElementById("holYearSelect").value = document.getElementById("holYearFilter")?.value || "";
+  document.getElementById("holidayModal").style.display = "flex";
+}
+
+async function saveHoliday() {
+  const errEl   = document.getElementById("holErr");
+  errEl.textContent = "";
+  const payload = {
+    date:             document.getElementById("holDate").value,
+    name:             document.getElementById("holName").value.trim(),
+    academic_year_id: document.getElementById("holYearSelect").value || null,
+  };
+  if (!payload.date || !payload.name) { errEl.textContent = "Date and name are required."; return; }
+  const res  = await api("/calendar/holidays", { method: "POST", body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (data.error) { errEl.textContent = data.error; return; }
+  closeModal("holidayModal");
+  loadHolidays();
+  toast("Holiday added");
+}
+
+async function deleteHoliday(id) {
+  if (!confirm("Delete this holiday?")) return;
+  const res  = await api(`/calendar/holidays/${id}`, { method: "DELETE" });
+  const data = await res.json();
+  if (data.error) { toast(data.error, "err"); return; }
+  toast("Deleted"); loadHolidays();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  QR CODE ATTENDANCE  (teacher generates, student scans)
+// ══════════════════════════════════════════════════════════════════════════
+
+let _qrSessionId    = null;
+let _qrExpiryTs     = null;
+let _qrTimer        = null;
+let _qrExpirySeconds = 90;
+
+async function openQRModal(sessionId) {
+  _qrSessionId = sessionId;
+  document.getElementById("qrModal").style.display = "flex";
+  await refreshQR();
+}
+
+async function refreshQR() {
+  if (!_qrSessionId) return;
+  clearInterval(_qrTimer);
+  document.getElementById("qrCanvas").innerHTML = `<div class="text-muted text-13px">Generating…</div>`;
+
+  const res  = await api(`/attendance/sessions/${_qrSessionId}/qr`, {
+    method: "POST",
+    body: JSON.stringify({ expiry_seconds: _qrExpirySeconds }),
+  });
+  const data = await res.json();
+  if (data.error) { toast(data.error, "err"); return; }
+
+  _qrExpiryTs = data.expires_at;
+  _qrExpirySeconds = data.expires_at - Math.floor(Date.now() / 1000);
+  document.getElementById("qrExpirySec").textContent = _qrExpirySeconds;
+
+  // Render QR using qrcode.js library
+  const canvas = document.getElementById("qrCanvas");
+  canvas.innerHTML = "";
+  if (typeof QRCode !== "undefined") {
+    new QRCode(canvas, {
+      text:   data.qr_data,
+      width:  196, height: 196,
+      colorDark: "#0d0d0f", colorLight: "#ffffff",
+      correctLevel: QRCode.CorrectLevel.M,
+    });
+  } else {
+    canvas.innerHTML = `<div class="text-13px" style="word-break:break-all;padding:0.5rem">${data.qr_data}</div>`;
+  }
+
+  // Countdown timer
+  const bar = document.getElementById("qrExpiryBar");
+  _qrTimer = setInterval(() => {
+    const remaining = _qrExpiryTs - Math.floor(Date.now() / 1000);
+    const pct = Math.max(0, (remaining / _qrExpirySeconds) * 100);
+    if (bar) bar.style.width = pct + "%";
+    const cd = document.getElementById("qrCountdown");
+    if (cd) cd.textContent = remaining > 0 ? `Expires in ${remaining}s` : "Expired — click Refresh";
+    if (remaining <= 0) { clearInterval(_qrTimer); if (bar) bar.style.width = "0%"; }
+  }, 1000);
+}
+
+function closeQRModal() {
+  clearInterval(_qrTimer);
+  _qrSessionId = null;
+  closeModal("qrModal");
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  STUDENT PANEL — Per-subject attendance + correction requests
+// ══════════════════════════════════════════════════════════════════════════
+
+async function loadStudentPanel() {
+  const res  = await api("/student/me/attendance");
+  const data = await res.json();
+  if (data.error) return;
+
+  const overall = data.overall || {};
+  const _sv = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  _sv("sStat-present", overall.present ?? "—");
+  _sv("sStat-total",   overall.total   ?? "—");
+  _sv("sStat-pct",     overall.pct != null ? overall.pct + "%" : "—");
+
+  // Subject-wise breakdown
+  const summaryEl = document.getElementById("studentSubjectSummary");
+  if (summaryEl) {
+    const subs = data.by_subject || [];
+    if (!subs.length) {
+      summaryEl.innerHTML = `<div class="text-muted text-12px p-1rem">No subject-wise records yet.</div>`;
+    } else {
+      summaryEl.innerHTML = subs.map(s => {
+        const pct = s.pct !== null ? parseFloat(s.pct) : null;
+        const bar = pct !== null ? pct : 0;
+        const color = pct === null ? "var(--text3)" : pct < 60 ? "var(--danger)" : pct < 75 ? "var(--amber)" : "var(--green)";
+        return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span class="text-13px"><span class="subject-tag" style="font-size:11px">${escapeHtml(s.subject_code)}</span> ${escapeHtml(s.subject_name)}</span>
+            <span style="font-size:12px;font-weight:600;color:${color}">${pct !== null ? pct + "%" : "—"}</span>
+          </div>
+          <div style="height:4px;background:var(--border);border-radius:2px">
+            <div style="height:4px;width:${bar}%;background:${color};border-radius:2px;transition:width .4s"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">${s.present}/${s.total} classes</div>
+        </div>`;
+      }).join("");
+    }
+  }
+
+  // Recent records table
+  const attBody = document.getElementById("studentAttBody");
+  if (attBody) {
+    const rec = data.recent || [];
+    if (!rec.length) {
+      attBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted p-2rem">No attendance records found.</td></tr>`;
+    } else {
+      attBody.innerHTML = rec.map(r => {
+        const statusCls = r.status === "Present" ? "color:var(--green)" : "color:var(--danger)";
+        return `<tr>
+          <td class="mono text-12px">${r.date || "—"}</td>
+          <td class="text-12px">${r.subject_name ? `<span class="subject-tag">${escapeHtml(r.subject_code || "")}</span>` : "—"}</td>
+          <td class="text-12px">—</td>
+          <td style="${statusCls};font-weight:600;font-size:12px">${r.status}</td>
+        </tr>`;
+      }).join("");
+    }
+  }
+}
+
+async function openStudentCorrectionModal() {
+  document.getElementById("corrErr").textContent  = "";
+  document.getElementById("corrSuccess").style.display = "none";
+  document.getElementById("corrDate").value   = new Date().toISOString().slice(0,10);
+  document.getElementById("corrReason").value = "";
+
+  // Load student's subjects for dropdown
+  const subjEl = document.getElementById("corrSubject");
+  if (subjEl && subjEl.options.length <= 1) {
+    const res  = await api("/student/me/attendance");
+    const data = await res.json();
+    (data.by_subject || []).forEach(s => {
+      const o = document.createElement("option");
+      o.value = s.subject_id; o.textContent = `${s.subject_code} — ${s.subject_name}`;
+      subjEl.appendChild(o);
+    });
+  }
+  document.getElementById("studentCorrectionModal").style.display = "flex";
+}
+
+async function submitCorrectionRequest() {
+  const errEl  = document.getElementById("corrErr");
+  const okEl   = document.getElementById("corrSuccess");
+  errEl.textContent = ""; okEl.style.display = "none";
+
+  const payload = {
+    date:       document.getElementById("corrDate").value,
+    subject_id: document.getElementById("corrSubject").value || null,
+    reason:     document.getElementById("corrReason").value.trim(),
+  };
+  if (!payload.date || !payload.reason) { errEl.textContent = "Date and reason are required."; return; }
+
+  const res  = await api("/corrections", { method: "POST", body: JSON.stringify(payload) });
+  const data = await res.json();
+  if (data.error) { errEl.textContent = data.error; return; }
+  okEl.style.display = "block";
+  document.getElementById("corrReason").value = "";
+}
+
+// ── Wire calendar tab load ────────────────────────────────────────────────
+
+const _origSwitchManageTab = switchManageTab;
+// Extend switchManageTab to handle the new calendar tab
+window.switchManageTab = function(tab, btn) {
+  _origSwitchManageTab(tab, btn);
+  if (tab === "calendar") { loadAcademicYears(); loadHolidays(); }
+};

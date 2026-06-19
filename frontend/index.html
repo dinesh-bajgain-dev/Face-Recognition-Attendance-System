@@ -164,13 +164,9 @@
           <span>वेदनेत्रम्</span>
         </div>
         <div class="flex flex-center gap-1rem">
-          <span
-            id="studentHeaderName"
-            class="text-13px text-secondary font-mono"
-          ></span>
-          <button class="btn-secondary text-12px" onclick="logout()">
-            Sign out
-          </button>
+          <span id="studentHeaderName" class="text-13px text-secondary font-mono"></span>
+          <button class="btn-secondary text-12px" onclick="openStudentCorrectionModal()">Request Correction</button>
+          <button class="btn-secondary text-12px" onclick="logout()">Sign out</button>
         </div>
       </div>
       <div class="student-body">
@@ -542,6 +538,9 @@
               placeholder="Search name or ID…"
               oninput="searchStudents()"
             />
+            <button class="btn-secondary" onclick="openImportStudentsModal()">
+              Import CSV
+            </button>
             <button class="btn-primary" onclick="navigate('enroll')">
               + Enroll New
             </button>
@@ -974,64 +973,80 @@
         <header class="page-header">
           <h1>Reports & Analytics</h1>
           <div class="header-actions">
-            <input
-              type="date"
-              id="repFrom"
-              class="select-input"
-              onchange="loadReports()"
-            />
+            <input type="date" id="repFrom" class="select-input" onchange="loadReports()" />
             <span class="text-muted">to</span>
-            <input
-              type="date"
-              id="repTo"
-              class="select-input"
-              onchange="loadReports()"
-            />
+            <input type="date" id="repTo"   class="select-input" onchange="loadReports()" />
             <select id="repDept" class="select-input" onchange="loadReports()">
               <option value="">All Departments</option>
             </select>
-            <button class="btn-secondary" onclick="exportReport()">
-              Export CSV
-            </button>
+            <button class="btn-secondary" onclick="exportReport()">Export CSV</button>
           </div>
         </header>
 
-        <!-- Metrics row: 4 cards -->
-        <div class="stats-row">
-          <div class="stat-card">
-            <div class="stat-label">Avg. Attendance</div>
-            <div class="stat-value" id="repAvgAtt">0%</div>
+        <div class="sub-tabs" style="margin-bottom:1rem">
+          <div class="sub-tab active" onclick="switchReportTab('overview', this)">Overview</div>
+          <div class="sub-tab" onclick="switchReportTab('defaulters', this)">Defaulter List</div>
+          <div class="sub-tab" onclick="switchReportTab('corrections', this)">Corrections</div>
+        </div>
+
+        <!-- Overview tab -->
+        <div class="sub-tab-panel active" id="rtab-overview">
+          <div class="stats-row">
+            <div class="stat-card"><div class="stat-label">Avg. Attendance</div><div class="stat-value" id="repAvgAtt">0%</div></div>
+            <div class="stat-card accent-green"><div class="stat-label">Highest</div><div class="stat-value" id="repHighest">0%</div></div>
+            <div class="stat-card accent-red"><div class="stat-label">Below 75%</div><div class="stat-value" id="repBelowCount">0</div></div>
+            <div class="stat-card accent-amber"><div class="stat-label">Total Recognitions</div><div class="stat-value" id="repTotalRecog">0</div></div>
           </div>
-          <div class="stat-card accent-green">
-            <div class="stat-label">Highest</div>
-            <div class="stat-value" id="repHighest">0%</div>
+          <div class="reports-chart-grid">
+            <div class="card"><div class="section-title">Monthly Attendance Trend</div><canvas id="monthlyChart" height="220"></canvas></div>
+            <div class="card"><div class="section-title">Attendance by Department</div><canvas id="deptChart" height="220"></canvas></div>
           </div>
-          <div class="stat-card accent-red">
-            <div class="stat-label">Below 75%</div>
-            <div class="stat-value" id="repBelowCount">0</div>
+          <div class="card"><div class="section-title">Per-Student Summary</div><div id="statsTableWrap"></div></div>
+        </div>
+
+        <!-- Defaulter List tab -->
+        <div class="sub-tab-panel" id="rtab-defaulters">
+          <div class="toolbar-row" style="margin-bottom:1rem">
+            <select id="defFaculty" class="input-sm w-180px" onchange="loadDefaulters()"><option value="">All Faculties</option></select>
+            <select id="defSemester" class="input-sm w-150px" onchange="loadDefaulters()">
+              <option value="">All Semesters</option>
+              <option value="1">Sem 1</option><option value="2">Sem 2</option>
+              <option value="3">Sem 3</option><option value="4">Sem 4</option>
+              <option value="5">Sem 5</option><option value="6">Sem 6</option>
+              <option value="7">Sem 7</option><option value="8">Sem 8</option>
+            </select>
+            <select id="defSubject" class="input-sm w-200px" onchange="loadDefaulters()"><option value="">All Subjects</option></select>
+            <div class="flex flex-center gap-0-5rem">
+              <label class="text-13px text-secondary">Threshold %</label>
+              <input type="number" id="defThreshold" value="75" min="0" max="100" class="input-sm" style="width:70px" onchange="loadDefaulters()">
+            </div>
+            <button class="btn-secondary" onclick="exportDefaultersCSV()">Export CSV</button>
           </div>
-          <div class="stat-card accent-amber">
-            <div class="stat-label">Total Recognitions</div>
-            <div class="stat-value" id="repTotalRecog">0</div>
+          <div id="defSummary" class="text-13px text-secondary mb-0-5rem"></div>
+          <div class="card">
+            <table class="data-table" id="defTable">
+              <thead><tr><th>Student ID</th><th>Name</th><th>Department</th><th>Sem</th><th>Subject</th><th>Present</th><th>Total</th><th style="text-align:center">%</th></tr></thead>
+              <tbody id="defBody"><tr><td colspan="8" class="text-center text-muted p-2rem">Select filters above to load defaulters</td></tr></tbody>
+            </table>
           </div>
         </div>
 
-        <!-- Charts row: Monthly + Department -->
-        <div class="reports-chart-grid">
-          <div class="card">
-            <div class="section-title">Monthly Attendance Trend</div>
-            <canvas id="monthlyChart" height="220"></canvas>
+        <!-- Corrections tab (admin view) -->
+        <div class="sub-tab-panel" id="rtab-corrections">
+          <div class="toolbar-row" style="margin-bottom:1rem">
+            <select id="corrStatusFilter" class="input-sm" onchange="loadAdminCorrections()">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
           </div>
           <div class="card">
-            <div class="section-title">Attendance by Department</div>
-            <canvas id="deptChart" height="220"></canvas>
+            <table class="data-table" id="corrTable">
+              <thead><tr><th>Student</th><th>Subject</th><th>Date</th><th>Reason</th><th>Status</th><th>Reviewed by</th><th>Actions</th></tr></thead>
+              <tbody id="corrBody"><tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+            </table>
           </div>
-        </div>
-
-        <!-- Per-Student Summary table -->
-        <div class="card">
-          <div class="section-title">Per-Student Summary</div>
-          <div id="statsTableWrap"></div>
         </div>
       </section>
 
@@ -1043,6 +1058,7 @@
           <div class="sub-tab" onclick="switchManageTab('subjects', this)">Subjects</div>
           <div class="sub-tab" onclick="switchManageTab('timeslots', this)">Time Slots</div>
           <div class="sub-tab" onclick="switchManageTab('timetable', this)">Timetable</div>
+          <div class="sub-tab" onclick="switchManageTab('calendar', this)">Calendar</div>
         </div>
 
         <!-- Faculties tab -->
@@ -1152,6 +1168,38 @@
                 </thead>
                 <tbody id="timeslotTableBody"></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+        <!-- Calendar tab -->
+        <div class="sub-tab-panel" id="mtab-calendar">
+          <div class="grid grid-2col" style="gap:1.5rem">
+            <!-- Academic Years -->
+            <div>
+              <div class="toolbar-row end" style="margin-bottom:0.5rem">
+                <button class="btn-primary" onclick="openAcademicYearModal()">+ Add Academic Year</button>
+              </div>
+              <div class="card">
+                <div class="section-title section-title-mb">Academic Years</div>
+                <table class="data-table">
+                  <thead><tr><th>Name</th><th>Start</th><th>End</th><th>Current</th><th>Actions</th></tr></thead>
+                  <tbody id="academicYearsBody"></tbody>
+                </table>
+              </div>
+            </div>
+            <!-- Holidays -->
+            <div>
+              <div class="toolbar-row" style="margin-bottom:0.5rem">
+                <select id="holYearFilter" class="input-sm w-200px" onchange="loadHolidays()"><option value="">All Years</option></select>
+                <button class="btn-primary" onclick="openHolidayModal()">+ Add Holiday</button>
+              </div>
+              <div class="card">
+                <div class="section-title section-title-mb">Holidays</div>
+                <table class="data-table">
+                  <thead><tr><th>Date</th><th>Name</th><th style="width:80px">Actions</th></tr></thead>
+                  <tbody id="holidaysBody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -2261,7 +2309,137 @@
       </div>
     </div>
 
+    <!-- Import Students Modal -->
+    <div class="modal-overlay" id="importStudentsModal">
+      <div class="modal-box" style="width:500px">
+        <div class="modal-title">Import Students from CSV</div>
+        <p class="text-13px text-secondary" style="margin-bottom:1rem">
+          CSV columns: <code>student_id, full_name, email, phone, department, faculty_id, semester, status</code><br>
+          Existing students (matched by student_id) will be updated, not duplicated.
+        </p>
+        <div class="form-group">
+          <label>CSV File</label>
+          <input type="file" id="importCsvFile" accept=".csv" class="input-sm" style="width:100%">
+        </div>
+        <div id="importProgress" style="display:none">
+          <div class="text-13px text-secondary" id="importProgressMsg">Uploading…</div>
+        </div>
+        <div id="importResult" style="display:none;margin-top:0.75rem"></div>
+        <div id="importErr" class="msg err" style="margin-top:0.5rem"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('importStudentsModal')">Close</button>
+          <button class="btn-primary" onclick="submitStudentImport()">Import</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Academic Year Modal -->
+    <div class="modal-overlay" id="academicYearModal">
+      <div class="modal-box" style="width:420px">
+        <div class="modal-title" id="acYearTitle">Add Academic Year</div>
+        <input type="hidden" id="acYearId">
+        <div class="form-group">
+          <label>Name (e.g. 2025-26)</label>
+          <input type="text" id="acYearName" class="input-sm" style="width:100%" placeholder="2025-26">
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Start Date</label>
+            <input type="date" id="acYearStart" class="input-sm" style="width:100%">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>End Date</label>
+            <input type="date" id="acYearEnd" class="input-sm" style="width:100%">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="flex flex-center gap-0-5rem">
+            <input type="checkbox" id="acYearCurrent"> Mark as current year
+          </label>
+        </div>
+        <div id="acYearErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('academicYearModal')">Cancel</button>
+          <button class="btn-primary" onclick="saveAcademicYear()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Holiday Modal -->
+    <div class="modal-overlay" id="holidayModal">
+      <div class="modal-box" style="width:380px">
+        <div class="modal-title">Add Holiday</div>
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" id="holDate" class="input-sm" style="width:100%">
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="holName" class="input-sm" style="width:100%" placeholder="e.g. Dashain Holiday">
+        </div>
+        <div class="form-group">
+          <label>Academic Year (optional)</label>
+          <select id="holYearSelect" class="input-sm" style="width:100%"><option value="">— None —</option></select>
+        </div>
+        <div id="holErr" class="msg err"></div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('holidayModal')">Cancel</button>
+          <button class="btn-primary" onclick="saveHoliday()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Student Correction Request Modal -->
+    <div class="modal-overlay" id="studentCorrectionModal">
+      <div class="modal-box" style="width:440px">
+        <div class="modal-title">Request Attendance Correction</div>
+        <p class="text-13px text-secondary" style="margin-bottom:1rem">
+          Submit a request if you were present but marked absent. Your teacher will review it.
+        </p>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Date</label>
+            <input type="date" id="corrDate" class="input-sm" style="width:100%">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Subject (optional)</label>
+            <select id="corrSubject" class="input-sm" style="width:100%"><option value="">— Select —</option></select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Reason</label>
+          <textarea id="corrReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Explain why you believe attendance should be corrected…"></textarea>
+        </div>
+        <div id="corrErr" class="msg err"></div>
+        <div id="corrSuccess" class="msg ok" style="display:none">Request submitted successfully.</div>
+        <div class="modal-footer">
+          <button class="btn-secondary" onclick="closeModal('studentCorrectionModal')">Close</button>
+          <button class="btn-primary" onclick="submitCorrectionRequest()">Submit Request</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Code Display Modal -->
+    <div class="modal-overlay" id="qrModal">
+      <div class="modal-box" style="width:380px;text-align:center">
+        <div class="modal-title">Session QR Code</div>
+        <p class="text-13px text-secondary" style="margin-bottom:0.75rem">
+          Students scan this code to mark themselves present. Code refreshes every <span id="qrExpirySec">90</span>s.
+        </p>
+        <div id="qrCanvas" style="margin:0 auto 1rem;width:220px;height:220px;background:#fff;display:flex;align-items:center;justify-content:center;border-radius:8px;padding:12px">
+          <div class="text-muted text-13px">Generating…</div>
+        </div>
+        <div id="qrExpiryBar" style="height:4px;background:var(--accent);border-radius:2px;transition:width 1s linear;margin-bottom:0.75rem"></div>
+        <div id="qrCountdown" class="text-13px text-secondary" style="margin-bottom:1rem"></div>
+        <button class="btn-secondary" onclick="refreshQR()">Refresh Now</button>
+        <div class="modal-footer" style="margin-top:1rem">
+          <button class="btn-secondary" onclick="closeQRModal()">Close</button>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
     <script src="static/js/app.js"></script>
   </body>
 </html>

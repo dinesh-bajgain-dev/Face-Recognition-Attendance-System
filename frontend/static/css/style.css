@@ -4970,3 +4970,34 @@ select#tmSubject option[value=""]:first-child {
   .weekly-grid     { grid-template-columns: repeat(2,1fr); }
   .att-method-bar  { gap: 0.3rem; }
 }
+
+/* ══════════════════════════════════════════════════════════
+   PHASE-2 ADDITIONS  (bulk import, defaulters, QR, calendar)
+══════════════════════════════════════════════════════════ */
+
+/* Report tabs scoped — override generic .sub-tab colours inside reports */
+#page-reports .sub-tab-panel { display: none; }
+#page-reports .sub-tab-panel.active { display: block; }
+
+/* Defaulter list — pct column colours set inline; just table tweaks */
+#defTable td, #corrTable td { font-size: 13px; }
+
+/* QR modal countdown bar */
+#qrExpiryBar { width: 100%; }
+
+/* Import result box */
+.msg.ok { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.3);
+          padding: .6rem .9rem; border-radius: 6px; font-size: 13px; }
+
+/* Calendar grid inside Manage */
+#mtab-calendar .grid-2col { align-items: flex-start; }
+
+/* Subject progress bars in student panel */
+#studentSubjectSummary > div:last-child { border-bottom: none !important; }
+
+/* Correction request pending badge pulsing */
+@keyframes pulse-amber { 0%,100% { opacity:1 } 50% { opacity:.55 } }
+.risk-badge.risk-atrisk { animation: pulse-amber 2s ease-in-out infinite; }
+
+/* ml-4 utility */
+.ml-4 { margin-left: 4px; }
