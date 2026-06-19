@@ -4932,20 +4932,15 @@ async function checkTimetableConflict() {
   const sem = document.getElementById("ttmSemester")?.value;
   const day = document.getElementById("ttmDay")?.value;
   const sid = document.getElementById("ttmSlot")?.value;
+  const tid = document.getElementById("ttmTeacher")?.value;
   const conflEl = document.getElementById("ttmConflict");
   if (!fid || !sem || !day || !sid) {
     conflEl.textContent = "Fill all required fields first";
     return;
   }
-  const r = await api("/timetable/check", {
-    method: "POST",
-    json: {
-      faculty_id: +fid,
-      semester: +sem,
-      day_of_week: day,
-      time_slot_id: +sid,
-    },
-  });
+  const payload = { faculty_id: +fid, semester: +sem, day_of_week: day, time_slot_id: +sid };
+  if (tid) payload.teacher_id = +tid;
+  const r = await api("/timetable/check", { method: "POST", json: payload });
   if (!r) return;
   const d = await r.json();
   if (d.available) {

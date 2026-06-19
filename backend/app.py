@@ -2371,25 +2371,49 @@ def check_timetable_slot():
     semester     = d.get("semester")
     day_of_week  = d.get("day_of_week")
     time_slot_id = d.get("time_slot_id")
+    teacher_id   = d.get("teacher_id")
     exclude_id   = d.get("exclude_id")   # for edit: skip own entry
     if not all([faculty_id, semester, day_of_week, time_slot_id]):
         return jsonify({"error": "faculty_id, semester, day_of_week, time_slot_id required"}), 400
-    sql = """
-        SELECT cs.id, t.full_name AS teacher_name, s.name AS subject_name
-        FROM class_schedules cs
-        LEFT JOIN teachers t ON t.id = cs.teacher_id
-        LEFT JOIN subjects s ON s.id = cs.subject_id
-        WHERE cs.faculty_id=%s AND cs.semester=%s
-          AND cs.day_of_week=%s AND cs.time_slot_id=%s
-    """
-    params = [faculty_id, semester, day_of_week, time_slot_id]
-    if exclude_id:
-        sql += " AND cs.id != %s"; params.append(exclude_id)
     with get_db() as conn:
-        existing = qone(conn, sql, params)
-    if existing:
-        return jsonify({"available": False, "conflict": existing,
-                        "message": f"Slot taken by {existing.get('teacher_name','?')} — {existing.get('subject_name','?')}"})
+        # 1. Check if the slot (this specific class) is already taken
+        sql = """
+            SELECT cs.id, t.full_name AS teacher_name, s.name AS subject_name,
+                   f.name AS faculty_name
+            FROM class_schedules cs
+            LEFT JOIN teachers t ON t.id = cs.teacher_id
+            LEFT JOIN subjects s ON s.id = cs.subject_id
+            LEFT JOIN faculties f ON f.id = cs.faculty_id
+            WHERE cs.faculty_id=%s AND cs.semester=%s
+              AND cs.day_of_week=%s AND cs.time_slot_id=%s
+        """
+        params = [faculty_id, semester, day_of_week, time_slot_id]
+        if exclude_id:
+            sql += " AND cs.id != %s"; params.append(exclude_id)
+        slot_conflict = qone(conn, sql, params)
+        if slot_conflict:
+            return jsonify({"available": False, "conflict": slot_conflict,
+                            "message": f"Slot taken by {slot_conflict.get('teacher_name','?')} — {slot_conflict.get('subject_name','?')}"})
+
+        # 2. Check if the chosen teacher is already teaching elsewhere at the same time
+        if teacher_id:
+            t_sql = """
+                SELECT cs.id, f.name AS faculty_name, cs.semester,
+                       s.name AS subject_name
+                FROM class_schedules cs
+                LEFT JOIN faculties f ON f.id = cs.faculty_id
+                LEFT JOIN subjects  s ON s.id = cs.subject_id
+                WHERE cs.teacher_id=%s
+                  AND cs.day_of_week=%s AND cs.time_slot_id=%s
+            """
+            t_params = [teacher_id, day_of_week, time_slot_id]
+            if exclude_id:
+                t_sql += " AND cs.id != %s"; t_params.append(exclude_id)
+            t_conflict = qone(conn, t_sql, t_params)
+            if t_conflict:
+                return jsonify({"available": False, "conflict": t_conflict,
+                                "message": f"Teacher already assigned to {t_conflict.get('faculty_name','?')} Sem {t_conflict.get('semester','?')} — {t_conflict.get('subject_name','?')} at this time"})
+
     return jsonify({"available": True})
 
 @app.route("/api/timetable", methods=["POST"])
@@ -2404,18 +2428,31 @@ def create_timetable_entry():
     subject_id   = d.get("subject_id")
     if not all([faculty_id, semester, day_of_week, time_slot_id]):
         return jsonify({"error": "faculty_id, semester, day_of_week, time_slot_id required"}), 400
-    try:
-        with get_db() as conn:
+    with get_db() as conn:
+        # Block if teacher is already teaching at this day+time in any other class
+        if teacher_id:
+            clash = qone(conn, """
+                SELECT cs.id, f.name AS faculty_name, cs.semester, s.name AS subject_name
+                FROM class_schedules cs
+                LEFT JOIN faculties f ON f.id = cs.faculty_id
+                LEFT JOIN subjects  s ON s.id = cs.subject_id
+                WHERE cs.teacher_id=%s AND cs.day_of_week=%s AND cs.time_slot_id=%s
+            """, (teacher_id, day_of_week, time_slot_id))
+            if clash:
+                return jsonify({
+                    "error": f"Teacher conflict — already assigned to {clash.get('faculty_name','?')} Sem {clash.get('semester','?')} ({clash.get('subject_name','?')}) at this time"
+                }), 409
+        try:
             row = qone(conn, """
                 INSERT INTO class_schedules
                     (faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id)
                 VALUES (%s,%s,%s,%s,%s,%s)
                 RETURNING id, faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id
             """, (faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id))
-    except Exception as e:
-        if "unique" in str(e).lower():
-            return jsonify({"error": "Timetable collision — slot already occupied"}), 409
-        raise
+        except Exception as e:
+            if "unique" in str(e).lower():
+                return jsonify({"error": "Timetable collision — slot already occupied"}), 409
+            raise
     _log_activity(g.user["username"], "create_timetable", "schedule", target_id=str(row["id"]))
     return jsonify({"entry": row}), 201
 
