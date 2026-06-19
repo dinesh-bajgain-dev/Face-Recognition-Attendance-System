@@ -3060,7 +3060,9 @@ function selectLoginRole(role) {
 /* ── Generic modal close ──────────────────────────────────────────────── */
 function closeModal(id) {
   const el = document.getElementById(id);
-  if (el) el.style.display = "none";
+  if (!el) return;
+  el.style.display = "none";
+  el.classList.remove("open"); // timetable modal uses classList.add("open")
   document.body.style.overflow = "";
 }
 
@@ -4848,7 +4850,9 @@ async function openTimetableModal() {
   document.getElementById("ttmConflict").textContent = "";
   document.getElementById("ttmErr").textContent = "";
   await _loadTimetableModalDropdowns();
-  document.getElementById("timetableModal").classList.add("open");
+  const m = document.getElementById("timetableModal");
+  m.style.display = "";   // clear any inline display:none from closeModal
+  m.classList.add("open");
 }
 
 async function _loadTimetableModalDropdowns() {
@@ -5007,7 +5011,9 @@ async function quickAssignSlot(day, slotId, slotLabel, facId, sem) {
   document.getElementById("ttmDay").value = day;
   document.getElementById("ttmSlot").value = slotId;
   await ttmLoadSubjects();
-  document.getElementById("timetableModal").classList.add("open");
+  const _m = document.getElementById("timetableModal");
+  _m.style.display = "";
+  _m.classList.add("open");
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
