@@ -4266,6 +4266,9 @@ async function _loadAssignedClasses() {
             : ""
         }
         <div style="font-size:11px;color:var(--text3);margin-top:0.25rem">${escapeHtml(a.faculty_name || "")}</div>
+        <div class="tcc-actions" style="margin-top:0.5rem">
+          <button class="btn-primary btn-sm" onclick="openSessionModal(${a.id})">Start Attendance</button>
+        </div>
       </div>`,
       )
       .join("");
@@ -4382,7 +4385,7 @@ function _renderClassCard(cls) {
            <button class="btn-secondary btn-sm" onclick="openQRModal(${sess.id})" title="Show QR code for students to scan">QR Code</button>`
           : sessStatus === "closed"
             ? `<button class="btn-secondary btn-sm" onclick="viewSessionReport(${sess.id})">View Report</button>`
-            : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.assignment_id})">Start Attendance</button>`
+            : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.id || cls.assignment_id})">Start Attendance</button>`
       }
     </div>
   </div>`;
