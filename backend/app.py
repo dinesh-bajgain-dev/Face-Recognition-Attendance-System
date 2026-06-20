@@ -323,6 +323,24 @@ def init_db():
                 ON students USING hnsw (embedding vector_cosine_ops)
                 WITH (m=16, ef_construction=64);
             """)
+
+        # Leave requests table (student portal)
+        with conn.cursor() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS leave_requests (
+                    id          SERIAL PRIMARY KEY,
+                    student_id  TEXT NOT NULL REFERENCES students(student_id) ON DELETE CASCADE,
+                    from_date   DATE NOT NULL,
+                    to_date     DATE NOT NULL,
+                    reason      TEXT NOT NULL,
+                    status      TEXT NOT NULL DEFAULT 'pending',
+                    reviewed_by INTEGER REFERENCES teachers(id),
+                    review_note TEXT,
+                    reviewed_at TIMESTAMPTZ,
+                    created_at  TIMESTAMPTZ DEFAULT NOW()
+                );
+                CREATE INDEX IF NOT EXISTS idx_leave_student ON leave_requests(student_id, status);
+            """)
     finally:
         conn.close()
 
@@ -925,6 +943,25 @@ def require_auth(fn):
                     "SELECT id FROM teachers WHERE password_hash=%s AND status='active'", (token,))
                 if t:
                     user["_tid"] = t["id"]
+            if not user:
+                # Student session token — check sessions table
+                sess = qone(conn,
+                    """SELECT s.student_id, st.full_name, st.faculty_id, st.semester
+                       FROM sessions s
+                       JOIN students st ON st.student_id = s.student_id
+                       WHERE s.token=%s AND s.user_type='student'
+                         AND (s.expires_at IS NULL OR s.expires_at > NOW())""",
+                    (token,))
+                if sess:
+                    user = {
+                        "id": 0,
+                        "username": sess["student_id"],
+                        "role": "student",
+                        "student_id": sess["student_id"],
+                        "full_name": sess["full_name"],
+                        "faculty_id": sess["faculty_id"],
+                        "semester": sess["semester"],
+                    }
         if not user: return jsonify({"error":"Unauthorized"}), 401
         g.user = user
         return fn(*args, **kwargs)
@@ -1015,20 +1052,35 @@ def change_password():
 # ── Student portal login (email-only, no password) ────────────────────────
 @app.route("/api/student/login", methods=["POST"])
 def student_login():
+    import secrets
     d = request.json or {}
     email = (d.get("email") or "").strip().lower()
     if not email:
         return jsonify({"error": "Email is required"}), 400
     with get_db(register_pgvector=False) as conn:
         student = qone(conn,
-            """SELECT student_id, full_name, email, department, semester, status
+            """SELECT student_id, full_name, email, department, semester, status, faculty_id
                FROM students WHERE LOWER(email)=%s""",
             (email,))
-    if not student:
-        return jsonify({"error": "No student found with that email. Please use your registered email."}), 404
-    if student.get("status") == "inactive":
-        return jsonify({"error": "Your account is inactive. Contact the admin."}), 403
-    return jsonify({"ok": True, "student_id": student["student_id"], "full_name": student["full_name"]})
+        if not student:
+            return jsonify({"error": "No student found with that email. Please use your registered email."}), 404
+        if student.get("status") == "inactive":
+            return jsonify({"error": "Your account is inactive. Contact the admin."}), 403
+        # Issue a session token stored in the sessions table
+        token = secrets.token_hex(32)
+        expires = datetime.now() + timedelta(days=7)
+        qexec(conn, """
+            INSERT INTO sessions (token, user_type, student_id, created_at, expires_at)
+            VALUES (%s, 'student', %s, NOW(), %s)
+        """, (token, student["student_id"], expires))
+    return jsonify({
+        "ok": True,
+        "token": token,
+        "student_id": student["student_id"],
+        "full_name": student["full_name"],
+        "faculty_id": student.get("faculty_id"),
+        "semester": student.get("semester"),
+    })
 
 # ── Students ──────────────────────────────────────────────────────────────
 @app.route("/api/students")
@@ -3600,6 +3652,252 @@ def attendance_change_history(sid):
             WHERE ah.student_id=%s ORDER BY ah.changed_at DESC LIMIT 100
         """, (sid,))
     return jsonify({"history": rows})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  STUDENT PORTAL — Dashboard, Timetable, Notifications, Leave Requests
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/student/me/dashboard")
+@require_auth
+def student_dashboard():
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    sid = g.user["student_id"]
+    fac_id = g.user.get("faculty_id")
+    sem = g.user.get("semester")
+    today = date.today()
+    day_abbr = today.strftime("%a")[:3]  # Mon, Tue…
+
+    with get_db(register_pgvector=False) as conn:
+        # Overall stats (all time)
+        stats = qone(conn, """
+            SELECT COUNT(*) FILTER(WHERE status='Present') AS present,
+                   COUNT(*) AS total,
+                   ROUND(100.0 * COUNT(*) FILTER(WHERE status='Present')
+                         / NULLIF(COUNT(*),0), 1) AS pct
+            FROM attendance WHERE student_id=%s
+        """, (sid,))
+
+        # Per-subject stats
+        by_sub = qall(conn, """
+            SELECT sb.id, sb.name AS subject_name, sb.code AS subject_code,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+                   COUNT(a.id) AS total,
+                   ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) AS pct
+            FROM subjects sb
+            JOIN attendance a ON a.subject_id=sb.id AND a.student_id=%s
+            GROUP BY sb.id, sb.name, sb.code
+            ORDER BY pct ASC NULLS LAST
+        """, (sid,))
+
+        # Today's classes from class_schedules
+        today_classes = []
+        if fac_id and sem:
+            today_classes = qall(conn, """
+                SELECT cs.id, ts.label, ts.start_time::text, ts.end_time::text,
+                       s.name AS subject_name, s.code AS subject_code,
+                       t.full_name AS teacher_name
+                FROM class_schedules cs
+                JOIN time_slots ts ON ts.id = cs.time_slot_id
+                LEFT JOIN subjects s ON s.id = cs.subject_id
+                LEFT JOIN teachers t ON t.id = cs.teacher_id
+                WHERE cs.faculty_id=%s AND cs.semester=%s AND cs.day_of_week=%s
+                ORDER BY ts.start_time
+            """, (fac_id, sem, day_abbr))
+
+        # Upcoming holidays (next 30 days)
+        holidays = qall(conn, """
+            SELECT name, date::text FROM holidays
+            WHERE date >= %s AND date <= %s
+            ORDER BY date LIMIT 5
+        """, (today.isoformat(), (today + timedelta(days=30)).isoformat()))
+
+        # Low attendance subjects (alerts)
+        alerts = [s for s in by_sub if s["pct"] is not None and float(s["pct"]) < 75]
+
+        # Monthly trend (last 6 months)
+        monthly = qall(conn, """
+            SELECT TO_CHAR(date, 'Mon') AS month,
+                   DATE_TRUNC('month', date) AS month_start,
+                   COUNT(*) FILTER(WHERE status='Present') AS present,
+                   COUNT(*) AS total
+            FROM attendance WHERE student_id=%s
+              AND date >= %s
+            GROUP BY month, month_start ORDER BY month_start
+        """, (sid, (today - timedelta(days=180)).isoformat()))
+
+    return jsonify({
+        "stats": stats,
+        "by_subject": by_sub,
+        "today_classes": today_classes,
+        "holidays": holidays,
+        "alerts": alerts,
+        "monthly_trend": monthly,
+        "today": today.isoformat(),
+        "day": day_abbr,
+    })
+
+
+@app.route("/api/student/me/timetable")
+@require_auth
+def student_timetable():
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    fac_id = g.user.get("faculty_id")
+    sem = g.user.get("semester")
+    if not fac_id or not sem:
+        return jsonify({"timetable": [], "slots": []})
+    with get_db(register_pgvector=False) as conn:
+        entries = qall(conn, """
+            SELECT cs.id, cs.day_of_week, ts.id AS time_slot_id,
+                   ts.label, ts.start_time::text, ts.end_time::text,
+                   s.name AS subject_name, s.code AS subject_code,
+                   t.full_name AS teacher_name
+            FROM class_schedules cs
+            JOIN time_slots ts ON ts.id = cs.time_slot_id
+            LEFT JOIN subjects s ON s.id = cs.subject_id
+            LEFT JOIN teachers t ON t.id = cs.teacher_id
+            WHERE cs.faculty_id=%s AND cs.semester=%s
+            ORDER BY ts.start_time, cs.day_of_week
+        """, (fac_id, sem))
+        slots = qall(conn, """
+            SELECT DISTINCT ts.id, ts.label, ts.start_time::text, ts.end_time::text
+            FROM class_schedules cs JOIN time_slots ts ON ts.id=cs.time_slot_id
+            WHERE cs.faculty_id=%s AND cs.semester=%s ORDER BY ts.start_time
+        """, (fac_id, sem))
+    return jsonify({"timetable": entries, "slots": slots})
+
+
+@app.route("/api/student/me/notifications")
+@require_auth
+def student_notifications():
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    sid = g.user["student_id"]
+    notes = []
+    with get_db(register_pgvector=False) as conn:
+        # Low attendance alerts
+        low_subs = qall(conn, """
+            SELECT sb.name AS subject_name, sb.code AS subject_code,
+                   ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) AS pct
+            FROM subjects sb
+            JOIN attendance a ON a.subject_id=sb.id AND a.student_id=%s
+            GROUP BY sb.id, sb.name, sb.code
+            HAVING ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) < 75
+        """, (sid,))
+        for s in low_subs:
+            pct = float(s["pct"] or 0)
+            level = "critical" if pct < 65 else "warning"
+            notes.append({"type": level, "title": f"Low attendance: {s['subject_code']}",
+                           "body": f"{s['subject_name']} — {pct}% (below 75%)", "time": None})
+
+        # Pending corrections
+        corrections = qall(conn, """
+            SELECT id, date::text, status, reason FROM correction_requests
+            WHERE student_id=%s ORDER BY created_at DESC LIMIT 5
+        """, (sid,))
+        for c in corrections:
+            if c["status"] == "pending":
+                notes.append({"type": "info", "title": "Correction request pending",
+                               "body": f"Date: {c['date']} — {c['reason'][:60]}", "time": None})
+            elif c["status"] == "approved":
+                notes.append({"type": "success", "title": "Correction approved",
+                               "body": f"Your attendance on {c['date']} was corrected.", "time": None})
+            elif c["status"] == "rejected":
+                notes.append({"type": "warning", "title": "Correction rejected",
+                               "body": f"Request for {c['date']} was rejected.", "time": None})
+
+        # Leave requests
+        leaves = qall(conn, """
+            SELECT id, from_date::text, to_date::text, status FROM leave_requests
+            WHERE student_id=%s ORDER BY created_at DESC LIMIT 5
+        """, (sid,))
+        for lv in leaves:
+            if lv["status"] == "approved":
+                notes.append({"type": "success", "title": "Leave approved",
+                               "body": f"{lv['from_date']} to {lv['to_date']}", "time": None})
+            elif lv["status"] == "rejected":
+                notes.append({"type": "warning", "title": "Leave rejected",
+                               "body": f"{lv['from_date']} to {lv['to_date']}", "time": None})
+
+    return jsonify({"notifications": notes})
+
+
+@app.route("/api/leave-requests", methods=["GET"])
+@require_auth
+def list_leave_requests():
+    role = g.user.get("role")
+    with get_db(register_pgvector=False) as conn:
+        if role == "student":
+            rows = qall(conn, """
+                SELECT lr.id, lr.from_date::text, lr.to_date::text, lr.reason,
+                       lr.status, lr.review_note, lr.reviewed_at::text, lr.created_at::text,
+                       t.full_name AS reviewer_name
+                FROM leave_requests lr
+                LEFT JOIN teachers t ON t.id = lr.reviewed_by
+                WHERE lr.student_id=%s ORDER BY lr.created_at DESC
+            """, (g.user["student_id"],))
+        elif role in ("admin", "teacher"):
+            rows = qall(conn, """
+                SELECT lr.id, lr.student_id, st.full_name AS student_name,
+                       lr.from_date::text, lr.to_date::text, lr.reason,
+                       lr.status, lr.review_note, lr.reviewed_at::text, lr.created_at::text,
+                       t.full_name AS reviewer_name
+                FROM leave_requests lr
+                JOIN students st ON st.student_id = lr.student_id
+                LEFT JOIN teachers t ON t.id = lr.reviewed_by
+                ORDER BY lr.created_at DESC LIMIT 100
+            """)
+        else:
+            return jsonify({"error": "Unauthorized"}), 403
+    return jsonify({"leave_requests": rows})
+
+
+@app.route("/api/leave-requests", methods=["POST"])
+@require_auth
+def create_leave_request():
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    sid = g.user["student_id"]
+    d = request.json or {}
+    from_date = d.get("from_date")
+    to_date = d.get("to_date") or from_date
+    reason = (d.get("reason") or "").strip()
+    if not from_date or not reason:
+        return jsonify({"error": "from_date and reason are required"}), 400
+    with get_db(register_pgvector=False) as conn:
+        row = qone(conn, """
+            INSERT INTO leave_requests (student_id, from_date, to_date, reason)
+            VALUES (%s,%s,%s,%s)
+            RETURNING id, from_date::text, to_date::text, reason, status, created_at::text
+        """, (sid, from_date, to_date, reason))
+    return jsonify({"leave_request": row}), 201
+
+
+@app.route("/api/leave-requests/<int:lid>", methods=["PUT"])
+@require_auth
+def review_leave_request(lid):
+    if g.user.get("role") not in ("admin", "teacher"):
+        return jsonify({"error": "Admin or teacher access only"}), 403
+    d = request.json or {}
+    status = d.get("status")
+    if status not in ("approved", "rejected"):
+        return jsonify({"error": "status must be 'approved' or 'rejected'"}), 400
+    reviewer_id = _tid() if g.user.get("role") == "teacher" else None
+    with get_db(register_pgvector=False) as conn:
+        row = qone(conn, """
+            UPDATE leave_requests SET status=%s, reviewed_by=%s,
+                review_note=%s, reviewed_at=NOW()
+            WHERE id=%s
+            RETURNING id, status
+        """, (status, reviewer_id, d.get("note"), lid))
+    if not row:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"updated": True, "status": status})
 
 
 # ── Boot ──────────────────────────────────────────────────────────────────
