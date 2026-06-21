@@ -145,95 +145,245 @@
     <!-- ══════════════════════════════════════════════════════════════════
          STUDENT PANEL (full-screen overlay, shown after student login)
     ══════════════════════════════════════════════════════════════════════ -->
-    <div id="student-panel">
-      <div class="student-header">
-        <div class="student-header-logo">
-          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="6" fill="#e8e8ec" />
-            <rect
-              x="6"
-              y="6"
-              width="16"
-              height="16"
-              rx="3.5"
-              fill="none"
-              stroke="#0d0d0f"
-              stroke-width="2.2"
-            />
-          </svg>
+    <!-- ══════════════════════════════════════════════════════════════════
+         STUDENT PORTAL
+    ══════════════════════════════════════════════════════════════════ -->
+    <div id="student-panel" style="display:none">
+
+      <!-- Top header bar -->
+      <header class="sp-header">
+        <div class="sp-header-logo">
+          <svg width="22" height="22" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#e8e8ec"/><rect x="6" y="6" width="16" height="16" rx="3.5" fill="none" stroke="#0d0d0f" stroke-width="2.2"/></svg>
           <span>वेदनेत्रम्</span>
         </div>
-        <div class="flex flex-center gap-1rem">
-          <span id="studentHeaderName" class="text-13px text-secondary font-mono"></span>
-          <button class="btn-secondary text-12px" onclick="openStudentCorrectionModal()">Request Correction</button>
+        <div class="sp-header-right">
+          <span class="sp-notif-btn" onclick="_spNavigate('notifications')" title="Notifications">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <span id="spNotifBadge" class="sp-notif-badge" style="display:none">0</span>
+          </span>
+          <span id="spHeaderStudentName" class="text-13px text-secondary"></span>
           <button class="btn-secondary text-12px" onclick="logout()">Sign out</button>
         </div>
-      </div>
-      <div class="student-body">
-        <div class="student-welcome">
-          <h2 id="studentWelcomeName">Welcome</h2>
-          <p id="studentWelcomeSub" class="text-secondary text-13px"></p>
-        </div>
+      </header>
 
-        <!-- Stats row -->
-        <div class="student-stats-grid">
-          <div class="student-stat-card">
-            <div class="student-stat-label">Present Days</div>
-            <div class="student-stat-val green" id="sStat-present">—</div>
-          </div>
-          <div class="student-stat-card">
-            <div class="student-stat-label">Total Days</div>
-            <div class="student-stat-val" id="sStat-total">—</div>
-          </div>
-          <div class="student-stat-card">
-            <div class="student-stat-label">Overall %</div>
-            <div class="student-stat-val amber" id="sStat-pct">—</div>
-          </div>
-        </div>
+      <!-- Layout: sidebar + main content -->
+      <div class="sp-layout">
 
-        <!-- Two-column layout for subject summary + records -->
-        <div class="grid grid-2col mb-1rem">
-          <!-- Subject-wise breakdown -->
-          <div class="card">
-            <div class="section-title section-title-mb">
-              Subject-wise Attendance
+        <!-- Sidebar -->
+        <nav class="sp-sidebar">
+          <div class="sp-student-info">
+            <div class="sp-avatar" id="spAvatarInitial">S</div>
+            <div>
+              <div id="spSidebarName" class="sp-sidebar-name">Student</div>
+              <div id="spSidebarId" class="sp-sidebar-id text-secondary text-11px"></div>
             </div>
-            <div id="studentSubjectSummary">
-              <div class="text-muted text-12px p-1rem">Loading…</div>
+          </div>
+          <ul class="sp-nav">
+            <li class="sp-nav-item active" data-page="dashboard" onclick="_spNavigate('dashboard',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              Dashboard
+            </li>
+            <li class="sp-nav-item" data-page="attendance" onclick="_spNavigate('attendance',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+              Attendance
+            </li>
+            <li class="sp-nav-item" data-page="timetable" onclick="_spNavigate('timetable',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+              Timetable
+            </li>
+            <li class="sp-nav-item" data-page="calculator" onclick="_spNavigate('calculator',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/></svg>
+              Calculator
+            </li>
+            <li class="sp-nav-item" data-page="leave" onclick="_spNavigate('leave',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Leave Requests
+            </li>
+            <li class="sp-nav-item" data-page="corrections" onclick="_spNavigate('corrections',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Corrections
+            </li>
+            <li class="sp-nav-item" data-page="calendar" onclick="_spNavigate('calendar',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+              Academic Calendar
+            </li>
+            <li class="sp-nav-item" data-page="profile" onclick="_spNavigate('profile',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Profile
+            </li>
+            <li class="sp-nav-item" data-page="notifications" onclick="_spNavigate('notifications',this)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+              Notifications
+            </li>
+          </ul>
+        </nav>
+
+        <!-- Main content -->
+        <main class="sp-main">
+
+          <!-- ── Dashboard ──────────────────────────────────────────── -->
+          <div id="sp-page-dashboard" class="sp-page active">
+            <div class="sp-page-title">Dashboard</div>
+            <div id="spDashAlerts"></div>
+            <!-- Stats row -->
+            <div class="sp-stats-row" id="spStatsRow">
+              <div class="sp-stat-card"><div class="sp-stat-val green" id="spStatPresent">—</div><div class="sp-stat-label">Present Days</div></div>
+              <div class="sp-stat-card"><div class="sp-stat-val red" id="spStatAbsent">—</div><div class="sp-stat-label">Absent Days</div></div>
+              <div class="sp-stat-card"><div class="sp-stat-val accent" id="spStatPct">—</div><div class="sp-stat-label">Overall %</div></div>
+              <div class="sp-stat-card"><div class="sp-stat-val" id="spStatToday">—</div><div class="sp-stat-label">Classes Today</div></div>
+            </div>
+            <!-- Today's Classes + Upcoming Holidays -->
+            <div class="sp-grid-2">
+              <div class="sp-card">
+                <div class="sp-card-title">Today's Classes</div>
+                <div id="spTodayClasses"><div class="text-muted text-12px">Loading…</div></div>
+              </div>
+              <div class="sp-card">
+                <div class="sp-card-title">Upcoming Holidays</div>
+                <div id="spUpcomingHolidays"><div class="text-muted text-12px">Loading…</div></div>
+              </div>
+            </div>
+            <!-- Subject-wise attendance -->
+            <div class="sp-card mt-1">
+              <div class="sp-card-title">Subject-wise Attendance</div>
+              <div id="spDashSubjects"><div class="text-muted text-12px">Loading…</div></div>
             </div>
           </div>
 
-          <!-- Attendance records table -->
-          <div class="card">
-            <div class="section-title section-title-mb-1rem">
-              Attendance Records
-              <span class="text-11px text-muted ml-0-5rem font-400"
-                >(last 90)</span
-              >
+          <!-- ── Attendance ─────────────────────────────────────────── -->
+          <div id="sp-page-attendance" class="sp-page">
+            <div class="sp-page-title">Attendance Records</div>
+            <!-- Filters -->
+            <div class="sp-filter-row">
+              <input type="date" id="spAttFrom" class="input-sm" onchange="loadSPAttendance()">
+              <input type="date" id="spAttTo" class="input-sm" onchange="loadSPAttendance()">
+              <select id="spAttSubject" class="input-sm" onchange="loadSPAttendance()">
+                <option value="">All Subjects</option>
+              </select>
+              <button class="btn-secondary btn-sm" onclick="loadSPAttendance()">Apply</button>
             </div>
-            <div class="overflow-x-auto max-h-55vh overflow-y-auto">
-              <table class="student-att-table">
-                <thead class="sticky-top bg-primary">
-                  <tr>
-                    <th>Date</th>
-                    <th>Subject</th>
-                    <th>Teacher</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody id="studentAttBody">
-                  <tr>
-                    <td colspan="4" class="text-center text-muted p-2rem">
-                      Loading…
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <!-- Summary bar -->
+            <div id="spAttSummary" class="sp-att-summary"></div>
+            <!-- Subject bars -->
+            <div class="sp-card mb-1">
+              <div class="sp-card-title">Subject-wise Breakdown</div>
+              <div id="spAttSubjects"></div>
+            </div>
+            <!-- Records table -->
+            <div class="sp-card">
+              <div class="sp-card-title">Daily Records</div>
+              <div class="overflow-x-auto">
+                <table class="data-table" style="width:100%">
+                  <thead><tr><th>Date</th><th>Subject</th><th>Status</th><th>Note</th></tr></thead>
+                  <tbody id="spAttBody"><tr><td colspan="4" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-    </div>
+
+          <!-- ── Timetable ──────────────────────────────────────────── -->
+          <div id="sp-page-timetable" class="sp-page">
+            <div class="sp-page-title">My Timetable</div>
+            <div id="spTimetableGrid"><div class="text-muted text-12px">Loading…</div></div>
+          </div>
+
+          <!-- ── Calculator ─────────────────────────────────────────── -->
+          <div id="sp-page-calculator" class="sp-page">
+            <div class="sp-page-title">Attendance Calculator</div>
+            <div class="sp-grid-2">
+              <!-- Recovery calculator -->
+              <div class="sp-card">
+                <div class="sp-card-title">Recovery Calculator</div>
+                <p class="text-12px text-secondary mb-1">How many more classes do you need to reach 75%?</p>
+                <div class="form-group"><label>Classes Attended</label><input type="number" id="calcPresent" class="input-sm" style="width:100%" min="0" oninput="calcRecovery()"></div>
+                <div class="form-group"><label>Total Classes Held</label><input type="number" id="calcTotal" class="input-sm" style="width:100%" min="0" oninput="calcRecovery()"></div>
+                <div class="form-group"><label>Target Attendance %</label><input type="number" id="calcTarget" class="input-sm" style="width:100%" value="75" min="1" max="100" oninput="calcRecovery()"></div>
+                <div id="calcResult" class="sp-calc-result"></div>
+              </div>
+              <!-- Absence predictor -->
+              <div class="sp-card">
+                <div class="sp-card-title">Absence Predictor</div>
+                <p class="text-12px text-secondary mb-1">What happens if you miss upcoming classes?</p>
+                <div class="form-group"><label>Current Attended</label><input type="number" id="predPresent" class="input-sm" style="width:100%" min="0" oninput="calcPredict()"></div>
+                <div class="form-group"><label>Total Classes So Far</label><input type="number" id="predTotal" class="input-sm" style="width:100%" min="0" oninput="calcPredict()"></div>
+                <div class="form-group"><label>Classes You Plan to Miss</label><input type="number" id="predMiss" class="input-sm" style="width:100%" min="0" value="0" oninput="calcPredict()"></div>
+                <div class="form-group"><label>Total Remaining Classes</label><input type="number" id="predRemain" class="input-sm" style="width:100%" min="0" value="0" oninput="calcPredict()"></div>
+                <div id="predResult" class="sp-calc-result"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Leave Requests ─────────────────────────────────────── -->
+          <div id="sp-page-leave" class="sp-page">
+            <div class="sp-page-title">Leave Requests</div>
+            <div class="sp-card mb-1">
+              <div class="sp-card-title">Submit New Request</div>
+              <div class="sp-grid-2" style="gap:0.75rem">
+                <div class="form-group"><label>From Date *</label><input type="date" id="leaveFrom" class="input-sm" style="width:100%"></div>
+                <div class="form-group"><label>To Date (optional)</label><input type="date" id="leaveTo" class="input-sm" style="width:100%"></div>
+              </div>
+              <div class="form-group"><label>Reason *</label><textarea id="leaveReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Explain the reason for your leave…"></textarea></div>
+              <div id="leaveErr" class="msg err"></div>
+              <button class="btn-primary" onclick="submitLeaveRequest()">Submit Leave Request</button>
+            </div>
+            <div class="sp-card">
+              <div class="sp-card-title">My Leave Requests</div>
+              <div class="overflow-x-auto">
+                <table class="data-table" style="width:100%">
+                  <thead><tr><th>From</th><th>To</th><th>Reason</th><th>Status</th><th>Note</th></tr></thead>
+                  <tbody id="spLeaveBody"><tr><td colspan="5" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Corrections ─────────────────────────────────────────── -->
+          <div id="sp-page-corrections" class="sp-page">
+            <div class="sp-page-title">Attendance Corrections</div>
+            <div class="sp-card mb-1">
+              <div class="sp-card-title">Submit Correction Request</div>
+              <div class="sp-grid-2" style="gap:0.75rem">
+                <div class="form-group"><label>Date *</label><input type="date" id="corrDate" class="input-sm" style="width:100%"></div>
+                <div class="form-group"><label>Subject</label><select id="corrSubject" class="input-sm" style="width:100%"><option value="">— Any —</option></select></div>
+              </div>
+              <div class="form-group"><label>Reason *</label><textarea id="corrReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Why should attendance be corrected?"></textarea></div>
+              <div id="corrErr" class="msg err"></div>
+              <button class="btn-primary" onclick="submitSPCorrection()">Submit Request</button>
+            </div>
+            <div class="sp-card">
+              <div class="sp-card-title">My Correction Requests</div>
+              <div class="overflow-x-auto">
+                <table class="data-table" style="width:100%">
+                  <thead><tr><th>Date</th><th>Subject</th><th>Reason</th><th>Status</th><th>Note</th></tr></thead>
+                  <tbody id="spCorrBody"><tr><td colspan="5" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Calendar ───────────────────────────────────────────── -->
+          <div id="sp-page-calendar" class="sp-page">
+            <div class="sp-page-title">Academic Calendar</div>
+            <div id="spCalendarContent"><div class="text-muted text-12px">Loading…</div></div>
+          </div>
+
+          <!-- ── Profile ────────────────────────────────────────────── -->
+          <div id="sp-page-profile" class="sp-page">
+            <div class="sp-page-title">My Profile</div>
+            <div class="sp-card" style="max-width:480px">
+              <div id="spProfileContent"><div class="text-muted text-12px">Loading…</div></div>
+            </div>
+          </div>
+
+          <!-- ── Notifications ──────────────────────────────────────── -->
+          <div id="sp-page-notifications" class="sp-page">
+            <div class="sp-page-title">Notifications</div>
+            <div id="spNotifsContent"><div class="text-muted text-12px">Loading…</div></div>
+          </div>
+
+        </main>
+      </div><!-- sp-layout -->
+    </div><!-- student-panel -->
 
     <!-- ══════════════════════════════════════════════════════════════════
          MAIN APP (Admin + Teacher)
