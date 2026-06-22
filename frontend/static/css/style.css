@@ -5002,3 +5002,133 @@ select#tmSubject option[value=""]:first-child {
 
 /* ml-4 utility */
 .ml-4 { margin-left: 4px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STUDENT PORTAL v2 — full multi-page layout
+═══════════════════════════════════════════════════════════════════════ */
+#student-panel {
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Header */
+.sp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1.5rem;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 1rem;
+}
+.sp-header-logo { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 15px; font-weight: 700; letter-spacing: .1em; }
+.sp-header-right { display: flex; align-items: center; gap: 1rem; }
+.sp-notif-btn { position: relative; cursor: pointer; color: var(--text2); display: flex; align-items: center; padding: 4px; border-radius: 6px; }
+.sp-notif-btn:hover { color: var(--text1); background: var(--bg3); }
+.sp-notif-badge { position: absolute; top: -4px; right: -4px; background: var(--danger); color: #fff; font-size: 9px; font-weight: 700; border-radius: 50%; width: 16px; height: 16px; justify-content: center; align-items: center; }
+
+/* Layout */
+.sp-layout { display: flex; flex: 1; overflow: hidden; }
+
+/* Sidebar */
+.sp-sidebar {
+  width: 210px;
+  flex-shrink: 0;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 1rem 0;
+}
+.sp-student-info { display: flex; align-items: center; gap: 0.65rem; padding: 0 1rem 1rem; border-bottom: 1px solid var(--border); margin-bottom: 0.5rem; }
+.sp-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+.sp-sidebar-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 130px; }
+.sp-nav { list-style: none; padding: 0; margin: 0; }
+.sp-nav-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 1rem; font-size: 13px; cursor: pointer; color: var(--text2); border-left: 2px solid transparent; transition: all .15s; white-space: nowrap; }
+.sp-nav-item:hover { background: var(--bg3); color: var(--text1); }
+.sp-nav-item.active { color: var(--accent); background: rgba(99,102,241,.08); border-left-color: var(--accent); font-weight: 500; }
+.sp-nav-item svg { flex-shrink: 0; color: inherit; }
+
+/* Main content */
+.sp-main { flex: 1; overflow-y: auto; padding: 1.5rem 2rem; }
+.sp-page { display: none; }
+.sp-page.active { display: block; }
+.sp-page-title { font-size: 18px; font-weight: 700; margin-bottom: 1.25rem; }
+
+/* Cards */
+.sp-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1.25rem; }
+.sp-card-title { font-size: 13px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 0.75rem; }
+.mt-1 { margin-top: 1rem; }
+.mb-1 { margin-bottom: 1rem; }
+
+/* Stats row */
+.sp-stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.sp-stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.25rem; }
+.sp-stat-val { font-size: 28px; font-weight: 700; font-family: var(--mono); margin-bottom: 4px; }
+.sp-stat-val.green { color: var(--green); }
+.sp-stat-val.red { color: var(--danger); }
+.sp-stat-val.accent { color: var(--accent); }
+.sp-stat-label { font-size: 11px; color: var(--text3); font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+
+/* 2-col grid */
+.sp-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* Alerts */
+.sp-alert { padding: 0.6rem 0.9rem; border-radius: 6px; font-size: 13px; margin-bottom: 0.5rem; }
+.sp-alert-warning { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.3); color: var(--amber); }
+.sp-alert-critical { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.25); color: var(--danger); }
+
+/* Today's classes / holiday rows */
+.sp-class-row { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.sp-class-row:last-child { border-bottom: none; }
+.sp-class-time { font-family: var(--mono); font-size: 11px; color: var(--text3); flex-shrink: 0; width: 90px; padding-top: 2px; }
+
+/* Filters */
+.sp-filter-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.sp-att-summary { display: flex; gap: 1.5rem; font-size: 13px; padding: 0.6rem 0; margin-bottom: 0.75rem; color: var(--text2); }
+
+/* Timetable student view */
+.sp-tt-cell { cursor: default !important; }
+.tt-today-col { color: var(--accent) !important; font-weight: 600; }
+
+/* Calculator */
+.sp-calc-result { margin-top: 0.75rem; padding: 0.75rem; border-radius: 6px; font-size: 13px; }
+.sp-calc-ok { background: rgba(34,197,94,.1); border: 1px solid rgba(34,197,94,.25); color: var(--green); padding: 0.6rem 0.9rem; border-radius: 6px; }
+.sp-calc-need { background: var(--bg3); border: 1px solid var(--border); padding: 0.75rem; border-radius: 6px; display: flex; flex-direction: column; gap: 0.35rem; }
+
+/* Calendar */
+.sp-cal-list { display: flex; flex-direction: column; gap: 0; }
+.sp-cal-row { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.sp-cal-row:last-child { border-bottom: none; }
+.sp-cal-date { font-family: var(--mono); font-size: 11px; color: var(--text3); width: 90px; flex-shrink: 0; }
+
+/* Profile */
+.sp-avatar-lg { width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 700; margin: 0 auto 0.75rem; }
+.sp-profile-name { text-align: center; font-size: 16px; font-weight: 600; margin-bottom: 1.25rem; }
+.sp-profile-row { display: flex; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid var(--border); gap: 1rem; }
+.sp-profile-row:last-child { border-bottom: none; }
+.sp-profile-label { font-size: 12px; color: var(--text3); width: 110px; flex-shrink: 0; font-family: var(--mono); }
+.sp-profile-value { font-size: 13px; }
+
+/* Notifications */
+.sp-notif-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.sp-notif-item { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; border: 1px solid var(--border); background: var(--bg2); }
+.sp-notif-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+.sp-notif-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.sp-notif-body { font-size: 12px; color: var(--text2); }
+.sp-notif-critical { border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.06); }
+.sp-notif-warning { border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.06); }
+.sp-notif-success { border-color: rgba(34,197,94,.25); background: rgba(34,197,94,.06); }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .sp-sidebar { width: 48px; }
+  .sp-nav-item span, .sp-student-info .sp-sidebar-name, .sp-student-info .sp-sidebar-id { display: none; }
+  .sp-nav-item { justify-content: center; padding: 0.75rem; }
+  .sp-stats-row { grid-template-columns: 1fr 1fr; }
+  .sp-grid-2 { grid-template-columns: 1fr; }
+  .sp-main { padding: 1rem; }
+}
