@@ -159,7 +159,7 @@ async function doLogin() {
   const errEl = document.getElementById("loginErr");
   errEl.textContent = "";
 
-  // Student login — verify email exists in students table before allowing access
+  // Student login — verify email and get a real session token
   if (_loginRole === "student") {
     const email = document.getElementById("loginEmail")?.value.trim();
     if (!email) {
@@ -177,11 +177,13 @@ async function doLogin() {
         errEl.textContent = d.error || "Login failed";
         return;
       }
-      authToken = "student-portal";
+      authToken = d.token;
       authRole = "student";
       localStorage.setItem("frs_token", authToken);
       localStorage.setItem("frs_role", authRole);
       localStorage.setItem("frs_student_email", email);
+      localStorage.setItem("frs_student_id", d.student_id || "");
+      localStorage.setItem("frs_student_name", d.full_name || "");
       showApp();
     } catch {
       errEl.textContent = "Cannot reach server";
@@ -4652,130 +4654,550 @@ async function loadTeacherLogs() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════
-   STUDENT PORTAL
+   STUDENT PORTAL  — multi-page self-service portal
 ══════════════════════════════════════════════════════════════════════ */
-async function loadStudentPortal() {
-  const panel = document.getElementById("student-panel");
-  if (!panel) return;
-  panel.style.display = "flex";
 
+let _spStudentId = "";
+let _spDashData = null;
+
+function loadStudentPortal() {
+  _spStudentId = localStorage.getItem("frs_student_id") || "";
+  const name = localStorage.getItem("frs_student_name") || "Student";
   const email = localStorage.getItem("frs_student_email") || "";
 
+  // Set sidebar identity
+  const el = (id) => document.getElementById(id);
+  el("spSidebarName") && (el("spSidebarName").textContent = name);
+  el("spSidebarId") && (el("spSidebarId").textContent = _spStudentId);
+  el("spHeaderStudentName") && (el("spHeaderStudentName").textContent = name);
+  const init = el("spAvatarInitial");
+  if (init) init.textContent = name.charAt(0).toUpperCase();
+
+  // Show panel and navigate to dashboard
+  const panel = el("student-panel");
+  if (panel) panel.style.display = "flex";
+  _spNavigate("dashboard");
+}
+
+function _spNavigate(page, liEl) {
+  // Update sidebar active state
+  document.querySelectorAll(".sp-nav-item").forEach((li) => li.classList.remove("active"));
+  if (liEl) {
+    liEl.classList.add("active");
+  } else {
+    const found = document.querySelector(`.sp-nav-item[data-page="${page}"]`);
+    if (found) found.classList.add("active");
+  }
+  // Switch pages
+  document.querySelectorAll(".sp-page").forEach((p) => p.classList.remove("active"));
+  const pg = document.getElementById(`sp-page-${page}`);
+  if (pg) pg.classList.add("active");
+
+  // Load data for the page
+  const loaders = {
+    dashboard: loadSPDashboard,
+    attendance: loadSPAttendance,
+    timetable: loadSPTimetable,
+    calculator: loadSPCalculator,
+    leave: loadSPLeave,
+    corrections: loadSPCorrections,
+    calendar: loadSPCalendar,
+    profile: loadSPProfile,
+    notifications: loadSPNotifications,
+  };
+  if (loaders[page]) loaders[page]();
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────
+
+async function loadSPDashboard() {
   try {
-    const r = await fetch(`${API}/students`, {
+    const r = await fetch(`${API}/student/me/dashboard`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    _spDashData = d;
+    const stats = d.stats || {};
+    const present = parseInt(stats.present || 0);
+    const total = parseInt(stats.total || 0);
+    const absent = total - present;
+    const pct = stats.pct ? parseFloat(stats.pct) : 0;
+
+    const sv = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    sv("spStatPresent", present);
+    sv("spStatAbsent", absent);
+    sv("spStatPct", pct + "%");
+    const pctEl = document.getElementById("spStatPct");
+    if (pctEl) pctEl.style.color = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
+    sv("spStatToday", (d.today_classes || []).length);
+
+    // Academic alerts
+    const alertsEl = document.getElementById("spDashAlerts");
+    if (alertsEl) {
+      const alerts = d.alerts || [];
+      alertsEl.innerHTML = alerts.map((a) => {
+        const ap = parseFloat(a.pct || 0);
+        const cls = ap < 65 ? "sp-alert-critical" : "sp-alert-warning";
+        return `<div class="sp-alert ${cls}">
+          <strong>${escapeHtml(a.subject_code)}</strong> — ${escapeHtml(a.subject_name)}:
+          ${ap}% attendance. ${ap < 65 ? "⚠ Critical — immediate action needed." : "Below 75% threshold."}
+        </div>`;
+      }).join("");
+    }
+
+    // Today's classes
+    const todayEl = document.getElementById("spTodayClasses");
+    if (todayEl) {
+      const cls = d.today_classes || [];
+      todayEl.innerHTML = !cls.length
+        ? `<div class="text-muted text-12px">No classes scheduled today (${d.day || ""}).</div>`
+        : cls.map((c) => `<div class="sp-class-row">
+            <span class="sp-class-time">${(c.start_time || "").slice(0, 5)}–${(c.end_time || "").slice(0, 5)}</span>
+            <div>
+              <div class="text-13px font-500">${escapeHtml(c.subject_name || c.label)}</div>
+              <div class="text-11px text-secondary">${c.teacher_name ? escapeHtml(c.teacher_name) : "—"}</div>
+            </div>
+          </div>`).join("");
+    }
+
+    // Upcoming holidays
+    const holEl = document.getElementById("spUpcomingHolidays");
+    if (holEl) {
+      const hols = d.holidays || [];
+      holEl.innerHTML = !hols.length
+        ? `<div class="text-muted text-12px">No holidays in the next 30 days.</div>`
+        : hols.map((h) => `<div class="sp-class-row">
+            <span class="sp-class-time">${h.date}</span>
+            <div class="text-13px">${escapeHtml(h.name)}</div>
+          </div>`).join("");
+    }
+
+    // Subject-wise bars
+    const subEl = document.getElementById("spDashSubjects");
+    if (subEl) _spRenderSubjectBars(subEl, d.by_subject || []);
+
+    // Prefill calculator with current stats
+    const cp = document.getElementById("calcPresent");
+    const ct = document.getElementById("calcTotal");
+    const pp = document.getElementById("predPresent");
+    const pt = document.getElementById("predTotal");
+    if (cp && !cp.value) cp.value = present;
+    if (ct && !ct.value) ct.value = total;
+    if (pp && !pp.value) pp.value = present;
+    if (pt && !pt.value) pt.value = total;
+    calcRecovery(); calcPredict();
+
+  } catch (e) {
+    console.error("loadSPDashboard:", e);
+  }
+}
+
+function _spRenderSubjectBars(el, subs) {
+  if (!subs.length) {
+    el.innerHTML = `<div class="text-muted text-12px">No attendance records yet.</div>`;
+    return;
+  }
+  el.innerHTML = subs.map((s) => {
+    const pct = s.pct !== null ? parseFloat(s.pct) : null;
+    const color = pct === null ? "var(--text3)" : pct < 65 ? "var(--danger)" : pct < 75 ? "var(--amber)" : "var(--green)";
+    const statusLabel = pct === null ? "" : pct < 65 ? " · Critical" : pct < 75 ? " · At Risk" : " · Safe";
+    return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span class="text-13px"><span class="subject-tag" style="font-size:11px">${escapeHtml(s.subject_code)}</span> ${escapeHtml(s.subject_name)}</span>
+        <span style="font-size:12px;font-weight:600;color:${color}">${pct !== null ? pct + "%" : "—"}${statusLabel}</span>
+      </div>
+      <div style="height:5px;background:var(--border);border-radius:3px">
+        <div style="height:5px;width:${Math.min(pct ?? 0, 100)}%;background:${color};border-radius:3px;transition:width .4s"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.present}/${s.total} classes attended</div>
+    </div>`;
+  }).join("");
+}
+
+// ── Attendance ─────────────────────────────────────────────────────────────
+
+async function loadSPAttendance() {
+  const from = document.getElementById("spAttFrom")?.value || "";
+  const to = document.getElementById("spAttTo")?.value || "";
+  const subjectFilter = document.getElementById("spAttSubject")?.value || "";
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  try {
+    const r = await fetch(`${API}/student/me/attendance?${qs}`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
     if (!r.ok) throw new Error();
     const d = await r.json();
-    const students = d.students || [];
-    const student = email
-      ? students.find((s) => s.email?.toLowerCase() === email.toLowerCase())
-      : null;
 
-    if (!student) {
-      const wn = document.getElementById("studentWelcomeName");
-      if (wn) wn.textContent = "Welcome";
-      const ws = document.getElementById("studentWelcomeSub");
-      if (ws)
-        ws.textContent = email
-          ? `No student record found for ${email}`
-          : "Please log in with your email.";
-      return;
+    // Summary bar
+    const overall = d.overall || {};
+    const summEl = document.getElementById("spAttSummary");
+    if (summEl) {
+      const pct = parseFloat(overall.pct || 0);
+      const color = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
+      summEl.innerHTML = `<span>Present: <strong>${overall.present || 0}</strong></span>
+        <span>Total: <strong>${overall.total || 0}</strong></span>
+        <span>Overall: <strong style="color:${color}">${pct}%</strong></span>`;
     }
 
-    const hn = document.getElementById("studentHeaderName");
-    if (hn) hn.textContent = student.student_id;
-    const wn = document.getElementById("studentWelcomeName");
-    if (wn) wn.textContent = `Welcome, ${student.full_name}`;
-    const ws = document.getElementById("studentWelcomeSub");
-    if (ws)
-      ws.textContent = `${student.department || ""} · ${student.email || ""}`;
+    // Subject bars
+    const subEl = document.getElementById("spAttSubjects");
+    if (subEl) _spRenderSubjectBars(subEl, d.by_subject || []);
 
-    // Load full profile
-    const pr = await fetch(`${API}/students/${student.student_id}`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-    if (!pr.ok) throw new Error();
-    const p = await pr.json();
-
-    const pct = p.stats?.percentage || 0;
-    const color =
-      pct >= 75 ? "var(--green)" : pct >= 50 ? "var(--amber)" : "var(--red)";
-
-    const sp = document.getElementById("sStat-present");
-    if (sp) sp.textContent = p.stats?.total_present || 0;
-    const st = document.getElementById("sStat-total");
-    if (st) st.textContent = p.stats?.total_days || 0;
-    const sc = document.getElementById("sStat-pct");
-    if (sc) {
-      sc.textContent = `${pct}%`;
-      sc.style.color = color;
+    // Populate subject filter dropdown
+    const subjSel = document.getElementById("spAttSubject");
+    if (subjSel && subjSel.options.length <= 1 && d.by_subject?.length) {
+      d.by_subject.forEach((s) => {
+        const o = document.createElement("option");
+        o.value = s.subject_id;
+        o.text = `${s.subject_code} — ${s.subject_name}`;
+        subjSel.add(o);
+      });
+      if (subjectFilter) subjSel.value = subjectFilter;
     }
 
-    // Per-subject breakdown
-    const subjectEl = document.getElementById("studentSubjectSummary");
-    if (subjectEl) {
-      const subs = p.by_subject || [];
-      if (!subs.length) {
-        subjectEl.innerHTML = `<div class="text-muted text-12px p-1rem">No subject-wise records yet. (Overall: ${pct}%)</div>`;
-      } else {
-        subjectEl.innerHTML = subs
-          .map((s) => {
-            const sp = s.pct !== null ? parseFloat(s.pct) : null;
-            const sc =
-              sp === null
-                ? "var(--text3)"
-                : sp < 60
-                  ? "var(--danger)"
-                  : sp < 75
-                    ? "var(--amber)"
-                    : "var(--green)";
-            return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-              <span class="text-13px"><span class="subject-tag" style="font-size:11px">${escapeHtml(s.subject_code)}</span> ${escapeHtml(s.subject_name)}</span>
-              <span style="font-size:12px;font-weight:600;color:${sc}">${sp !== null ? sp + "%" : "—"}</span>
-            </div>
-            <div style="height:4px;background:var(--border);border-radius:2px">
-              <div style="height:4px;width:${sp ?? 0}%;background:${sc};border-radius:2px;transition:width .4s"></div>
-            </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.present}/${s.total} classes</div>
-          </div>`;
-          })
-          .join("");
-      }
-    }
-
-    const attBody = document.getElementById("studentAttBody");
-    if (attBody) {
-      const records = (p.attendance || []).slice(0, 90);
-      if (!records.length) {
-        attBody.innerHTML = `<tr><td colspan="4" class="text-center text-muted p-2rem">No records yet.</td></tr>`;
-      } else {
-        attBody.innerHTML = records
-          .map((rec) => {
-            const sc =
-              rec.status === "Present"
-                ? "color:var(--green)"
-                : "color:var(--danger)";
+    // Records table
+    const body = document.getElementById("spAttBody");
+    if (body) {
+      let records = d.recent || [];
+      if (subjectFilter) records = records.filter((r) => String(r.subject_id) === subjectFilter);
+      body.innerHTML = !records.length
+        ? `<tr><td colspan="4" class="text-center text-muted p-2rem">No records found.</td></tr>`
+        : records.map((rec) => {
+            const color = rec.status === "Present" ? "var(--green)" : "var(--danger)";
             const sub = rec.subject_code
               ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(rec.subject_code)}</span>`
-              : `<span style="color:var(--text3)">—</span>`;
+              : "—";
             return `<tr>
-            <td style="font-family:var(--mono);font-size:11px">${rec.date}</td>
-            <td style="font-size:11px">${sub}</td>
-            <td style="color:var(--text3);font-size:11px">—</td>
-            <td style="${sc};font-weight:600;font-size:12px">${rec.status}</td>
-          </tr>`;
-          })
-          .join("");
-      }
+              <td class="mono text-12px">${rec.date}</td>
+              <td>${sub} <span class="text-12px">${escapeHtml(rec.subject_name || "")}</span></td>
+              <td style="color:${color};font-weight:600;font-size:12px">${rec.status}</td>
+              <td class="text-12px text-secondary">${escapeHtml(rec.note || "")}</td>
+            </tr>`;
+          }).join("");
     }
   } catch (e) {
-    console.error("loadStudentPortal:", e);
-    const ws = document.getElementById("studentWelcomeSub");
-    if (ws)
-      ws.textContent = "Could not load your attendance data. Check connection.";
+    console.error("loadSPAttendance:", e);
   }
+}
+
+// ── Timetable ─────────────────────────────────────────────────────────────
+
+async function loadSPTimetable() {
+  const grid = document.getElementById("spTimetableGrid");
+  if (!grid) return;
+  grid.innerHTML = `<div class="text-muted text-12px">Loading…</div>`;
+  try {
+    const r = await fetch(`${API}/student/me/timetable`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const slots = d.slots || [];
+    const entries = d.timetable || [];
+    if (!slots.length) {
+      grid.innerHTML = `<div class="text-muted text-12px">No timetable assigned yet. Contact your administrator.</div>`;
+      return;
+    }
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayLabels = { Mon:"Monday", Tue:"Tuesday", Wed:"Wednesday", Thu:"Thursday", Fri:"Friday", Sat:"Saturday" };
+    const lookup = {};
+    entries.forEach((e) => { lookup[`${e.day_of_week}_${e.time_slot_id}`] = e; });
+    const today = new Date().toLocaleDateString("en-US", {weekday: "short"}).slice(0, 3);
+
+    grid.innerHTML = `<div class="tt-grid">
+      <div class="tt-head-cell tt-corner"></div>
+      ${days.map((d) => `<div class="tt-head-cell${d === today ? " tt-today-col" : ""}">${dayLabels[d]}</div>`).join("")}
+      ${slots.map((slot) => `
+        <div class="tt-slot-label">
+          <div class="tt-slot-name">${slot.label}</div>
+          <div class="tt-slot-time">${(slot.start_time||"").slice(0,5)}–${(slot.end_time||"").slice(0,5)}</div>
+        </div>
+        ${days.map((day) => {
+          const e = lookup[`${day}_${slot.id}`];
+          if (e) return `<div class="tt-cell tt-cell-filled sp-tt-cell">
+            <div class="tt-cell-subject">${escapeHtml(e.subject_code||e.subject_name||"—")}</div>
+            <div class="tt-cell-teacher">${escapeHtml(e.teacher_name||"")}</div>
+          </div>`;
+          return `<div class="tt-cell" style="background:var(--bg2)"></div>`;
+        }).join("")}
+      `).join("")}
+    </div>`;
+  } catch (e) {
+    grid.innerHTML = `<div class="msg err">Failed to load timetable.</div>`;
+  }
+}
+
+// ── Calculator ────────────────────────────────────────────────────────────
+
+function loadSPCalculator() {
+  calcRecovery();
+  calcPredict();
+}
+
+function calcRecovery() {
+  const present = parseInt(document.getElementById("calcPresent")?.value || 0);
+  const total = parseInt(document.getElementById("calcTotal")?.value || 0);
+  const target = parseFloat(document.getElementById("calcTarget")?.value || 75);
+  const el = document.getElementById("calcResult");
+  if (!el) return;
+  if (!total) { el.innerHTML = ""; return; }
+  const currentPct = total ? (present / total * 100) : 0;
+  if (currentPct >= target) {
+    el.innerHTML = `<div class="sp-calc-ok">✓ You are already at ${currentPct.toFixed(1)}% — above the ${target}% target.</div>`;
+    return;
+  }
+  // Solve: (present + x) / (total + x) >= target/100
+  // x >= (target*total - 100*present) / (100 - target)
+  const x = Math.ceil((target * total - 100 * present) / (100 - target));
+  const projected = ((present + x) / (total + x) * 100).toFixed(1);
+  el.innerHTML = `<div class="sp-calc-need">
+    <div>Current: <strong>${currentPct.toFixed(1)}%</strong></div>
+    <div>You need to attend <strong>${x} more consecutive classes</strong></div>
+    <div>That will bring you to <strong>${projected}%</strong></div>
+  </div>`;
+}
+
+function calcPredict() {
+  const present = parseInt(document.getElementById("predPresent")?.value || 0);
+  const total = parseInt(document.getElementById("predTotal")?.value || 0);
+  const miss = parseInt(document.getElementById("predMiss")?.value || 0);
+  const remain = parseInt(document.getElementById("predRemain")?.value || 0);
+  const el = document.getElementById("predResult");
+  if (!el) return;
+  if (!total) { el.innerHTML = ""; return; }
+  // Assuming they attend all remaining classes except the ones they miss
+  const futurePresent = present + (remain - miss);
+  const futureTotal = total + remain;
+  const futurePct = futureTotal ? (futurePresent / futureTotal * 100) : 0;
+  const color = futurePct >= 75 ? "var(--green)" : futurePct >= 65 ? "var(--amber)" : "var(--danger)";
+  const risk = futurePct >= 75 ? "Safe" : futurePct >= 65 ? "At Risk" : "Critical";
+  el.innerHTML = `<div class="sp-calc-need">
+    <div>After missing ${miss} classes: <strong style="color:${color}">${futurePct.toFixed(1)}%</strong></div>
+    <div>Risk level: <strong style="color:${color}">${risk}</strong></div>
+    ${futurePct < 75 ? `<div style="margin-top:0.5rem;font-size:12px;color:var(--text3)">You would need to attend additional classes to recover to 75%.</div>` : ""}
+  </div>`;
+}
+
+// ── Leave Requests ────────────────────────────────────────────────────────
+
+async function loadSPLeave() {
+  const body = document.getElementById("spLeaveBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
+  try {
+    const r = await fetch(`${API}/leave-requests`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const rows = d.leave_requests || [];
+    body.innerHTML = !rows.length
+      ? `<tr><td colspan="5" class="text-center text-muted p-2rem">No leave requests yet.</td></tr>`
+      : rows.map((lr) => {
+          const statusColor = lr.status === "approved" ? "var(--green)" : lr.status === "rejected" ? "var(--danger)" : "var(--amber)";
+          return `<tr>
+            <td class="mono text-12px">${lr.from_date}</td>
+            <td class="mono text-12px">${lr.to_date}</td>
+            <td class="text-12px">${escapeHtml(lr.reason)}</td>
+            <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${lr.status}</span></td>
+            <td class="text-12px text-secondary">${escapeHtml(lr.review_note || "")}</td>
+          </tr>`;
+        }).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Failed to load.</td></tr>`;
+  }
+}
+
+async function submitLeaveRequest() {
+  const errEl = document.getElementById("leaveErr");
+  errEl.textContent = "";
+  const fromDate = document.getElementById("leaveFrom")?.value;
+  const toDate = document.getElementById("leaveTo")?.value || fromDate;
+  const reason = document.getElementById("leaveReason")?.value.trim();
+  if (!fromDate || !reason) {
+    errEl.textContent = "From date and reason are required.";
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/leave-requests`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ from_date: fromDate, to_date: toDate, reason }),
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || "Failed to submit."; return; }
+    document.getElementById("leaveFrom").value = "";
+    document.getElementById("leaveTo").value = "";
+    document.getElementById("leaveReason").value = "";
+    toast("Leave request submitted");
+    loadSPLeave();
+  } catch { errEl.textContent = "Cannot reach server."; }
+}
+
+// ── Corrections ───────────────────────────────────────────────────────────
+
+async function loadSPCorrections() {
+  const body = document.getElementById("spCorrBody");
+  if (body) {
+    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
+  }
+  // Populate subject dropdown
+  const subjSel = document.getElementById("corrSubject");
+  if (subjSel && subjSel.options.length <= 1 && _spDashData?.by_subject?.length) {
+    _spDashData.by_subject.forEach((s) => {
+      const o = document.createElement("option");
+      o.value = s.id || s.subject_id;
+      o.text = `${s.subject_code} — ${s.subject_name}`;
+      subjSel.add(o);
+    });
+  }
+  try {
+    const r = await fetch(`${API}/corrections`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const rows = (d.corrections || []).filter((c) => c.student_id === _spStudentId);
+    if (body) {
+      body.innerHTML = !rows.length
+        ? `<tr><td colspan="5" class="text-center text-muted p-2rem">No correction requests yet.</td></tr>`
+        : rows.map((c) => {
+            const statusColor = c.status === "approved" ? "var(--green)" : c.status === "rejected" ? "var(--danger)" : "var(--amber)";
+            return `<tr>
+              <td class="mono text-12px">${c.date}</td>
+              <td class="text-12px">${c.subject_code ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(c.subject_code)}</span>` : "—"}</td>
+              <td class="text-12px">${escapeHtml(c.reason)}</td>
+              <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${c.status}</span></td>
+              <td class="text-12px text-secondary">${escapeHtml(c.review_note || "")}</td>
+            </tr>`;
+          }).join("");
+    }
+  } catch { if (body) body.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Failed to load.</td></tr>`; }
+}
+
+async function submitSPCorrection() {
+  const errEl = document.getElementById("corrErr");
+  errEl.textContent = "";
+  const date = document.getElementById("corrDate")?.value;
+  const subject_id = document.getElementById("corrSubject")?.value || null;
+  const reason = document.getElementById("corrReason")?.value.trim();
+  if (!date || !reason) { errEl.textContent = "Date and reason are required."; return; }
+  try {
+    const r = await fetch(`${API}/corrections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+      body: JSON.stringify({ date, subject_id: subject_id ? +subject_id : null, reason }),
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || "Failed to submit."; return; }
+    document.getElementById("corrDate").value = "";
+    document.getElementById("corrReason").value = "";
+    toast("Correction request submitted");
+    loadSPCorrections();
+  } catch { errEl.textContent = "Cannot reach server."; }
+}
+
+// ── Academic Calendar ──────────────────────────────────────────────────────
+
+async function loadSPCalendar() {
+  const el = document.getElementById("spCalendarContent");
+  if (!el) return;
+  el.innerHTML = `<div class="text-muted text-12px">Loading…</div>`;
+  try {
+    const r = await fetch(`${API}/calendar/holidays`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = d.holidays || [];
+    const upcoming = rows.filter((h) => h.date >= today);
+    const past = rows.filter((h) => h.date < today).reverse();
+
+    const renderList = (items) => items.length
+      ? `<div class="sp-cal-list">${items.map((h) => `
+          <div class="sp-cal-row">
+            <div class="sp-cal-date">${h.date}</div>
+            <div class="text-13px">${escapeHtml(h.name)}</div>
+          </div>`).join("")}</div>`
+      : `<div class="text-muted text-12px">None.</div>`;
+
+    el.innerHTML = `
+      <div class="sp-card mb-1"><div class="sp-card-title">Upcoming Holidays</div>${renderList(upcoming)}</div>
+      <div class="sp-card"><div class="sp-card-title" style="color:var(--text3)">Past Holidays</div>${renderList(past.slice(0, 10))}</div>
+    `;
+  } catch { el.innerHTML = `<div class="msg err">Failed to load calendar.</div>`; }
+}
+
+// ── Profile ───────────────────────────────────────────────────────────────
+
+async function loadSPProfile() {
+  const el = document.getElementById("spProfileContent");
+  if (!el) return;
+  el.innerHTML = `<div class="text-muted text-12px">Loading…</div>`;
+  try {
+    const r = await fetch(`${API}/students/${_spStudentId}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const s = d.student || {};
+    const row = (label, value) => `<div class="sp-profile-row">
+      <span class="sp-profile-label">${label}</span>
+      <span class="sp-profile-value">${escapeHtml(String(value || "—"))}</span>
+    </div>`;
+    el.innerHTML = `
+      <div class="sp-avatar-lg">${(s.full_name || "S").charAt(0).toUpperCase()}</div>
+      <div class="sp-profile-name">${escapeHtml(s.full_name || "")}</div>
+      ${row("Student ID", s.student_id)}
+      ${row("Email", s.email)}
+      ${row("Faculty", s.department)}
+      ${row("Semester", s.semester ? "Semester " + s.semester : "—")}
+      ${row("Phone", s.phone)}
+      ${row("Status", s.status)}
+    `;
+  } catch { el.innerHTML = `<div class="msg err">Failed to load profile.</div>`; }
+}
+
+// ── Notifications ─────────────────────────────────────────────────────────
+
+async function loadSPNotifications() {
+  const el = document.getElementById("spNotifsContent");
+  if (!el) return;
+  el.innerHTML = `<div class="text-muted text-12px">Loading…</div>`;
+  try {
+    const r = await fetch(`${API}/student/me/notifications`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    const notes = d.notifications || [];
+
+    // Update badge
+    const badge = document.getElementById("spNotifBadge");
+    if (badge) {
+      const important = notes.filter((n) => n.type !== "info").length;
+      badge.textContent = important;
+      badge.style.display = important > 0 ? "flex" : "none";
+    }
+
+    if (!notes.length) {
+      el.innerHTML = `<div class="sp-card"><div class="text-muted text-12px">No notifications right now.</div></div>`;
+      return;
+    }
+    const iconMap = { critical: "🔴", warning: "🟡", success: "🟢", info: "🔵" };
+    el.innerHTML = `<div class="sp-notif-list">${notes.map((n) => `
+      <div class="sp-notif-item sp-notif-${n.type}">
+        <span class="sp-notif-icon">${iconMap[n.type] || "🔵"}</span>
+        <div>
+          <div class="sp-notif-title">${escapeHtml(n.title)}</div>
+          <div class="sp-notif-body">${escapeHtml(n.body)}</div>
+        </div>
+      </div>`).join("")}</div>`;
+  } catch { el.innerHTML = `<div class="msg err">Failed to load notifications.</div>`; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
