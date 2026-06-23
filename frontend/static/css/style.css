@@ -5132,3 +5132,8 @@ select#tmSubject option[value=""]:first-child {
   .sp-grid-2 { grid-template-columns: 1fr; }
   .sp-main { padding: 1rem; }
 }
+
+/* Notification unread indicators */
+.sp-notif-unread { border-left: 3px solid var(--accent) !important; }
+.sp-new-dot { display: inline-block; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; border-radius: 4px; padding: 1px 5px; vertical-align: middle; margin-left: 4px; }
+.sp-notif-time { font-size: 10px; color: var(--text3); margin-top: 3px; font-family: var(--mono); }
