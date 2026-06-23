@@ -1012,6 +1012,24 @@ def change_password():
     _log_activity(g.user.get("username","?"), "change_password", "user", str(g.user["id"]))
     return jsonify({"updated": True})
 
+# ── Student portal login (email-only, no password) ────────────────────────
+@app.route("/api/student/login", methods=["POST"])
+def student_login():
+    d = request.json or {}
+    email = (d.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
+    with get_db(register_pgvector=False) as conn:
+        student = qone(conn,
+            """SELECT student_id, full_name, email, department, semester, status
+               FROM students WHERE LOWER(email)=%s""",
+            (email,))
+    if not student:
+        return jsonify({"error": "No student found with that email. Please use your registered email."}), 404
+    if student.get("status") == "inactive":
+        return jsonify({"error": "Your account is inactive. Contact the admin."}), 403
+    return jsonify({"ok": True, "student_id": student["student_id"], "full_name": student["full_name"]})
+
 # ── Students ──────────────────────────────────────────────────────────────
 @app.route("/api/students")
 def list_students():

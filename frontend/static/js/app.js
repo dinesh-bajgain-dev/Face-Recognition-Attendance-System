@@ -159,19 +159,33 @@ async function doLogin() {
   const errEl = document.getElementById("loginErr");
   errEl.textContent = "";
 
-  // Student login — email-based, read-only portal (no backend auth)
+  // Student login — verify email exists in students table before allowing access
   if (_loginRole === "student") {
     const email = document.getElementById("loginEmail")?.value.trim();
     if (!email) {
       errEl.textContent = "Enter your registered email";
       return;
     }
-    authToken = "student-portal";
-    authRole = "student";
-    localStorage.setItem("frs_token", authToken);
-    localStorage.setItem("frs_role", authRole);
-    localStorage.setItem("frs_student_email", email);
-    showApp();
+    try {
+      const r = await fetch(`${API}/student/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        errEl.textContent = d.error || "Login failed";
+        return;
+      }
+      authToken = "student-portal";
+      authRole = "student";
+      localStorage.setItem("frs_token", authToken);
+      localStorage.setItem("frs_role", authRole);
+      localStorage.setItem("frs_student_email", email);
+      showApp();
+    } catch {
+      errEl.textContent = "Cannot reach server";
+    }
     return;
   }
 
