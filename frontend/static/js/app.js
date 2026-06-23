@@ -314,7 +314,15 @@ function navigate(page) {
       loadManualAttendance();
     },
     "t-logs": loadTeacherLogs,
-    "t-reports": loadTeacherReports,
+    "t-reports": () => {
+      loadTeacherReports();
+      // Pre-load pending count for corrections badge without loading the full tab
+      api("/corrections").then((r) => r && r.json().then((d) => {
+        const pending = (d.corrections || []).filter((c) => c.status === "pending").length;
+        const badge = document.getElementById("tCorrPendingBadge");
+        if (badge) { badge.textContent = pending; badge.style.display = pending > 0 ? "inline" : "none"; }
+      })).catch(() => {});
+    },
     profile: () => {},
     enroll: () => {
       _ensureDefaultData();
@@ -4677,6 +4685,8 @@ function loadStudentPortal() {
   const panel = el("student-panel");
   if (panel) panel.style.display = "flex";
   _spNavigate("dashboard");
+  // Fetch unread notification count in background
+  _spFetchUnreadCount();
 }
 
 function _spNavigate(page, liEl) {
@@ -4893,40 +4903,62 @@ async function loadSPTimetable() {
     const r = await fetch(`${API}/student/me/timetable`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
-    if (!r.ok) throw new Error();
+    if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
-    const slots = d.slots || [];
-    const entries = d.timetable || [];
-    if (!slots.length) {
-      grid.innerHTML = `<div class="text-muted text-12px">No timetable assigned yet. Contact your administrator.</div>`;
+
+    if (d.missing === "faculty") {
+      grid.innerHTML = `<div class="sp-card"><div class="text-13px" style="color:var(--amber)">
+        ⚠ Your faculty is not set in the system. Please contact your administrator to update your enrollment.
+      </div></div>`;
       return;
     }
+
+    const slots = d.slots || [];
+    const entries = d.timetable || [];
+
+    if (!slots.length) {
+      const semNote = d.semester
+        ? `Semester ${d.semester}`
+        : "your faculty (semester not assigned — showing all)";
+      grid.innerHTML = `<div class="sp-card"><div class="text-13px text-muted">
+        No timetable entries found for ${semNote}. Contact your administrator if this is incorrect.
+      </div></div>`;
+      return;
+    }
+
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const dayLabels = { Mon:"Monday", Tue:"Tuesday", Wed:"Wednesday", Thu:"Thursday", Fri:"Friday", Sat:"Saturday" };
     const lookup = {};
     entries.forEach((e) => { lookup[`${e.day_of_week}_${e.time_slot_id}`] = e; });
     const today = new Date().toLocaleDateString("en-US", {weekday: "short"}).slice(0, 3);
+    const semLabel = d.semester ? ` — Semester ${d.semester}` : " — All Semesters";
 
-    grid.innerHTML = `<div class="tt-grid">
-      <div class="tt-head-cell tt-corner"></div>
-      ${days.map((d) => `<div class="tt-head-cell${d === today ? " tt-today-col" : ""}">${dayLabels[d]}</div>`).join("")}
-      ${slots.map((slot) => `
-        <div class="tt-slot-label">
-          <div class="tt-slot-name">${slot.label}</div>
-          <div class="tt-slot-time">${(slot.start_time||"").slice(0,5)}–${(slot.end_time||"").slice(0,5)}</div>
-        </div>
-        ${days.map((day) => {
-          const e = lookup[`${day}_${slot.id}`];
-          if (e) return `<div class="tt-cell tt-cell-filled sp-tt-cell">
-            <div class="tt-cell-subject">${escapeHtml(e.subject_code||e.subject_name||"—")}</div>
-            <div class="tt-cell-teacher">${escapeHtml(e.teacher_name||"")}</div>
-          </div>`;
-          return `<div class="tt-cell" style="background:var(--bg2)"></div>`;
-        }).join("")}
-      `).join("")}
-    </div>`;
+    grid.innerHTML = `
+      ${!d.semester ? `<div class="msg" style="margin-bottom:0.75rem;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:var(--amber)">
+        Semester not set on your account — showing all semesters for your faculty. Ask admin to update your semester.
+      </div>` : ""}
+      <div class="tt-grid" style="--tt-days:6">
+        <div class="tt-head-cell tt-corner">Time${semLabel}</div>
+        ${days.map((day) => `<div class="tt-head-cell${day === today ? " tt-today-col" : ""}">${dayLabels[day]}</div>`).join("")}
+        ${slots.map((slot) => `
+          <div class="tt-slot-label">
+            <div class="tt-slot-name">${escapeHtml(slot.label)}</div>
+            <div class="tt-slot-time">${(slot.start_time||"").slice(0,5)}–${(slot.end_time||"").slice(0,5)}</div>
+          </div>
+          ${days.map((day) => {
+            const e = lookup[`${day}_${slot.id}`];
+            if (e) return `<div class="tt-cell tt-cell-filled sp-tt-cell" title="${escapeHtml(e.teacher_name||"")}">
+              <div class="tt-cell-subject">${escapeHtml(e.subject_code || e.subject_name || "—")}</div>
+              <div class="tt-cell-teacher">${escapeHtml(e.teacher_name || "")}</div>
+              ${!d.semester && e.semester ? `<div style="font-size:9px;color:var(--text3)">Sem ${e.semester}</div>` : ""}
+            </div>`;
+            return `<div class="tt-cell" style="background:var(--bg2)"></div>`;
+          }).join("")}
+        `).join("")}
+      </div>`;
   } catch (e) {
-    grid.innerHTML = `<div class="msg err">Failed to load timetable.</div>`;
+    console.error("loadSPTimetable:", e);
+    document.getElementById("spTimetableGrid").innerHTML = `<div class="msg err">Failed to load timetable. Please try again.</div>`;
   }
 }
 
@@ -5041,36 +5073,45 @@ async function submitLeaveRequest() {
 
 async function loadSPCorrections() {
   const body = document.getElementById("spCorrBody");
-  if (body) {
-    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
-  }
-  // Populate subject dropdown
+  if (body) body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
+
+  // Load subjects for the dropdown independently (don't rely on _spDashData)
   const subjSel = document.getElementById("corrSubject");
-  if (subjSel && subjSel.options.length <= 1 && _spDashData?.by_subject?.length) {
-    _spDashData.by_subject.forEach((s) => {
-      const o = document.createElement("option");
-      o.value = s.id || s.subject_id;
-      o.text = `${s.subject_code} — ${s.subject_name}`;
-      subjSel.add(o);
-    });
+  if (subjSel && subjSel.options.length <= 1) {
+    try {
+      const sr = await fetch(`${API}/student/me/attendance`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (sr.ok) {
+        const sd = await sr.json();
+        (sd.by_subject || []).forEach((s) => {
+          const o = document.createElement("option");
+          o.value = s.subject_id;
+          o.text = `${s.subject_code} — ${s.subject_name}`;
+          subjSel.add(o);
+        });
+      }
+    } catch { /* non-critical */ }
   }
+
   try {
     const r = await fetch(`${API}/corrections`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
     if (!r.ok) throw new Error();
     const d = await r.json();
-    const rows = (d.corrections || []).filter((c) => c.student_id === _spStudentId);
+    const rows = d.corrections || [];  // Backend already filters to this student's records
     if (body) {
       body.innerHTML = !rows.length
         ? `<tr><td colspan="5" class="text-center text-muted p-2rem">No correction requests yet.</td></tr>`
         : rows.map((c) => {
             const statusColor = c.status === "approved" ? "var(--green)" : c.status === "rejected" ? "var(--danger)" : "var(--amber)";
+            const statusIcon = c.status === "approved" ? "✓ " : c.status === "rejected" ? "✗ " : "";
             return `<tr>
               <td class="mono text-12px">${c.date}</td>
               <td class="text-12px">${c.subject_code ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(c.subject_code)}</span>` : "—"}</td>
               <td class="text-12px">${escapeHtml(c.reason)}</td>
-              <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${c.status}</span></td>
+              <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${statusIcon}${c.status}</span></td>
               <td class="text-12px text-secondary">${escapeHtml(c.review_note || "")}</td>
             </tr>`;
           }).join("");
@@ -5139,27 +5180,43 @@ async function loadSPProfile() {
   if (!el) return;
   el.innerHTML = `<div class="text-muted text-12px">Loading…</div>`;
   try {
-    const r = await fetch(`${API}/students/${_spStudentId}`, {
+    const r = await fetch(`${API}/student/me/profile`, {
       headers: { Authorization: `Bearer ${authToken}` },
     });
-    if (!r.ok) throw new Error();
+    if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
-    const s = d.student || {};
+    const s = d.student || {};   // API wraps in {student: {...}}
+    const stats = d.stats || {};
     const row = (label, value) => `<div class="sp-profile-row">
       <span class="sp-profile-label">${label}</span>
       <span class="sp-profile-value">${escapeHtml(String(value || "—"))}</span>
     </div>`;
+    const pct = parseFloat(stats.pct || 0);
+    const pctColor = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
     el.innerHTML = `
       <div class="sp-avatar-lg">${(s.full_name || "S").charAt(0).toUpperCase()}</div>
       <div class="sp-profile-name">${escapeHtml(s.full_name || "")}</div>
       ${row("Student ID", s.student_id)}
       ${row("Email", s.email)}
-      ${row("Faculty", s.department)}
-      ${row("Semester", s.semester ? "Semester " + s.semester : "—")}
+      ${row("Faculty", s.faculty_name || s.department)}
+      ${row("Semester", s.semester ? "Semester " + s.semester : "Not assigned")}
       ${row("Phone", s.phone)}
       ${row("Status", s.status)}
+      ${row("Enrolled", s.enrolled_at ? s.enrolled_at.slice(0, 10) : "—")}
+      ${row("Face Samples", s.sample_count)}
+      <div class="sp-profile-row" style="margin-top:0.5rem;border-top:2px solid var(--border);padding-top:0.75rem">
+        <span class="sp-profile-label">Overall Attendance</span>
+        <span class="sp-profile-value" style="font-size:18px;font-weight:700;color:${pctColor}">${pct}%</span>
+      </div>
+      <div class="sp-profile-row">
+        <span class="sp-profile-label">Classes Present</span>
+        <span class="sp-profile-value">${stats.present || 0} / ${stats.total || 0}</span>
+      </div>
     `;
-  } catch { el.innerHTML = `<div class="msg err">Failed to load profile.</div>`; }
+  } catch (e) {
+    console.error("loadSPProfile:", e);
+    document.getElementById("spProfileContent").innerHTML = `<div class="msg err">Failed to load profile. Please try again.</div>`;
+  }
 }
 
 // ── Notifications ─────────────────────────────────────────────────────────
@@ -5175,29 +5232,50 @@ async function loadSPNotifications() {
     if (!r.ok) throw new Error();
     const d = await r.json();
     const notes = d.notifications || [];
+    const unreadCount = d.unread_count || 0;
 
-    // Update badge
-    const badge = document.getElementById("spNotifBadge");
-    if (badge) {
-      const important = notes.filter((n) => n.type !== "info").length;
-      badge.textContent = important;
-      badge.style.display = important > 0 ? "flex" : "none";
-    }
+    // Update badge — only action items (corrections/leaves reviewed), not attendance warnings
+    _spUpdateNotifBadge(unreadCount);
+
+    // Mark as read now that student has opened the page
+    fetch(`${API}/student/me/notifications/read`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+    }).then(() => _spUpdateNotifBadge(0));
 
     if (!notes.length) {
       el.innerHTML = `<div class="sp-card"><div class="text-muted text-12px">No notifications right now.</div></div>`;
       return;
     }
-    const iconMap = { critical: "🔴", warning: "🟡", success: "🟢", info: "🔵" };
+    const iconMap = { critical: "⚠️", warning: "⚠️", success: "✅", info: "ℹ️" };
     el.innerHTML = `<div class="sp-notif-list">${notes.map((n) => `
-      <div class="sp-notif-item sp-notif-${n.type}">
-        <span class="sp-notif-icon">${iconMap[n.type] || "🔵"}</span>
-        <div>
-          <div class="sp-notif-title">${escapeHtml(n.title)}</div>
+      <div class="sp-notif-item sp-notif-${n.type}${n.is_new ? " sp-notif-unread" : ""}">
+        <span class="sp-notif-icon">${iconMap[n.type] || "ℹ️"}</span>
+        <div style="flex:1">
+          <div class="sp-notif-title">${escapeHtml(n.title)}${n.is_new ? ' <span class="sp-new-dot">NEW</span>' : ""}</div>
           <div class="sp-notif-body">${escapeHtml(n.body)}</div>
+          ${n.time ? `<div class="sp-notif-time">${n.time.slice(0, 16).replace("T", " ")}</div>` : ""}
         </div>
       </div>`).join("")}</div>`;
   } catch { el.innerHTML = `<div class="msg err">Failed to load notifications.</div>`; }
+}
+
+function _spUpdateNotifBadge(count) {
+  const badge = document.getElementById("spNotifBadge");
+  if (!badge) return;
+  badge.textContent = count;
+  badge.style.display = count > 0 ? "flex" : "none";
+}
+
+async function _spFetchUnreadCount() {
+  try {
+    const r = await fetch(`${API}/student/me/notifications`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    _spUpdateNotifBadge(d.unread_count || 0);
+  } catch { /* silent */ }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -5843,6 +5921,91 @@ async function submitPhotoAttendance() {
 
 let _rptData = [];
 
+function switchTeacherReportTab(tab, btn) {
+  ["performance", "corrections"].forEach((t) => {
+    const panel = document.getElementById(`trtab-${t}`);
+    const tabBtn = document.getElementById(`trtab-btn-${t}`);
+    if (panel) panel.style.display = t === tab ? "" : "none";
+    if (tabBtn) tabBtn.classList.toggle("active", t === tab);
+  });
+  if (tab === "corrections") loadTeacherCorrections();
+  // Update refresh button action
+  const refreshBtn = document.getElementById("rptRefreshBtn");
+  if (refreshBtn) {
+    refreshBtn.onclick = tab === "corrections" ? loadTeacherCorrections : loadTeacherReports;
+  }
+}
+
+async function loadTeacherCorrections() {
+  const body = document.getElementById("tCorrBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="6" class="text-center text-muted p-1rem">Loading…</td></tr>`;
+  const statusFilter = document.getElementById("tCorrStatusFilter")?.value || "";
+  const search = (document.getElementById("tCorrSearch")?.value || "").toLowerCase();
+  try {
+    const r = await api("/corrections");
+    if (!r) return;
+    const d = await r.json();
+    let rows = d.corrections || [];
+
+    // Update pending badge
+    const pendingCount = rows.filter((c) => c.status === "pending").length;
+    const badge = document.getElementById("tCorrPendingBadge");
+    if (badge) {
+      badge.textContent = pendingCount;
+      badge.style.display = pendingCount > 0 ? "inline" : "none";
+    }
+
+    if (statusFilter) rows = rows.filter((c) => c.status === statusFilter);
+    if (search) rows = rows.filter((c) =>
+      (c.student_id || "").toLowerCase().includes(search) ||
+      (c.student_name || "").toLowerCase().includes(search)
+    );
+
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="6" class="text-center text-muted p-2rem">No correction requests found for your subjects.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((c) => {
+      const badge = c.status === "pending"
+        ? `<span class="risk-badge risk-atrisk">Pending</span>`
+        : c.status === "approved"
+        ? `<span class="risk-badge risk-good">Approved</span>`
+        : `<span class="risk-badge risk-critical">Rejected</span>`;
+      const actions = c.status === "pending"
+        ? `<button class="btn-sm btn-primary" onclick="teacherReviewCorrection(${c.id},'approved')">Approve</button>
+           <button class="btn-sm btn-danger ml-4" onclick="teacherReviewCorrection(${c.id},'rejected')">Reject</button>`
+        : `<span class="text-12px text-secondary">${escapeHtml(c.review_note || "—")}</span>`;
+      return `<tr>
+        <td>
+          <div class="text-13px font-500">${escapeHtml(c.student_name || c.student_id)}</div>
+          <div class="mono text-11px text-secondary">${c.student_id}</div>
+        </td>
+        <td>${c.subject_code ? `<span class="subject-tag">${escapeHtml(c.subject_code)}</span>` : "—"}</td>
+        <td class="mono text-12px">${c.date || "—"}</td>
+        <td class="text-13px">${escapeHtml(c.reason)}</td>
+        <td>${badge}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Failed to load.</td></tr>`;
+  }
+}
+
+async function teacherReviewCorrection(id, status) {
+  const note = status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
+  const r = await api(`/corrections/${id}`, {
+    method: "PUT",
+    json: { status, review_note: note },
+  });
+  if (!r) return;
+  const d = await r.json();
+  if (d.error) { toast(d.error, "err"); return; }
+  toast(status === "approved" ? "Correction approved — attendance updated" : "Correction rejected");
+  loadTeacherCorrections();
+}
+
 async function loadTeacherReports() {
   // Set default date range if empty
   const fromEl = document.getElementById("rptFrom");
@@ -6121,6 +6284,7 @@ function switchReportTab(tab, btn) {
   if (panel) panel.classList.add("active");
   if (tab === "defaulters") loadDefaulters();
   if (tab === "corrections") loadAdminCorrections();
+  if (tab === "leave") loadAdminLeaveRequests();
 }
 
 // ── Defaulter List ────────────────────────────────────────────────────────
@@ -6278,8 +6442,7 @@ async function adminReviewCorrection(id, status) {
     status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
   const res = await api(`/corrections/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status, review_note: note }),
+    json: { status, review_note: note },
   });
   const data = await res.json();
   if (data.error) {
@@ -6288,6 +6451,79 @@ async function adminReviewCorrection(id, status) {
   }
   toast(status === "approved" ? "Approved — attendance updated" : "Rejected");
   loadAdminCorrections();
+}
+
+// ── Leave Requests (admin/teacher view) ───────────────────────────────────
+
+async function loadAdminLeaveRequests() {
+  const statusFilter = document.getElementById("leaveStatusFilter")?.value || "";
+  const search = (document.getElementById("leaveSearchFilter")?.value || "").toLowerCase();
+  const body = document.getElementById("leaveAdminBody");
+  if (!body) return;
+  body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr>`;
+  try {
+    const res = await api("/leave-requests");
+    const data = await res.json();
+    let rows = data.leave_requests || [];
+    if (statusFilter) rows = rows.filter((r) => r.status === statusFilter);
+    if (search) rows = rows.filter((r) =>
+      (r.student_id || "").toLowerCase().includes(search) ||
+      (r.student_name || "").toLowerCase().includes(search)
+    );
+
+    // Show pending count banner
+    const pendingCount = (data.leave_requests || []).filter((r) => r.status === "pending").length;
+    const banner = document.getElementById("leavePendingBanner");
+    if (banner) {
+      if (pendingCount > 0) {
+        banner.style.display = "block";
+        banner.className = "msg warn";
+        banner.textContent = `${pendingCount} pending leave request${pendingCount > 1 ? "s" : ""} awaiting review.`;
+      } else {
+        banner.style.display = "none";
+      }
+    }
+
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">No leave requests found.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map((r) => {
+      const badge = r.status === "pending"
+        ? `<span class="risk-badge risk-atrisk">Pending</span>`
+        : r.status === "approved"
+        ? `<span class="risk-badge risk-good">Approved</span>`
+        : `<span class="risk-badge risk-critical">Rejected</span>`;
+      const actions = r.status === "pending"
+        ? `<button class="btn-sm btn-primary" onclick="adminReviewLeave(${r.id},'approved')">Approve</button>
+           <button class="btn-sm btn-danger ml-4" onclick="adminReviewLeave(${r.id},'rejected')">Reject</button>`
+        : `<span class="text-12px text-secondary">${r.review_note ? escapeHtml(r.review_note) : "—"}</span>`;
+      return `<tr>
+        <td>${escapeHtml(r.student_name || r.student_id)}</td>
+        <td class="mono text-12px">${r.from_date}</td>
+        <td class="mono text-12px">${r.to_date || r.from_date}</td>
+        <td class="text-13px">${escapeHtml(r.reason)}</td>
+        <td class="mono text-12px">${(r.created_at || "").slice(0, 10)}</td>
+        <td>${badge}</td>
+        <td>${actions}</td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">Failed to load.</td></tr>`;
+  }
+}
+
+async function adminReviewLeave(id, status) {
+  const note = status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
+  const res = await api(`/leave-requests/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, review_note: note }),
+  });
+  const data = await res.json();
+  if (data.error) { toast(data.error, "err"); return; }
+  toast(status === "approved" ? "Leave approved" : "Leave rejected");
+  loadAdminLeaveRequests();
 }
 
 // ══════════════════════════════════════════════════════════════════════════
