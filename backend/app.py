@@ -341,6 +341,12 @@ def init_db():
                 );
                 CREATE INDEX IF NOT EXISTS idx_leave_student ON leave_requests(student_id, status);
             """)
+        # Notification read-tracking (adds column if not present)
+        with conn.cursor() as c:
+            try:
+                c.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS notifications_read_at TIMESTAMPTZ")
+            except Exception:
+                pass
     finally:
         conn.close()
 
@@ -3534,7 +3540,8 @@ def review_correction(cid):
     if status not in ("approved", "rejected"):
         return jsonify({"error": "status must be approved or rejected"}), 400
 
-    reviewer_id = _tid() if g.user.get("role") == "teacher" else g.user["id"]
+    # reviewed_by references teachers(id) — NULL for admin (admin is not a teacher)
+    reviewer_id = _tid() if g.user.get("role") == "teacher" else None
 
     with get_db() as conn:
         cr = qone(conn, """
@@ -3745,13 +3752,26 @@ def student_dashboard():
 def student_timetable():
     if g.user.get("role") != "student":
         return jsonify({"error": "Student access only"}), 403
+    sid = g.user["student_id"]
     fac_id = g.user.get("faculty_id")
     sem = g.user.get("semester")
-    if not fac_id or not sem:
-        return jsonify({"timetable": [], "slots": []})
+
     with get_db(register_pgvector=False) as conn:
-        entries = qall(conn, """
-            SELECT cs.id, cs.day_of_week, ts.id AS time_slot_id,
+        # Always re-fetch from DB — session data may be stale or semester may be NULL
+        stu = qone(conn, "SELECT faculty_id, semester FROM students WHERE student_id=%s", (sid,))
+        if stu:
+            fac_id = fac_id or stu.get("faculty_id")
+            sem = sem or stu.get("semester")
+
+        if not fac_id:
+            return jsonify({"timetable": [], "slots": [], "missing": "faculty"})
+
+        # Build query — semester is optional; show all semesters if not set
+        sem_clause = "AND cs.semester=%s" if sem else ""
+        params_entries = [fac_id, sem] if sem else [fac_id]
+        entries = qall(conn, f"""
+            SELECT cs.id, cs.day_of_week, cs.semester,
+                   ts.id AS time_slot_id,
                    ts.label, ts.start_time::text, ts.end_time::text,
                    s.name AS subject_name, s.code AS subject_code,
                    t.full_name AS teacher_name
@@ -3759,15 +3779,20 @@ def student_timetable():
             JOIN time_slots ts ON ts.id = cs.time_slot_id
             LEFT JOIN subjects s ON s.id = cs.subject_id
             LEFT JOIN teachers t ON t.id = cs.teacher_id
-            WHERE cs.faculty_id=%s AND cs.semester=%s
+            WHERE cs.faculty_id=%s {sem_clause}
             ORDER BY ts.start_time, cs.day_of_week
-        """, (fac_id, sem))
-        slots = qall(conn, """
-            SELECT DISTINCT ts.id, ts.label, ts.start_time::text, ts.end_time::text
-            FROM class_schedules cs JOIN time_slots ts ON ts.id=cs.time_slot_id
-            WHERE cs.faculty_id=%s AND cs.semester=%s ORDER BY ts.start_time
-        """, (fac_id, sem))
-    return jsonify({"timetable": entries, "slots": slots})
+        """, params_entries)
+        # GROUP BY instead of DISTINCT — avoids Postgres "ORDER BY must appear in SELECT list"
+        # error that occurs when ORDER BY ts.start_time isn't identical to ts.start_time::text
+        slots = qall(conn, f"""
+            SELECT ts.id, ts.label, ts.start_time::text, ts.end_time::text
+            FROM class_schedules cs
+            JOIN time_slots ts ON ts.id = cs.time_slot_id
+            WHERE cs.faculty_id=%s {sem_clause}
+            GROUP BY ts.id, ts.label, ts.start_time, ts.end_time
+            ORDER BY ts.start_time
+        """, params_entries)
+    return jsonify({"timetable": entries, "slots": slots, "semester": sem, "faculty_id": fac_id})
 
 
 @app.route("/api/student/me/notifications")
@@ -3776,9 +3801,17 @@ def student_notifications():
     if g.user.get("role") != "student":
         return jsonify({"error": "Student access only"}), 403
     sid = g.user["student_id"]
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
     notes = []
+
     with get_db(register_pgvector=False) as conn:
-        # Low attendance alerts
+        # Fetch the last time this student read their notifications
+        sess_row = qone(conn,
+            "SELECT notifications_read_at FROM sessions WHERE token=%s AND user_type='student'",
+            (token,))
+        read_at = sess_row["notifications_read_at"] if sess_row else None
+
+        # Low attendance warnings — always present, never individually "new"
         low_subs = qall(conn, """
             SELECT sb.name AS subject_name, sb.code AS subject_code,
                    ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
@@ -3793,38 +3826,115 @@ def student_notifications():
             pct = float(s["pct"] or 0)
             level = "critical" if pct < 65 else "warning"
             notes.append({"type": level, "title": f"Low attendance: {s['subject_code']}",
-                           "body": f"{s['subject_name']} — {pct}% (below 75%)", "time": None})
+                           "body": f"{s['subject_name']} — {pct}% (below 75%)",
+                           "time": None, "is_new": False})
 
-        # Pending corrections
+        # Correction request statuses — "new" if reviewed after last read
         corrections = qall(conn, """
-            SELECT id, date::text, status, reason FROM correction_requests
-            WHERE student_id=%s ORDER BY created_at DESC LIMIT 5
+            SELECT id, date::text, status, reason, reviewed_at
+            FROM correction_requests
+            WHERE student_id=%s ORDER BY created_at DESC LIMIT 10
         """, (sid,))
         for c in corrections:
+            reviewed_at = c.get("reviewed_at")
+            is_new = bool(reviewed_at and (read_at is None or reviewed_at > read_at))
             if c["status"] == "pending":
                 notes.append({"type": "info", "title": "Correction request pending",
-                               "body": f"Date: {c['date']} — {c['reason'][:60]}", "time": None})
+                               "body": f"Date: {c['date']} — {c['reason'][:60]}",
+                               "time": None, "is_new": False})
             elif c["status"] == "approved":
-                notes.append({"type": "success", "title": "Correction approved",
-                               "body": f"Your attendance on {c['date']} was corrected.", "time": None})
+                notes.append({"type": "success", "title": "Correction approved ✓",
+                               "body": f"Your attendance on {c['date']} was corrected.",
+                               "time": reviewed_at.isoformat() if reviewed_at else None,
+                               "is_new": is_new})
             elif c["status"] == "rejected":
                 notes.append({"type": "warning", "title": "Correction rejected",
-                               "body": f"Request for {c['date']} was rejected.", "time": None})
+                               "body": f"Request for {c['date']} was rejected.",
+                               "time": reviewed_at.isoformat() if reviewed_at else None,
+                               "is_new": is_new})
 
-        # Leave requests
+        # Leave request statuses — "new" if reviewed after last read
         leaves = qall(conn, """
-            SELECT id, from_date::text, to_date::text, status FROM leave_requests
-            WHERE student_id=%s ORDER BY created_at DESC LIMIT 5
+            SELECT id, from_date::text, to_date::text, status, reviewed_at
+            FROM leave_requests
+            WHERE student_id=%s ORDER BY created_at DESC LIMIT 10
         """, (sid,))
         for lv in leaves:
+            reviewed_at = lv.get("reviewed_at")
+            is_new = bool(reviewed_at and (read_at is None or reviewed_at > read_at))
             if lv["status"] == "approved":
-                notes.append({"type": "success", "title": "Leave approved",
-                               "body": f"{lv['from_date']} to {lv['to_date']}", "time": None})
+                notes.append({"type": "success", "title": "Leave approved ✓",
+                               "body": f"{lv['from_date']} to {lv['to_date']}",
+                               "time": reviewed_at.isoformat() if reviewed_at else None,
+                               "is_new": is_new})
             elif lv["status"] == "rejected":
                 notes.append({"type": "warning", "title": "Leave rejected",
-                               "body": f"{lv['from_date']} to {lv['to_date']}", "time": None})
+                               "body": f"{lv['from_date']} to {lv['to_date']}",
+                               "time": reviewed_at.isoformat() if reviewed_at else None,
+                               "is_new": is_new})
 
-    return jsonify({"notifications": notes})
+    unread_count = sum(1 for n in notes if n.get("is_new"))
+    return jsonify({"notifications": notes, "unread_count": unread_count})
+
+
+@app.route("/api/student/me/notifications/read", methods=["POST"])
+@require_auth
+def mark_notifications_read():
+    """Mark all notifications as read for the current student session."""
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    with get_db(register_pgvector=False) as conn:
+        qexec(conn,
+            "UPDATE sessions SET notifications_read_at=NOW() WHERE token=%s AND user_type='student'",
+            (token,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/student/me/profile")
+@require_auth
+def student_profile():
+    """Student views their own profile — scoped to the authenticated student."""
+    if g.user.get("role") != "student":
+        return jsonify({"error": "Student access only"}), 403
+    sid = g.user["student_id"]
+    with get_db(register_pgvector=False) as conn:
+        s = qone(conn, """
+            SELECT st.student_id, st.full_name, st.department, st.email, st.phone,
+                   st.semester, st.status, st.sample_count, st.enrolled_at::text,
+                   f.name AS faculty_name, f.code AS faculty_code
+            FROM students st
+            LEFT JOIN faculties f ON f.id = st.faculty_id
+            WHERE st.student_id=%s
+        """, (sid,))
+        if not s:
+            return jsonify({"error": "Student not found"}), 404
+
+        stats = qone(conn, """
+            SELECT COUNT(*) FILTER(WHERE status='Present') AS present,
+                   COUNT(*) AS total,
+                   ROUND(100.0 * COUNT(*) FILTER(WHERE status='Present')
+                         / NULLIF(COUNT(*),0), 1) AS pct
+            FROM attendance WHERE student_id=%s
+        """, (sid,))
+
+        by_subject = qall(conn, """
+            SELECT sb.name AS subject_name, sb.code AS subject_code,
+                   COUNT(a.id) FILTER(WHERE a.status='Present') AS present,
+                   COUNT(a.id) AS total,
+                   ROUND(100.0 * COUNT(a.id) FILTER(WHERE a.status='Present')
+                         / NULLIF(COUNT(a.id),0), 1) AS pct
+            FROM subjects sb
+            JOIN attendance a ON a.subject_id=sb.id AND a.student_id=%s
+            GROUP BY sb.id, sb.name, sb.code
+            ORDER BY pct ASC NULLS LAST
+        """, (sid,))
+
+    return jsonify({
+        "student": s,
+        "stats": stats or {},
+        "by_subject": by_subject,
+    })
 
 
 @app.route("/api/leave-requests", methods=["GET"])
@@ -3889,12 +3999,13 @@ def review_leave_request(lid):
         return jsonify({"error": "status must be 'approved' or 'rejected'"}), 400
     reviewer_id = _tid() if g.user.get("role") == "teacher" else None
     with get_db(register_pgvector=False) as conn:
+        note = d.get("review_note") or d.get("note") or None
         row = qone(conn, """
             UPDATE leave_requests SET status=%s, reviewed_by=%s,
                 review_note=%s, reviewed_at=NOW()
             WHERE id=%s
             RETURNING id, status
-        """, (status, reviewer_id, d.get("note"), lid))
+        """, (status, reviewer_id, note, lid))
     if not row:
         return jsonify({"error": "Not found"}), 404
     return jsonify({"updated": True, "status": status})
