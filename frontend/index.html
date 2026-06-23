@@ -1143,6 +1143,7 @@
           <div class="sub-tab active" onclick="switchReportTab('overview', this)">Overview</div>
           <div class="sub-tab" onclick="switchReportTab('defaulters', this)">Defaulter List</div>
           <div class="sub-tab" onclick="switchReportTab('corrections', this)">Corrections</div>
+          <div class="sub-tab" onclick="switchReportTab('leave', this)">Leave Requests</div>
         </div>
 
         <!-- Overview tab -->
@@ -1199,8 +1200,28 @@
           </div>
           <div class="card">
             <table class="data-table" id="corrTable">
-              <thead><tr><th>Student</th><th>Subject</th><th>Date</th><th>Reason</th><th>Status</th><th>Reviewed by</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Student</th><th>Subject</th><th>Date</th><th>Reason</th><th>Status</th><th>Reviewed</th><th>Actions</th></tr></thead>
               <tbody id="corrBody"><tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Leave Requests tab (admin view) -->
+        <div class="sub-tab-panel" id="rtab-leave">
+          <div class="toolbar-row" style="margin-bottom:1rem">
+            <select id="leaveStatusFilter" class="input-sm" onchange="loadAdminLeaveRequests()">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <input type="text" id="leaveSearchFilter" class="input-sm" placeholder="Search student…" oninput="loadAdminLeaveRequests()" style="width:180px">
+          </div>
+          <div id="leavePendingBanner" class="msg" style="margin-bottom:0.75rem;display:none"></div>
+          <div class="card">
+            <table class="data-table">
+              <thead><tr><th>Student</th><th>From</th><th>To</th><th>Reason</th><th>Submitted</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody id="leaveAdminBody"><tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1855,84 +1876,127 @@
         <header class="page-header">
           <div>
             <h1>Reports</h1>
-            <div class="text-secondary text-13px">Student performance &amp; attendance analytics</div>
+            <div class="text-secondary text-13px">Student performance, analytics &amp; correction requests</div>
           </div>
           <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
             <button class="btn-secondary btn-sm" onclick="exportReportCSV()">↓ Export CSV</button>
-            <button class="btn-primary btn-sm" onclick="loadTeacherReports()">Refresh</button>
+            <button class="btn-primary btn-sm" id="rptRefreshBtn" onclick="loadTeacherReports()">Refresh</button>
           </div>
         </header>
 
-        <!-- Filters -->
-        <div class="card" style="padding:0.75rem 1rem;margin-bottom:1rem">
-          <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
-            <div class="form-group" style="margin:0;min-width:120px">
-              <label style="font-size:11px">From</label>
-              <input type="date" id="rptFrom" class="input-sm" style="width:100%">
-            </div>
-            <div class="form-group" style="margin:0;min-width:120px">
-              <label style="font-size:11px">To</label>
-              <input type="date" id="rptTo" class="input-sm" style="width:100%">
-            </div>
-            <div class="form-group" style="margin:0;min-width:200px">
-              <label style="font-size:11px">Faculty</label>
-              <select id="rptFaculty" class="input-sm" style="width:100%" onchange="loadTeacherReports()">
-                <option value="">All Faculties</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0;min-width:130px">
-              <label style="font-size:11px">Semester</label>
-              <select id="rptSemester" class="input-sm" style="width:100%">
-                <option value="">All Semesters</option>
-                <option value="1">Semester 1</option><option value="2">Semester 2</option>
-                <option value="3">Semester 3</option><option value="4">Semester 4</option>
-                <option value="5">Semester 5</option><option value="6">Semester 6</option>
-                <option value="7">Semester 7</option><option value="8">Semester 8</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px">
-              <label style="font-size:11px">Subject</label>
-              <select id="rptSubject" class="input-sm" style="width:100%">
-                <option value="">All Subjects</option>
-              </select>
-            </div>
-            <div class="form-group" style="margin:0;min-width:160px">
-              <label style="font-size:11px">Student</label>
-              <input type="text" id="rptStudentFilter" class="input-sm" placeholder="Search name / ID…"
-                oninput="_filterRptTable()" style="width:100%">
-            </div>
-            <button class="btn-primary btn-sm" onclick="loadTeacherReports()">Apply</button>
+        <!-- Sub-tabs -->
+        <div class="sub-tabs" style="margin-bottom:1rem">
+          <div class="sub-tab active" id="trtab-btn-performance" onclick="switchTeacherReportTab('performance',this)">Performance</div>
+          <div class="sub-tab" id="trtab-btn-corrections" onclick="switchTeacherReportTab('corrections',this)">
+            Corrections <span id="tCorrPendingBadge" style="display:none;background:var(--danger);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;margin-left:4px"></span>
           </div>
         </div>
 
-        <!-- Summary metrics -->
-        <div class="metrics-grid" id="rptMetrics" style="margin-bottom:1rem"></div>
-
-        <!-- Risk summary row -->
-        <div id="rptRiskSummary" style="display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap"></div>
-
-        <!-- Student performance table -->
-        <div class="card" style="padding:0">
-          <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-            <span style="font-size:13px;font-weight:600">Student Performance</span>
-            <input type="text" id="rptSearch" placeholder="Search students…" class="input-sm"
-              oninput="_filterRptTable()" style="width:180px">
+        <!-- ── Performance tab ─────────────────────────── -->
+        <div id="trtab-performance">
+          <!-- Filters -->
+          <div class="card" style="padding:0.75rem 1rem;margin-bottom:1rem">
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
+              <div class="form-group" style="margin:0;min-width:120px">
+                <label style="font-size:11px">From</label>
+                <input type="date" id="rptFrom" class="input-sm" style="width:100%">
+              </div>
+              <div class="form-group" style="margin:0;min-width:120px">
+                <label style="font-size:11px">To</label>
+                <input type="date" id="rptTo" class="input-sm" style="width:100%">
+              </div>
+              <div class="form-group" style="margin:0;min-width:200px">
+                <label style="font-size:11px">Faculty</label>
+                <select id="rptFaculty" class="input-sm" style="width:100%" onchange="loadTeacherReports()">
+                  <option value="">All Faculties</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;min-width:130px">
+                <label style="font-size:11px">Semester</label>
+                <select id="rptSemester" class="input-sm" style="width:100%">
+                  <option value="">All Semesters</option>
+                  <option value="1">Semester 1</option><option value="2">Semester 2</option>
+                  <option value="3">Semester 3</option><option value="4">Semester 4</option>
+                  <option value="5">Semester 5</option><option value="6">Semester 6</option>
+                  <option value="7">Semester 7</option><option value="8">Semester 8</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;min-width:160px">
+                <label style="font-size:11px">Subject</label>
+                <select id="rptSubject" class="input-sm" style="width:100%">
+                  <option value="">All Subjects</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;min-width:160px">
+                <label style="font-size:11px">Student</label>
+                <input type="text" id="rptStudentFilter" class="input-sm" placeholder="Search name / ID…"
+                  oninput="_filterRptTable()" style="width:100%">
+              </div>
+              <button class="btn-primary btn-sm" onclick="loadTeacherReports()">Apply</button>
+            </div>
           </div>
-          <div style="overflow-x:auto">
-            <table class="data-table" id="rptTable">
+
+          <!-- Summary metrics -->
+          <div class="metrics-grid" id="rptMetrics" style="margin-bottom:1rem"></div>
+
+          <!-- Risk summary row -->
+          <div id="rptRiskSummary" style="display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap"></div>
+
+          <!-- Student performance table -->
+          <div class="card" style="padding:0">
+            <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+              <span style="font-size:13px;font-weight:600">Student Performance</span>
+              <input type="text" id="rptSearch" placeholder="Search students…" class="input-sm"
+                oninput="_filterRptTable()" style="width:180px">
+            </div>
+            <div style="overflow-x:auto">
+              <table class="data-table" id="rptTable">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Dept / Sem</th>
+                    <th>Present</th>
+                    <th>Absent</th>
+                    <th>Total</th>
+                    <th>Attendance %</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="rptBody">
+                  <tr><td colspan="7" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Corrections tab ─────────────────────────── -->
+        <div id="trtab-corrections" style="display:none">
+          <div class="toolbar-row" style="margin-bottom:1rem">
+            <select id="tCorrStatusFilter" class="input-sm" onchange="loadTeacherCorrections()">
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <input type="text" id="tCorrSearch" class="input-sm" placeholder="Search student…"
+              oninput="loadTeacherCorrections()" style="width:180px">
+            <button class="btn-secondary btn-sm" onclick="loadTeacherCorrections()">Refresh</button>
+          </div>
+          <div class="card" style="padding:0">
+            <table class="data-table">
               <thead>
                 <tr>
                   <th>Student</th>
-                  <th>Dept / Sem</th>
-                  <th>Present</th>
-                  <th>Absent</th>
-                  <th>Total</th>
-                  <th>Attendance %</th>
+                  <th>Subject</th>
+                  <th>Date</th>
+                  <th>Reason</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
-              <tbody id="rptBody">
-                <tr><td colspan="7" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>
+              <tbody id="tCorrBody">
+                <tr><td colspan="6" class="text-center text-muted p-2rem">Loading…</td></tr>
               </tbody>
             </table>
           </div>
