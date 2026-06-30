@@ -1,6 +1,6 @@
 # Vedanetram · AI-Powered Face Recognition Attendance System
 
-Vedanetram (वेदनेत्रम्) is a web-based attendance system for schools and colleges. It uses a webcam to recognise students' faces automatically, marks attendance in real time, and gives admins and teachers instant reports — no paper registers, no manual data entry.
+Vedanetram (वेदनेत्रम्) is a web-based attendance system for schools and colleges. It uses a webcam to recognise students' faces automatically, marks attendance in real time, and gives admins, teachers, and students instant reports — no paper registers, no manual data entry.
 
 ---
 
@@ -58,9 +58,9 @@ The system has three roles. Each role sees a different panel after login.
 
 | Role | What they can do |
 |---|---|
-| **Admin** | Full control — manage faculties, subjects, teachers, students, timetable, settings, view all reports |
-| **Teacher** | Start attendance sessions (camera / manual / photo upload), view their own class reports |
-| **Student** | *(future)* View their own attendance records |
+| **Admin** | Full control — manage faculties, subjects, teachers, students, timetable, academic calendar, bulk import; view all reports including defaulters, corrections, and leave requests; configure system settings |
+| **Teacher** | Start attendance sessions (camera / manual / photo upload); view assigned classes; approve or reject student correction and leave requests; view per-student performance reports |
+| **Student** | Self-service portal — view attendance history and analytics, weekly timetable, attendance calculator, submit leave requests and correction requests, view notifications, manage profile |
 
 ---
 
@@ -237,6 +237,7 @@ After logging in as admin you get a sidebar with these pages:
 #### Students
 - Card grid of all enrolled students with search and faculty filter
 - Click any card to open the student's full profile: attendance history, monthly chart, recognition log
+- **Bulk Import** — upload a CSV to enrol multiple students at once
 
 #### Teachers
 - Add, edit, and delete teachers
@@ -263,18 +264,24 @@ After logging in as admin you get a sidebar with these pages:
 #### Timetable
 - Visual grid: rows = time slots, columns = days (Mon–Sat)
 - Click any cell to assign a teacher to that slot for a given faculty and semester
-- Collision detection prevents double-booking the same teacher
+- Collision detection prevents double-booking the same teacher at the same time across any faculty
 
 #### Reports
-- Date range selector for historical analysis
-- Monthly attendance trend (line chart)
-- Per-faculty attendance rate (bar chart)
-- Per-student percentage table with risk labels: **Good** (≥75%), **At Risk** (<75%), **Critical** (<60%)
+Reports has four tabs:
+
+- **Overview** — date range selector, monthly attendance trend chart, per-faculty bar chart, per-student percentage table with risk labels: **Good** (≥75%), **At Risk** (<75%), **Critical** (<60%)
+- **Defaulter List** — filter by faculty, semester, subject, and threshold %; shows every student below the cutoff; Export CSV
+- **Corrections** — all student attendance correction requests; Approve (auto-marks student Present) or Reject with an optional note
+- **Leave Requests** — all student leave applications with pending count badge; Approve or Reject
 
 #### Manage
-- **Faculties** — add/edit/delete faculties (e.g. BCA, BBM, CSIT)
+Five tabs:
+
+- **Faculties** — add/edit/delete faculties (e.g. BCA, BBM, BSc CSIT)
 - **Subjects** — add/edit/delete subjects linked to a faculty and semester
-- **Time Slots** — add/edit/delete class time slots (search box included)
+- **Time Slots** — add/edit/delete class time slots (searchable, 800+ slots supported)
+- **Timetable** — full timetable grid management (also accessible directly from the Timetable page)
+- **Academic Calendar** — manage academic years and holidays; holiday creation supports date ranges (e.g. "Dec 20–Jan 3") and inserts one row per day automatically
 
 #### Settings
 - Change recognition threshold (0.0–1.0)
@@ -288,10 +295,10 @@ After logging in as admin you get a sidebar with these pages:
 Teachers log in with their own credentials and see a separate panel:
 
 #### Teacher Dashboard
-- Today's classes (pulled from their assignments)
+- Today's classes (pulled from their timetable assignments)
 - Weekly schedule
-- My Assigned Classes — card view and timetable view
-- Stats: total classes, sessions marked today
+- **My Assigned Classes** — card view and timetable grid view toggle
+- Stats: total classes, sessions marked today, total sessions
 
 #### Start Attendance (Camera)
 1. Go to **Take Attendance**
@@ -308,10 +315,63 @@ Teachers log in with their own credentials and see a separate panel:
 - History of all face recognition events for the teacher's classes
 
 #### Reports (Teacher)
-- Per-student attendance percentages for the teacher's assigned subjects
-- Filter by subject, semester, date range, or student name
-- Risk summary cards (Critical / At Risk / Good counts)
-- Export CSV
+Two tabs:
+
+- **Performance** — per-student attendance percentages for the teacher's assigned subjects; filter by subject, semester, date range, or student name; risk summary cards (Critical / At Risk / Good counts); Export CSV
+- **Corrections** — correction requests submitted by students in the teacher's assigned subjects; pending count badge on the tab; Approve (auto-marks Present) or Reject with an optional note
+
+---
+
+### Student Panel
+
+Students log in with their **email address and password**. Only email addresses registered during enrolment are accepted. A secure session token is issued on login.
+
+The student panel has 9 sections accessible from the left sidebar:
+
+#### Dashboard
+- 4 stat cards: classes present, classes absent, overall attendance %, today's class count
+- Academic alerts for subjects below 75% (colour-coded: amber = at risk, red = critical)
+- Today's class schedule with time and teacher name
+- Upcoming holidays (next 30 days)
+- Subject-wise attendance bars with Safe / At Risk / Critical labels
+
+#### Attendance
+- Filter attendance records by date range and subject
+- Subject-wise attendance percentage bars
+- Full attendance record table (date, subject, status, notes)
+
+#### Timetable
+- Weekly grid auto-loaded from the student's faculty and semester
+- Today's column is highlighted
+- Shows subject code, subject name, and teacher for each slot
+- If semester is not yet assigned, shows all slots for the faculty with an admin-contact prompt
+
+#### Calculator
+- **Recovery Calculator** — enter current present/total counts and a target % to calculate how many consecutive classes must be attended to recover
+- **Absence Predictor** — enter remaining classes and how many you plan to miss; shows projected final % and risk level
+
+#### Leave Requests
+- Submit a leave request with from/to dates and reason
+- View all past requests with status (Pending / Approved / Rejected) and any reviewer note
+
+#### Corrections
+- Request a correction for a date where attendance was incorrectly marked Absent
+- Select the subject and provide a reason
+- View all past requests with status and reviewer note
+- When a correction is approved, attendance is automatically updated to Present
+
+#### Academic Calendar
+- Browse upcoming and past holidays for the institution
+
+#### Profile
+- View personal information: name, student ID, email, faculty, semester, phone, status, enrollment date
+- Overall attendance percentage and subject-wise breakdown
+
+#### Notifications
+- Unread badge on the bell icon shows new action items (correction/leave approvals or rejections)
+- Badge clears automatically when the Notifications page is opened
+- Low attendance warnings always shown (not counted in unread badge)
+- Correction and leave status updates shown with NEW indicator until read
 
 ---
 
@@ -355,15 +415,16 @@ If `BREVO_API_KEY` or `BREVO_FROM` is not set, email is silently disabled and at
 
 ## API Reference
 
-All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column require an `Authorization: Bearer <token>` header (you get the token from `/api/auth/login`).
+All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column require an `Authorization: Bearer <token>` header. Admin and teacher tokens come from `/api/auth/login`; student tokens come from `/api/student/login`.
 
 ### Auth
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/auth/login` | — | Login with username + password, returns token |
+| POST | `/api/auth/login` | — | Admin/teacher login; returns token |
 | GET | `/api/auth/me` | ✓ | Current user info |
 | POST | `/api/auth/change-password` | ✓ | Change own password |
+| POST | `/api/student/login` | — | Student login with email + password; returns session token |
 
 ### Students
 
@@ -374,7 +435,21 @@ All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column requir
 | GET | `/api/students/<id>/photo` | — | Enrolled face thumbnail (JPEG) |
 | PUT | `/api/students/<id>` | ✓ | Update student fields |
 | DELETE | `/api/students/<id>` | ✓ | Delete student (cascades attendance records) |
+| POST | `/api/students/import` | ✓ | Bulk import students from CSV |
 | GET | `/api/departments` | — | List of distinct faculty codes (for dropdowns) |
+
+### Student Self-Service
+
+All endpoints in this group require a valid student session token.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/student/me/profile` | ✓ | Own profile + faculty name + attendance summary |
+| GET | `/api/student/me/dashboard` | ✓ | Stats, today's classes, upcoming holidays, subject bars, low-attendance alerts |
+| GET | `/api/student/me/attendance` | ✓ | Attendance history; `?from=&to=` date filters |
+| GET | `/api/student/me/timetable` | ✓ | Weekly timetable for student's faculty/semester |
+| GET | `/api/student/me/notifications` | ✓ | Notifications list with `unread_count` and per-item `is_new` flag |
+| POST | `/api/student/me/notifications/read` | ✓ | Mark all notifications as read (clears unread badge) |
 
 ### Enrolment & Recognition
 
@@ -401,6 +476,7 @@ All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column requir
 | GET | `/api/attendance` | — | Attendance records for `?date=YYYY-MM-DD`; `?department=` filter |
 | GET | `/api/attendance/faculty-summary` | — | Per-faculty breakdown with student list for a date |
 | GET | `/api/attendance/history` | — | 30-day present/absent counts for charts |
+| GET | `/api/attendance/history/<sid>` | ✓ | Full audit trail of manual attendance changes for a student |
 | GET | `/api/attendance/stats` | — | Per-student attendance percentages |
 | GET | `/api/attendance/export` | — | Download CSV; `?department=` adds a faculty header block |
 | PUT | `/api/attendance/<sid>/<date>` | ✓ | Manually update one attendance record |
@@ -416,6 +492,22 @@ All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column requir
 | PUT | `/api/attendance/sessions/<id>/close` | ✓ | Close a session |
 | POST | `/api/attendance/sessions/<id>/mark` | ✓ | Mark one student in a session |
 | POST | `/api/attendance/sessions/<id>/bulk` | ✓ | Bulk mark multiple students + auto-close session |
+
+### Corrections
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/corrections` | ✓ | List correction requests (student: own only; teacher: assigned subjects; admin: all) |
+| POST | `/api/corrections` | ✓ | Student submits a correction request for a missed date |
+| PUT | `/api/corrections/<id>` | ✓ | Teacher/admin approves or rejects; approval auto-marks the student Present |
+
+### Leave Requests
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/leave-requests` | ✓ | List leave requests (student: own only; admin/teacher: all) |
+| POST | `/api/leave-requests` | ✓ | Student submits a leave request with from/to dates and reason |
+| PUT | `/api/leave-requests/<id>` | ✓ | Admin/teacher approves or rejects with an optional note |
 
 ### Teachers
 
@@ -455,9 +547,21 @@ All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column requir
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/timetable` | ✓ | Timetable grid for `?faculty_id=&semester=` |
-| POST | `/api/timetable/check` | ✓ | Check for scheduling collision |
-| POST | `/api/timetable/<id>` | ✓ | Create a timetable entry |
+| POST | `/api/timetable/check` | ✓ | Check for scheduling collision (slot + cross-faculty teacher conflict) |
+| POST | `/api/timetable` | ✓ | Create a timetable entry |
 | DELETE | `/api/timetable/<id>` | ✓ | Remove a timetable entry |
+
+### Academic Calendar
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/calendar/academic-years` | ✓ | List academic years |
+| POST | `/api/calendar/academic-years` | ✓ | Create an academic year |
+| PUT | `/api/calendar/academic-years/<id>` | ✓ | Update an academic year |
+| DELETE | `/api/calendar/academic-years/<id>` | ✓ | Delete an academic year |
+| GET | `/api/calendar/holidays` | ✓ | List holidays |
+| POST | `/api/calendar/holidays` | ✓ | Create a holiday; supports `from_date`/`to_date` range (one row per day inserted) |
+| DELETE | `/api/calendar/holidays/<id>` | ✓ | Delete a holiday |
 
 ### Reports
 
@@ -466,6 +570,7 @@ All endpoints are on port `5050`. Endpoints marked ✓ in the Auth column requir
 | GET | `/api/reports/my-attendance` | ✓ | Role-scoped attendance report |
 | GET | `/api/reports/session-summary` | ✓ | Per-session summary |
 | GET | `/api/reports/teacher-performance` | ✓ | Per-student metrics with risk labels (Critical/At Risk/Good) |
+| GET | `/api/reports/defaulters` | ✓ | Students below a threshold %; filter by `faculty_id`, `semester`, `subject_id`, `threshold` |
 
 ### System
 
@@ -491,15 +596,19 @@ students            → enrolled students + face embeddings (vector 512)
 teachers            → teacher profiles (name, email, phone, status)
 teacher_assignments → each teacher's faculty/semester/subject/day/timeslot combos
 faculties           → BCA, BBM, BSc CSIT (or whatever you add)
-subjects            → 36+ subjects linked to a faculty and semester
+subjects            → subjects linked to a faculty and semester
 time_slots          → class periods with start/end times
 class_schedules     → timetable: which teacher teaches which subject at which slot
 attendance_sessions → one open session per teacher/subject/day; tracks open/closed
 attendance          → one row per student per subject per day (no duplicates)
+attendance_history  → audit trail of every manual attendance change
+attendance_warnings → automated low-attendance warning log
+correction_requests → student attendance correction requests + review outcome
+leave_requests      → student leave applications + review outcome
 recognition_logs    → every face recognition attempt (success or failure)
 activity_logs       → admin action audit trail
 email_log           → sent email history (prevents duplicate emails)
-sessions            → auth session tokens
+sessions            → auth session tokens for all roles; tracks notifications_read_at for students
 ```
 
 **The face embedding** is stored as a 512-dimension vector in `students.embedding`. PostgreSQL with pgvector searches this column using an HNSW index — the similarity lookup takes under 1 millisecond even with thousands of students.
@@ -517,6 +626,8 @@ sessions            → auth session tokens
 | Login fails with correct password | Database not initialised | Make sure `python app.py` ran successfully at least once (it creates the admin account) |
 | CORS error in browser console | API port mismatch | Confirm backend is on port `5050` and `flask-cors` is in requirements.txt |
 | Teacher dashboard shows empty | Auth ID mismatch | Use the latest `app.py` — it fixes the `_tid()` teacher ID resolution |
+| Student timetable empty | Semester not set on enrollment | Ask admin to update the student's semester field; timetable shows full faculty schedule in the meantime |
+| Student can't log in | Email not enrolled | Only email addresses registered during enrolment are accepted |
 | Email not sending | Missing env vars | Set both `BREVO_API_KEY` and `BREVO_FROM` in `backend/.env` |
 
 ---
