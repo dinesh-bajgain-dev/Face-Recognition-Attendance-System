@@ -254,6 +254,7 @@ async function doLogin() {
 }
 
 function logout() {
+  _sessionIdleStop();
   authToken = "";
   authRole = "";
   authUsername = "";
@@ -263,6 +264,87 @@ function logout() {
   if (cameraActive) stopCamera();
   showLogin();
 }
+
+/* ── Session idle timeout ────────────────────────────────────────────── */
+const SESSION_IDLE_MINUTES = 30;          // inactivity before warning
+const SESSION_WARN_SECONDS = 60;          // countdown before forced logout
+
+let _sessionIdleTimer    = null;
+let _sessionWarnTimer    = null;
+let _sessionWarnCountdown = SESSION_WARN_SECONDS;
+
+function _sessionIdleStart() {
+  _sessionIdleStop();
+  _sessionIdleTimer = setTimeout(_sessionShowWarning, SESSION_IDLE_MINUTES * 60 * 1000);
+}
+
+function _sessionIdleStop() {
+  clearTimeout(_sessionIdleTimer);
+  clearInterval(_sessionWarnTimer);
+  _sessionIdleTimer = null;
+  _sessionWarnTimer = null;
+  const modal = document.getElementById("sessionTimeoutModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function _sessionActivity() {
+  if (!authToken) return;          // not logged in — nothing to reset
+  const modal = document.getElementById("sessionTimeoutModal");
+  const warningShowing = modal && !modal.classList.contains("hidden");
+  if (warningShowing) {
+    // Dismiss the warning and reset the full idle timer
+    _sessionIdleStop();
+    _sessionIdleStart();
+  } else {
+    // Still in the idle-wait phase — just restart the timer
+    clearTimeout(_sessionIdleTimer);
+    _sessionIdleTimer = setTimeout(_sessionShowWarning, SESSION_IDLE_MINUTES * 60 * 1000);
+  }
+}
+
+function _sessionShowWarning() {
+  const modal = document.getElementById("sessionTimeoutModal");
+  if (!modal) { logout(); return; }
+  _sessionWarnCountdown = SESSION_WARN_SECONDS;
+  const sec = document.getElementById("sessionWarnSec");
+  const fill = document.getElementById("sessionWarnFill");
+  if (sec)  sec.textContent = _sessionWarnCountdown;
+  if (fill) {
+    fill.style.transition = "none";
+    fill.style.width = "100%";
+    fill.offsetWidth;
+    fill.style.transition = `width ${SESSION_WARN_SECONDS}s linear`;
+    fill.style.width = "0%";
+  }
+  modal.classList.remove("hidden");
+  _sessionWarnTimer = setInterval(() => {
+    _sessionWarnCountdown--;
+    if (sec) sec.textContent = _sessionWarnCountdown;
+    if (_sessionWarnCountdown <= 0) {
+      clearInterval(_sessionWarnTimer);
+      logout();
+    }
+  }, 1000);
+}
+
+function sessionStayLoggedIn() {
+  _sessionIdleStop();
+  _sessionIdleStart();
+}
+
+// Wire global activity events once at load time
+(function _wireSessionListeners() {
+  const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "click"];
+  events.forEach(ev =>
+    document.addEventListener(ev, _sessionActivity, { passive: true })
+  );
+  // Also reset on tab becoming visible again (user switches back to this tab)
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && authToken) {
+      _sessionActivity();
+    }
+  });
+})();
 
 /* ── API health ──────────────────────────────────────────────────────── */
 async function checkAPI() {
@@ -1602,6 +1684,7 @@ const _originalShowApp = showApp;
 window.showApp = function () {
   _originalShowApp();
   connectSSE();
+  _sessionIdleStart();
 };
 
 /* ═══════════════════════════════════════════════════════════════════════
