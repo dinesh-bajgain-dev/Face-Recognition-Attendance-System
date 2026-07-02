@@ -142,6 +142,29 @@
       </div>
     </div>
 
+    <!-- Session timeout warning modal -->
+    <div id="sessionTimeoutModal" class="session-timeout-modal hidden">
+      <div class="session-timeout-card">
+        <div class="session-timeout-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="32" height="32">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 6v6l4 2"/>
+          </svg>
+        </div>
+        <h3>Session Expiring</h3>
+        <p>You've been inactive for <strong>30 minutes</strong>.<br>You will be logged out in</p>
+        <div class="session-countdown-ring">
+          <span id="sessionWarnSec">60</span>
+          <small>seconds</small>
+        </div>
+        <div class="session-warn-bar">
+          <div id="sessionWarnFill" class="session-warn-fill"></div>
+        </div>
+        <button class="btn-primary" onclick="sessionStayLoggedIn()">Stay Logged In</button>
+        <button class="btn-ghost" onclick="logout()">Log Out Now</button>
+      </div>
+    </div>
+
     <!-- ══════════════════════════════════════════════════════════════════
          STUDENT PANEL (full-screen overlay, shown after student login)
     ══════════════════════════════════════════════════════════════════════ -->
