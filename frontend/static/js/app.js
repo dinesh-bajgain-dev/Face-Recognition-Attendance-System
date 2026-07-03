@@ -6675,9 +6675,16 @@ async function submitStudentImport() {
 
 let _academicYears = [];
 
+function _fmtDate(iso) {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${months[parseInt(m,10)-1]} ${parseInt(d,10)}, ${y}`;
+}
+
 async function loadAcademicYears() {
-  const body = document.getElementById("academicYearsBody");
-  if (!body) return;
+  const list = document.getElementById("academicYearsList");
+  if (!list) return;
   const res = await api("/calendar/academic-years");
   const data = await res.json();
   _academicYears = data.academic_years || [];
@@ -6698,23 +6705,43 @@ async function loadAcademicYears() {
   });
 
   if (!_academicYears.length) {
-    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-2rem">No academic years added yet.</td></tr>`;
+    list.innerHTML = `<div class="cal-empty">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+      <p>No academic years added yet.</p>
+      <button class="btn-secondary btn-sm" onclick="openAcademicYearModal()">Add First Year</button>
+    </div>`;
     return;
   }
-  body.innerHTML = _academicYears
-    .map(
-      (y) => `<tr>
-    <td>${escapeHtml(y.name)}</td>
-    <td class="mono text-12px">${y.start_date}</td>
-    <td class="mono text-12px">${y.end_date}</td>
-    <td style="text-align:center">${y.is_current ? "✓" : ""}</td>
-    <td>
-      <button class="btn-sm btn-secondary" onclick="openAcademicYearModal(${y.id})">Edit</button>
-      <button class="btn-sm btn-danger ml-4" onclick="deleteAcademicYear(${y.id})">Delete</button>
-    </td>
-  </tr>`,
-    )
-    .join("");
+
+  list.innerHTML = _academicYears.map(y => `
+    <div class="cal-year-card${y.is_current ? " cal-year-card--current" : ""}">
+      <div class="cal-year-card-header">
+        <div class="cal-year-name">${escapeHtml(y.name)}</div>
+        <div class="cal-year-actions">
+          ${y.is_current ? `<span class="cal-current-badge">Current</span>` : ""}
+          <button class="cal-action-btn" onclick="openAcademicYearModal(${y.id})" title="Edit">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            Edit
+          </button>
+          <button class="cal-action-btn cal-action-btn--danger" onclick="deleteAcademicYear(${y.id})" title="Delete">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            Delete
+          </button>
+        </div>
+      </div>
+      <div class="cal-year-dates">
+        <div class="cal-date-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>${_fmtDate(y.start_date)}</span>
+        </div>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        <div class="cal-date-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span>${_fmtDate(y.end_date)}</span>
+        </div>
+      </div>
+    </div>
+  `).join("");
 }
 
 function openAcademicYearModal(id) {
@@ -6787,26 +6814,38 @@ async function deleteAcademicYear(id) {
 }
 
 async function loadHolidays() {
-  const body = document.getElementById("holidaysBody");
-  if (!body) return;
+  const list = document.getElementById("holidaysList");
+  if (!list) return;
   const yearId = document.getElementById("holYearFilter")?.value || "";
   const qs = yearId ? `?academic_year_id=${yearId}` : "";
   const res = await api(`/calendar/holidays${qs}`);
   const data = await res.json();
   const rows = data.holidays || [];
   if (!rows.length) {
-    body.innerHTML = `<tr><td colspan="3" class="text-center text-muted p-2rem">No holidays added yet.</td></tr>`;
+    list.innerHTML = `<div class="cal-empty">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
+      <p>No holidays added yet.</p>
+    </div>`;
     return;
   }
-  body.innerHTML = rows
-    .map(
-      (h) => `<tr>
-    <td class="mono text-12px">${h.date}</td>
-    <td>${escapeHtml(h.name)}</td>
-    <td><button class="btn-sm btn-danger" onclick="deleteHoliday(${h.id})">Delete</button></td>
-  </tr>`,
-    )
-    .join("");
+  // Group consecutive dates of the same holiday name into ranges
+  list.innerHTML = rows.map(h => {
+    const [y, m, d] = h.date.split("-");
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const monthAbbr = months[parseInt(m,10)-1];
+    return `
+      <div class="hol-row">
+        <div class="hol-date-badge">
+          <span class="hol-month">${monthAbbr}</span>
+          <span class="hol-day">${parseInt(d,10)}</span>
+          <span class="hol-year">${y}</span>
+        </div>
+        <div class="hol-name">${escapeHtml(h.name)}</div>
+        <button class="cal-action-btn cal-action-btn--danger" onclick="deleteHoliday(${h.id})" title="Delete">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+        </button>
+      </div>`;
+  }).join("");
 }
 
 function _holDateHint() {
