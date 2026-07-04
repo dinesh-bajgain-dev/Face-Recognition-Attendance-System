@@ -1372,32 +1372,38 @@
         </div>
         <!-- Calendar tab -->
         <div class="sub-tab-panel" id="mtab-calendar">
-          <div class="grid grid-2col" style="gap:1.5rem">
-            <!-- Academic Years -->
-            <div>
-              <div class="toolbar-row end" style="margin-bottom:0.5rem">
-                <button class="btn-primary" onclick="openAcademicYearModal()">+ Add Academic Year</button>
+          <div class="cal-layout">
+            <!-- Academic Years column -->
+            <div class="cal-col">
+              <div class="cal-col-header">
+                <div>
+                  <div class="cal-col-title">Academic Years</div>
+                  <div class="cal-col-sub">Manage your institution's academic year periods</div>
+                </div>
+                <button class="btn-primary btn-sm" onclick="openAcademicYearModal()">+ Add Year</button>
               </div>
-              <div class="card">
-                <div class="section-title section-title-mb">Academic Years</div>
-                <table class="data-table">
-                  <thead><tr><th>Name</th><th>Start</th><th>End</th><th>Current</th><th>Actions</th></tr></thead>
-                  <tbody id="academicYearsBody"></tbody>
-                </table>
+              <div id="academicYearsList" class="cal-years-list">
+                <div class="text-muted text-12px p-1rem">Loading…</div>
               </div>
             </div>
-            <!-- Holidays -->
-            <div>
-              <div class="toolbar-row" style="margin-bottom:0.5rem">
-                <select id="holYearFilter" class="input-sm w-200px" onchange="loadHolidays()"><option value="">All Years</option></select>
-                <button class="btn-primary" onclick="openHolidayModal()">+ Add Holiday</button>
+
+            <!-- Holidays column -->
+            <div class="cal-col">
+              <div class="cal-col-header">
+                <div>
+                  <div class="cal-col-title">Holidays</div>
+                  <div class="cal-col-sub">Public holidays and institution closures</div>
+                </div>
+                <button class="btn-primary btn-sm" onclick="openHolidayModal()">+ Add Holiday</button>
               </div>
-              <div class="card">
-                <div class="section-title section-title-mb">Holidays</div>
-                <table class="data-table">
-                  <thead><tr><th>Date(s)</th><th>Name</th><th style="width:80px">Actions</th></tr></thead>
-                  <tbody id="holidaysBody"></tbody>
-                </table>
+              <div class="cal-filter-row">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                <select id="holYearFilter" class="input-sm" style="flex:1" onchange="loadHolidays()">
+                  <option value="">All Academic Years</option>
+                </select>
+              </div>
+              <div id="holidaysList" class="cal-holidays-list">
+                <div class="text-muted text-12px p-1rem">Loading…</div>
               </div>
             </div>
           </div>
