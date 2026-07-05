@@ -5093,8 +5093,196 @@ select#tmSubject option[value=""]:first-child {
 .msg.ok { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.3);
           padding: .6rem .9rem; border-radius: 6px; font-size: 13px; }
 
-/* Calendar grid inside Manage */
-#mtab-calendar .grid-2col { align-items: flex-start; }
+/* ── Calendar section ───────────────────────────────────────────────── */
+.cal-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+@media (max-width: 860px) {
+  .cal-layout { grid-template-columns: 1fr; }
+}
+.cal-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.cal-col-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.1rem 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.cal-col-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.cal-col-sub {
+  font-size: 12px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+.cal-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text3);
+}
+
+/* Academic year cards */
+.cal-years-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.cal-year-card {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.cal-year-card:last-child { border-bottom: none; }
+.cal-year-card:hover { background: var(--bg3); }
+.cal-year-card--current {
+  border-left: 3px solid var(--green, #4ade80);
+  padding-left: calc(1.25rem - 3px);
+}
+.cal-year-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+.cal-year-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text1);
+}
+.cal-year-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.cal-current-badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--green, #4ade80);
+  background: rgba(74,222,128,0.12);
+  border: 1px solid rgba(74,222,128,0.25);
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.cal-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg3);
+  color: var(--text2);
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.cal-action-btn:hover { background: var(--bg); color: var(--text1); }
+.cal-action-btn--danger { color: var(--danger); border-color: rgba(248,113,113,0.25); background: rgba(248,113,113,0.06); }
+.cal-action-btn--danger:hover { background: rgba(248,113,113,0.14); color: #f87171; }
+.cal-year-dates {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text3);
+}
+.cal-date-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text2);
+}
+.cal-date-item svg { color: var(--text3); flex-shrink: 0; }
+
+/* Holiday list rows */
+.cal-holidays-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.hol-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+.hol-row:last-child { border-bottom: none; }
+.hol-row:hover { background: var(--bg3); }
+.hol-date-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.2);
+  border-radius: 8px;
+  padding: 4px 6px;
+  flex-shrink: 0;
+}
+.hol-month {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent, #6366f1);
+}
+.hol-day {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text1);
+  line-height: 1.1;
+}
+.hol-year {
+  font-size: 9px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+.hol-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text1);
+  font-weight: 500;
+}
+
+/* Empty state */
+.cal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.5rem;
+  color: var(--text3);
+  text-align: center;
+}
+.cal-empty svg { color: var(--text3); opacity: 0.5; }
+.cal-empty p { font-size: 13px; margin: 0; }
 
 /* Subject progress bars in student panel */
 #studentSubjectSummary > div:last-child { border-bottom: none !important; }
