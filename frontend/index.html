@@ -1417,14 +1417,17 @@
           <div>
             <div class="card">
               <div class="section-title">Recognition</div>
-              <div class="form-group" style="margin-top: 0.75rem">
-                <label
-                  >Confidence Threshold
-                  <span
-                    id="threshVal"
-                    style="font-family: var(--mono); color: var(--blue)"
-                  ></span
-                ></label>
+
+              <!-- Threshold -->
+              <div class="form-group" style="margin-top:0.75rem">
+                <label style="display:flex;justify-content:space-between;align-items:baseline">
+                  <span>Confidence Threshold</span>
+                  <span id="threshVal" style="font-family:var(--mono);color:var(--blue);font-size:13px"></span>
+                </label>
+                <p style="margin:0.2rem 0 0.4rem;font-size:12px;color:var(--text3)">
+                  Minimum face-match similarity required to recognise a student.
+                  Higher = stricter, fewer false positives.
+                </p>
                 <input
                   type="range"
                   id="threshSlider"
@@ -1432,20 +1435,27 @@
                   max="0.99"
                   step="0.01"
                   oninput="
-                    document.getElementById('threshVal').textContent =
-                      Math.round(this.value * 100) + '%'
+                    const pct = Math.round(this.value * 100);
+                    document.getElementById('threshVal').textContent = pct + '% (value: ' + parseFloat(this.value).toFixed(2) + ')';
                   "
-                  style="width: 100%; margin: 0.5rem 0"
+                  style="width:100%;margin:0.25rem 0"
                 />
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:2px">
+                  <span>50% — lenient</span>
+                  <span style="color:var(--text2)">Recommended: 80%</span>
+                  <span>99% — strict</span>
+                </div>
               </div>
-              <div class="form-group">
-                <label
-                  >Frame Skip
-                  <span
-                    id="skipVal"
-                    style="font-family: var(--mono); color: var(--blue)"
-                  ></span
-                ></label>
+
+              <!-- Frame Skip -->
+              <div class="form-group" style="margin-top:0.75rem">
+                <label style="display:flex;justify-content:space-between;align-items:baseline">
+                  <span>Frame Skip</span>
+                  <span id="skipVal" style="font-family:var(--mono);color:var(--blue);font-size:13px"></span>
+                </label>
+                <p style="margin:0.2rem 0 0.4rem;font-size:12px;color:var(--text3)">
+                  Process every Nth camera frame. Higher = less CPU, slightly lower recognition speed.
+                </p>
                 <input
                   type="range"
                   id="skipSlider"
@@ -1453,18 +1463,25 @@
                   max="10"
                   step="1"
                   oninput="
-                    document.getElementById('skipVal').textContent = this.value
+                    const v = parseInt(this.value);
+                    document.getElementById('skipVal').textContent = 'every ' + v + (v === 1 ? ' frame' : ' frames');
                   "
-                  style="width: 100%; margin: 0.5rem 0"
+                  style="width:100%;margin:0.25rem 0"
                 />
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:2px">
+                  <span>1 — every frame (max accuracy)</span>
+                  <span>10 — every 10th (low CPU)</span>
+                </div>
               </div>
-              <button class="btn-primary" onclick="saveSettings()">
+
+              <button class="btn-primary" style="margin-top:0.5rem" onclick="saveSettings()">
                 Save Settings
               </button>
             </div>
-            <div class="card" style="margin-top: 1rem">
+
+            <div class="card" style="margin-top:1rem">
               <div class="section-title">Change Password</div>
-              <div class="form-group" style="margin-top: 0.75rem">
+              <div class="form-group" style="margin-top:0.75rem">
                 <label>Current Password</label>
                 <input type="password" id="oldPw" placeholder="••••••" />
               </div>
@@ -1472,37 +1489,24 @@
                 <label>New Password</label>
                 <input type="password" id="newPw" placeholder="••••••" />
               </div>
-              <button class="btn-primary" onclick="changeAdminPw()">
-                Update Password
-              </button>
+              <button class="btn-primary" onclick="changeAdminPw()">Update Password</button>
             </div>
           </div>
+
           <div>
             <div class="card">
               <div class="section-title">System Info</div>
-              <div
-                id="sysInfo"
-                style="
-                  margin-top: 0.75rem;
-                  display: flex;
-                  flex-direction: column;
-                  gap: 0.5rem;
-                "
-              ></div>
+              <div id="sysInfo" style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.5rem"></div>
             </div>
-            <div class="card" style="margin-top: 1rem">
-              <div class="section-title">Email Test</div>
-              <div class="form-group" style="margin-top: 0.75rem">
+
+            <div class="card" style="margin-top:1rem">
+              <div class="section-title">Email Notifications</div>
+              <div id="emailStatusBanner" style="margin-top:0.75rem"></div>
+              <div class="form-group" style="margin-top:0.75rem">
                 <label>Send test email to</label>
-                <input
-                  type="email"
-                  id="testEmailAddr"
-                  placeholder="you@example.com"
-                />
+                <input type="email" id="testEmailAddr" placeholder="you@example.com" />
               </div>
-              <button class="btn-secondary" onclick="sendTestEmail()">
-                Send Test
-              </button>
+              <button class="btn-secondary" onclick="sendTestEmail()">Send Test</button>
               <div id="emailTestMsg" class="msg mt-0-5rem"></div>
             </div>
           </div>
