@@ -1505,21 +1505,54 @@ async function loadSettings() {
   try {
     const r = await api("/settings");
     const d = await r.json();
+    const thresh = parseFloat(d.recognition_threshold);
+    const skip   = parseInt(d.frame_skip);
+
+    // Slider positions
     const _ts = document.getElementById("threshSlider");
-    if (_ts) _ts.value = d.recognition_threshold;
+    if (_ts) _ts.value = thresh;
     const _ss = document.getElementById("skipSlider");
-    if (_ss) _ss.value = d.frame_skip;
+    if (_ss) _ss.value = skip;
+
+    // Threshold label — show both % and decimal so it matches .env value
     const _tv = document.getElementById("threshVal");
-    if (_tv) _tv.textContent = Math.round(d.recognition_threshold * 100) + "%";
-    const _sv2 = document.getElementById("skipVal");
-    if (_sv2) _sv2.textContent = d.frame_skip;
+    if (_tv) _tv.textContent = Math.round(thresh * 100) + "% (value: " + thresh.toFixed(2) + ")";
+
+    // Frame skip label
+    const _sv = document.getElementById("skipVal");
+    if (_sv) _sv.textContent = "every " + skip + (skip === 1 ? " frame" : " frames");
+
+    // System Info — show only info NOT already visible in the sliders
     const _si = document.getElementById("sysInfo");
-    if (_si)
+    if (_si) {
+      const emailColor = d.email_enabled ? "var(--green)" : "var(--text3)";
+      const emailLabel = d.email_enabled ? "Enabled" : "Disabled — set BREVO_API_KEY in .env";
       _si.innerHTML = `
-      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Threshold</span><span style="font-family:var(--mono);font-size:12px">${Math.round(d.recognition_threshold * 100)}%</span></div>
-      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Frame Skip</span><span style="font-family:var(--mono);font-size:12px">every ${d.frame_skip} frames</span></div>
-      <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><span style="color:var(--text2)">Email</span><span style="font-family:var(--mono);font-size:12px;color:${d.email_enabled ? "var(--green)" : "var(--text3)"}">${d.email_enabled ? "Enabled" : "Disabled"}</span></div>
-      <div style="display:flex;justify-content:space-between;padding:7px 0"><span style="color:var(--text2)">Version</span><span style="font-family:var(--mono);font-size:12px">v3.2</span></div>`;
+        <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text2)">Email</span>
+          <span style="font-family:var(--mono);font-size:12px;color:${emailColor}">${emailLabel}</span>
+        </div>
+        ${d.brevo_from ? `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text2)">Sender</span>
+          <span style="font-family:var(--mono);font-size:12px">${d.brevo_from}</span>
+        </div>` : ""}
+        <div style="display:flex;justify-content:space-between;padding:7px 0">
+          <span style="color:var(--text2)">Version</span>
+          <span style="font-family:var(--mono);font-size:12px">v3.2</span>
+        </div>`;
+    }
+
+    // Email status banner — separate from the test-result div
+    const _eb = document.getElementById("emailStatusBanner");
+    if (_eb) {
+      _eb.innerHTML = d.email_enabled
+        ? `<div style="display:flex;align-items:center;gap:0.4rem;color:var(--green);font-size:13px">
+             <span>✓</span><span>Email is configured and active</span>
+           </div>`
+        : `<div style="color:var(--text3);font-size:12px">
+             Email is disabled. Add <code>BREVO_API_KEY</code> and <code>BREVO_FROM</code> to <code>backend/.env</code> to enable.
+           </div>`;
+    }
   } catch {}
 }
 
@@ -2680,27 +2713,8 @@ async function _loadActLog(sid) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   SETTINGS PAGE — add email status + test button
+   SETTINGS PAGE — email test helper
 ═══════════════════════════════════════════════════════════════════════ */
-const _origLoadSettings =
-  typeof loadSettings === "function" ? loadSettings : async () => {};
-window.loadSettings = async function () {
-  await _origLoadSettings();
-  try {
-    const r = await api("/settings");
-    const d = await r.json();
-    // Inject email status into settings page if element exists
-    let emailEl = document.getElementById("emailTestMsg");
-    if (!emailEl) return;
-    const on = d.email_enabled;
-    emailEl.className = `email-status ${on ? "on" : "off"}`;
-    emailEl.textContent = on ? "✓ Email enabled" : "✗ Email disabled";
-    if (d.smtp_user)
-      document.getElementById("emailTestMsg") &&
-        ((document.getElementById("emailTestMsg") || {}).textContent =
-          d.smtp_user);
-  } catch {}
-};
 
 async function sendTestEmail() {
   const email =
