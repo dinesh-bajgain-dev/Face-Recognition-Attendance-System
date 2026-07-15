@@ -6019,17 +6019,21 @@ async function submitPhotoAttendance() {
 let _rptData = [];
 
 function switchTeacherReportTab(tab, btn) {
-  ["performance", "corrections"].forEach((t) => {
+  ["performance", "corrections", "sheet"].forEach((t) => {
     const panel = document.getElementById(`trtab-${t}`);
     const tabBtn = document.getElementById(`trtab-btn-${t}`);
     if (panel) panel.style.display = t === tab ? "" : "none";
     if (tabBtn) tabBtn.classList.toggle("active", t === tab);
   });
   if (tab === "corrections") loadTeacherCorrections();
+  if (tab === "sheet") loadAttendanceSheet("teacher");
   // Update refresh button action
   const refreshBtn = document.getElementById("rptRefreshBtn");
   if (refreshBtn) {
-    refreshBtn.onclick = tab === "corrections" ? loadTeacherCorrections : loadTeacherReports;
+    refreshBtn.onclick =
+      tab === "corrections" ? loadTeacherCorrections
+      : tab === "sheet"     ? () => loadAttendanceSheet("teacher")
+      : loadTeacherReports;
   }
 }
 
@@ -6382,6 +6386,7 @@ function switchReportTab(tab, btn) {
   if (tab === "defaulters") loadDefaulters();
   if (tab === "corrections") loadAdminCorrections();
   if (tab === "leave") loadAdminLeaveRequests();
+  if (tab === "sheet") loadAttendanceSheet("admin");
 }
 
 // ── Defaulter List ────────────────────────────────────────────────────────
@@ -6491,6 +6496,281 @@ function exportDefaultersCSV() {
   a.click();
   URL.revokeObjectURL(url);
   toast("Defaulters CSV downloaded");
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MONTHLY ATTENDANCE SHEET  (printed-register style)
+//  Cell = running count of classes attended (1, 2, 3 …)
+//        "." = class held, student absent
+//        blank = no class held for that student's class that day
+// ══════════════════════════════════════════════════════════════════════════
+
+let _shData = null;   // last loaded sheet payload
+let _shRole = "admin";
+
+// Element ids differ per panel: the teacher panel has no faculty/semester
+// pickers because their scope is enforced server-side from their assignments.
+function _shEls(role) {
+  return role === "teacher"
+    ? { month: "tshMonth", faculty: null, semester: null, subject: "tshSubject",
+        grid: "tshGrid", warn: "tshWarn", summary: "tshSummary" }
+    : { month: "shMonth", faculty: "shFaculty", semester: "shSemester", subject: "shSubject",
+        grid: "shGrid", warn: "shWarn", summary: "shSummary" };
+}
+
+// Local-time month string. NOT toISOString() — that is UTC, and in Nepal
+// (UTC+5:45) it would report the previous month just after midnight on the 1st.
+function _thisMonthStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+async function loadAttendanceSheet(role) {
+  _shRole = role || _shRole || "admin";
+  const els = _shEls(_shRole);
+  const grid = document.getElementById(els.grid);
+  if (!grid) return;
+
+  const monthEl = document.getElementById(els.month);
+  if (monthEl && !monthEl.value) monthEl.value = _thisMonthStr();
+  const mv = monthEl?.value || _thisMonthStr();
+  const [yearStr, monStr] = mv.split("-");
+
+  const qs = new URLSearchParams({ year: yearStr, month: String(parseInt(monStr, 10)) });
+  // .set only when truthy — empty strings would be sent as real filters otherwise.
+  const fac = els.faculty && document.getElementById(els.faculty)?.value;
+  const sem = els.semester && document.getElementById(els.semester)?.value;
+  const sub = document.getElementById(els.subject)?.value;
+  if (fac) qs.set("faculty_id", fac);
+  if (sem) qs.set("semester", sem);
+  if (sub) qs.set("subject_id", sub);
+
+  grid.innerHTML = `<div class="text-muted text-13px p-1rem">Loading…</div>`;
+  const r = await api(`/reports/attendance-sheet?${qs}`);
+  if (!r) return;                      // api() returns null on 401 and logs out
+  const d = await r.json();
+  if (!r.ok || d.error) {
+    _shData = null;
+    grid.innerHTML = `<div class="text-13px p-1rem" style="color:var(--red)">${escapeHtml(d.error || "Failed to load sheet")}</div>`;
+    return;
+  }
+  _shData = d;
+  _shFillSelect(els.faculty, d.faculties, "All Faculties", (f) => `${f.code} — ${f.name}`);
+  _shFillSelect(els.subject, d.subjects, "All Subjects", (s) => `${s.code} — ${s.name}`);
+  _renderSheetPreview(d, els);
+}
+
+// Repopulate a filter select while preserving the current selection
+// (same approach loadTeacherReports uses for #rptFaculty / #rptSubject).
+function _shFillSelect(id, items, allLabel, label) {
+  if (!id) return;
+  const el = document.getElementById(id);
+  if (!el || !Array.isArray(items)) return;
+  const cur = el.value;
+  el.innerHTML = `<option value="">${allLabel}</option>`;
+  items.forEach((it) => {
+    const o = document.createElement("option");
+    o.value = it.id;
+    o.textContent = label(it);
+    el.appendChild(o);
+  });
+  el.value = cur;               // no-op if the old value is gone -> falls back to ""
+}
+
+function _renderSheetPreview(d, els) {
+  const grid = document.getElementById(els.grid);
+  const warn = document.getElementById(els.warn);
+  const summary = document.getElementById(els.summary);
+
+  // Warn when the columns span more than one class. Each row is still scored
+  // against its own class's days, but a printed register should be one class.
+  if (warn) {
+    const n = d.meta?.cohorts || 0;
+    if (n > 1) {
+      warn.style.display = "block";
+      warn.style.background = "var(--amber-dim)";
+      warn.style.color = "var(--amber)";
+      warn.style.border = "1px solid var(--amber)";
+      warn.style.padding = "0.6rem 0.9rem";
+      warn.style.borderRadius = "6px";
+      warn.style.fontSize = "12px";
+      warn.textContent =
+        `This sheet spans ${n} different classes. Each student is correctly scored against ` +
+        `only their own class's days, but a printed register is normally one class — ` +
+        `narrow it with the Faculty and Semester filters for a clean printout.`;
+    } else {
+      warn.style.display = "none";
+    }
+  }
+
+  if (summary) {
+    const sub = d.subject ? `${d.subject.code} — ${d.subject.name}` : "All Subjects";
+    summary.textContent =
+      `${d.month_name} ${d.year} · ${sub} · ${d.totals.students} students · ` +
+      `${d.totals.class_days} class day${d.totals.class_days === 1 ? "" : "s"}`;
+  }
+
+  if (!d.students.length) {
+    grid.innerHTML = `<div class="text-muted text-13px p-1rem">No students match these filters.</div>`;
+    return;
+  }
+  if (!d.totals.class_days) {
+    grid.innerHTML = `<div class="text-muted text-13px p-1rem">No classes were held in ${escapeHtml(d.month_name)} ${d.year} for this selection.</div>`;
+    return;
+  }
+
+  const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
+  const held = new Set(d.class_days);
+
+  let h = `<table class="sheet-table"><thead><tr>
+      <th class="sheet-num">#</th><th class="sheet-name">Name</th>`;
+  for (const n of days) h += `<th class="sheet-day${held.has(n) ? " sheet-day-held" : ""}">${n}</th>`;
+  h += `<th class="sheet-tot">P</th><th class="sheet-tot">C</th><th class="sheet-pct">%</th></tr></thead><tbody>`;
+
+  d.students.forEach((s, i) => {
+    h += `<tr><td class="sheet-num">${i + 1}</td><td class="sheet-name">${escapeHtml(s.full_name)}</td>`;
+    for (const n of days) {
+      const v = s.cells[String(n)];
+      const cls = v === undefined ? "sheet-blank" : v === "." ? "sheet-absent" : "sheet-present";
+      h += `<td class="sheet-cell ${cls}">${v === undefined ? "" : v}</td>`;
+    }
+    const pct = s.percentage === null ? "—" : `${s.percentage}%`;
+    const pctCls = s.percentage === null ? "" : s.percentage < 60 ? "sheet-crit" : s.percentage < 75 ? "sheet-risk" : "sheet-ok";
+    h += `<td class="sheet-tot">${s.present}</td><td class="sheet-tot">${s.total_classes}</td>
+          <td class="sheet-pct ${pctCls}">${pct}</td></tr>`;
+  });
+  h += `</tbody></table>`;
+  grid.innerHTML = h;
+}
+
+function downloadSheetCSV() {
+  if (!_shData || !_shData.students.length) { toast("No sheet loaded to export", "err"); return; }
+  const d = _shData;
+  const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
+
+  const rows = [
+    ["#", "Student ID", "Name", ...days.map(String), "Present", "Classes", "%"],
+    ...d.students.map((s, i) => [
+      i + 1, s.student_id, s.full_name,
+      ...days.map((n) => {
+        const v = s.cells[String(n)];
+        return v === undefined ? "" : v;   // blank = no class held
+      }),
+      s.present, s.total_classes, s.percentage === null ? "" : s.percentage,
+    ]),
+  ];
+  // Same quoting idiom as exportReportCSV — escape embedded quotes, wrap every cell.
+  const csv = rows
+    .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const sub = d.subject ? `_${d.subject.code}` : "";
+  a.download = `attendance_sheet_${d.year}-${String(d.month).padStart(2, "0")}${sub}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("Attendance sheet CSV downloaded");
+}
+
+function downloadSheetPrintable() {
+  if (!_shData || !_shData.students.length) { toast("No sheet loaded to print", "err"); return; }
+  const d = _shData;
+
+  // window.open runs synchronously in the click handler using already-cached
+  // data — no await precedes it, so popup blockers allow it. (It opens
+  // about:blank and we write into it; no HTTP request is made, so this is NOT
+  // the broken unauthenticated window.open(API…) pattern used elsewhere.)
+  const w = window.open("", "_blank");
+  if (!w) { toast("Popup blocked — allow popups for this site", "err"); return; }
+
+  const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
+  const held = new Set(d.class_days);
+  const subLabel = d.subject ? `${d.subject.code} — ${d.subject.name}` : "All Subjects";
+
+  let body = "";
+  d.students.forEach((s, i) => {
+    body += `<tr><td class="n">${i + 1}</td><td class="nm">${escapeHtml(s.full_name)}</td>`;
+    for (const n of days) {
+      const v = s.cells[String(n)];
+      body += `<td class="${v === undefined ? "no" : ""}">${v === undefined ? "" : v}</td>`;
+    }
+    body += `<td class="t">${s.present}</td><td class="t">${s.total_classes}</td>
+             <td class="t">${s.percentage === null ? "—" : s.percentage + "%"}</td></tr>`;
+  });
+
+  let head = `<th class="n">#</th><th class="nm">NAME</th>`;
+  for (const n of days) head += `<th class="${held.has(n) ? "" : "no"}">${n}</th>`;
+  head += `<th class="t">P</th><th class="t">C</th><th class="t">%</th>`;
+
+  // A4 landscape at 8mm margins = 281mm usable.
+  //   # 7mm + name 46mm + P/C/% (11+11+13=35mm) = 88mm fixed
+  //   remaining 193mm / 31 days = 6.23mm per day column.
+  // The counter can never exceed 31 (one row per student per date is enforced
+  // by a partial unique index), so a day cell never needs more than 2 digits:
+  // "31" at 8pt is ~3.1mm inside a ~6.0mm content box.
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+<title>Attendance Sheet — ${escapeHtml(d.month_name)} ${d.year}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, "Noto Sans Devanagari", sans-serif; color:#000; background:#fff;
+         margin:0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hdr { display:flex; justify-content:space-between; align-items:flex-end;
+         margin-bottom:3mm; font-size:10pt; }
+  .hdr .ttl { font-size:13pt; font-weight:bold; letter-spacing:.5px; }
+  .hdr .meta { text-align:right; line-height:1.5; }
+  .hdr b { border-bottom:1px solid #000; padding:0 6mm 1px 2mm; font-weight:normal; }
+  table { border-collapse: collapse; table-layout: fixed; width:100%; }
+  th, td { border:.4pt solid #000; text-align:center; vertical-align:middle;
+           font-size:8pt; height:5mm; overflow:hidden; }
+  thead { display: table-header-group; }          /* repeat header on each page */
+  thead th { background:#dce6f1; font-weight:bold; }
+  tbody tr { page-break-inside: avoid; }
+  .n  { width:7mm; }
+  .nm { width:46mm; text-align:left; padding-left:1.5mm; font-size:7.5pt;
+        white-space:nowrap; text-overflow:ellipsis; }
+  .t  { width:11mm; font-weight:bold; }
+  th.t:last-child, td.t:last-child { width:13mm; }
+  td.no, th.no { background:#f0f0f0; }            /* no class held that day */
+  .foot { margin-top:2.5mm; display:flex; justify-content:space-between; font-size:7.5pt; }
+  .legend b { font-family:monospace; }
+  @media screen {
+    body { padding:10mm; background:#eee; }
+    table, .hdr, .foot { background:#fff; }
+    .bar { margin-bottom:6mm; }
+    .bar button { font:inherit; padding:6px 14px; margin-right:6px; cursor:pointer; }
+  }
+  @media print { .bar { display:none; } }
+</style></head><body>
+<div class="bar">
+  <button onclick="window.print()">Print / Save as PDF</button>
+  <button onclick="window.close()">Close</button>
+</div>
+<div class="hdr">
+  <div>
+    <div class="ttl">वेदनेत्रम् · ATTENDANCE SHEET</div>
+    <div style="margin-top:1.5mm">SUBJECT: <b>${escapeHtml(subLabel)}</b></div>
+  </div>
+  <div class="meta">
+    <div>MONTH: <b>${escapeHtml(d.month_name)} ${d.year}</b></div>
+    <div style="margin-top:1.5mm">STUDENTS: <b>${d.totals.students}</b> &nbsp; CLASSES HELD: <b>${d.totals.class_days}</b></div>
+  </div>
+</div>
+<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+<div class="foot">
+  <div class="legend"><b>1,2,3…</b> = running count of classes attended &nbsp;·&nbsp;
+       <b>.</b> = absent &nbsp;·&nbsp; <b>blank/grey</b> = no class held &nbsp;·&nbsp;
+       <b>P</b> = present, <b>C</b> = classes held</div>
+  <div>Generated ${new Date().toLocaleDateString()}</div>
+</div>
+</body></html>`;
+
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  toast("Attendance sheet opened — use Print → Save as PDF");
 }
 
 // ── Admin Corrections View ────────────────────────────────────────────────
