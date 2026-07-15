@@ -1,4 +1,4 @@
-import os, cv2, json, base64, hashlib, hmac, secrets, threading, queue, time, re, csv, io
+import os, cv2, json, base64, hashlib, hmac, secrets, threading, queue, time, re, csv, io, calendar
 import urllib.request, urllib.error
 import numpy as np
 from contextlib import contextmanager
@@ -3340,6 +3340,291 @@ def defaulter_list():
             ORDER BY pct ASC, s.full_name
         """, params)
     return jsonify({"defaulters": rows, "threshold": threshold, "count": len(rows)})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  MONTHLY ATTENDANCE SHEET  (printed-register style)
+# ══════════════════════════════════════════════════════════════════════════
+
+@app.route("/api/reports/attendance-sheet")
+@require_auth
+def attendance_sheet_report():
+    """
+    Monthly attendance register: one row per student, one column per day.
+
+    Cell semantics:
+      int        -> running count of classes the student has attended so far
+                    this month (their 1st attended class shows 1, 2nd shows 2 ...)
+      "."        -> a class WAS held for that student's class on that day and the
+                    student was absent / never marked
+      key absent -> NO class was held for that student's class that day
+                    (frontend renders blank)
+
+    Query params: year, month (1-12), faculty_id, semester, subject_id
+      subject_id omitted -> "All Subjects": present on a day if they attended ANY
+                            class that day; the counter counts DAYS.
+      subject_id present -> restricted to that subject's attendance rows.
+
+    NOTE ON CLASS DAYS: "was a class held?" is only meaningful for one cohort
+    (faculty + semester). Class days are therefore grouped by (faculty_id,
+    semester) and each student is scored ONLY against their own cohort's days.
+    A single global day-list would fabricate absences for every student whose
+    class did not meet that day.
+    """
+    role = g.user.get("role")
+    # Role gate. Students must NOT reach this — it dumps a whole cohort roster
+    # with per-day detail. (/api/reports/defaulters is missing this gate; do
+    # not copy that endpoint's structure.)
+    if role not in ("teacher", "admin"):
+        return jsonify({"error": "Access denied"}), 403
+
+    today = date.today()
+    try:
+        year  = int(request.args.get("year",  today.year))
+        month = int(request.args.get("month", today.month))
+    except (TypeError, ValueError):
+        return jsonify({"error": "year and month must be integers"}), 400
+    if not (1 <= month <= 12) or not (2000 <= year <= 2100):
+        return jsonify({"error": "Invalid year or month"}), 400
+
+    faculty_id = (request.args.get("faculty_id") or "").strip()
+    semester   = (request.args.get("semester")   or "").strip()
+    subject_id = (request.args.get("subject_id") or "").strip()
+
+    try:
+        fid = int(faculty_id) if faculty_id else None
+        sid = int(subject_id) if subject_id else None
+    except ValueError:
+        return jsonify({"error": "faculty_id and subject_id must be integers"}), 400
+
+    # SEMESTER TYPE SPLIT — students.semester is TEXT; subjects,
+    # teacher_assignments and attendance_sessions .semester are INTEGER.
+    sem_txt = str(semester) if semester else None
+    sem_int = None
+    if semester:
+        try:
+            sem_int = int(semester)
+        except ValueError:
+            return jsonify({"error": "semester must be numeric"}), 400
+
+    # calendar.monthrange handles 28/29/30/31 and leap years.
+    first_day = date(year, month, 1)
+    last_day  = date(year, month, calendar.monthrange(year, month)[1])
+
+    # ── COHORT (which students become rows) ───────────────────────────────
+    # Reused verbatim by the roster query and the class-day query, so
+    # cohort_params must be appended in lockstep with cohort_where.
+    cohort_where  = ["s.status='active'"]
+    cohort_params: list = []
+    if fid is not None:
+        cohort_where.append("s.faculty_id=%s"); cohort_params.append(fid)
+    if sem_txt is not None:
+        cohort_where.append("s.semester::text=%s"); cohort_params.append(sem_txt)
+
+    if role == "teacher":
+        tid = _tid()   # NEVER g.user["id"] — teachers live in users AND teachers
+        # Scope is ANDed unconditionally, never replaced by a caller-supplied
+        # faculty_id. (/api/reports/teacher-performance replaces it, which lets a
+        # teacher read another faculty; that bug is not reproduced here.)
+        if sid is not None:
+            cohort_where.append("""EXISTS (
+                SELECT 1 FROM teacher_assignments ta
+                WHERE ta.teacher_id=%s AND ta.subject_id=%s
+                  AND ta.faculty_id     = s.faculty_id
+                  AND ta.semester::text = s.semester::text
+            )""")
+            cohort_params += [tid, sid]
+        else:
+            cohort_where.append("""EXISTS (
+                SELECT 1 FROM teacher_assignments ta
+                WHERE ta.teacher_id=%s
+                  AND ta.faculty_id     = s.faculty_id
+                  AND ta.semester::text = s.semester::text
+            )""")
+            cohort_params.append(tid)
+
+    cw = " AND ".join(cohort_where)
+
+    # Specific subject: the partial unique index (student_id, subject_id, date)
+    #   guarantees one row per student per date -> no fan-out.
+    # All Subjects: no subject filter. Legacy subject_id IS NULL rows are real
+    #   attendance and must count; bool_or below collapses them together with
+    #   per-subject rows so they cannot double count.
+    att_subject_clause = ""
+    att_subject_params: list = []
+    if sid is not None:
+        att_subject_clause = "AND a.subject_id=%s"
+        att_subject_params = [sid]
+
+    # ── SESSION SCOPE (arm 2 of the class-day union) ──────────────────────
+    ses_where  = ["ses.session_date BETWEEN %s AND %s"]
+    ses_params: list = [first_day, last_day]
+    if fid is not None:
+        ses_where.append("ses.faculty_id=%s"); ses_params.append(fid)
+    if sem_int is not None:
+        ses_where.append("ses.semester=%s"); ses_params.append(sem_int)   # INTEGER, no cast
+    if sid is not None:
+        ses_where.append("ses.subject_id=%s"); ses_params.append(sid)
+    if role == "teacher":
+        # ta.semester and ses.semester are both INTEGER -> direct compare.
+        ses_where.append("""EXISTS (
+            SELECT 1 FROM teacher_assignments ta
+            WHERE ta.teacher_id=%s
+              AND ta.faculty_id = ses.faculty_id
+              AND ta.semester   = ses.semester
+        )""")
+        ses_params.append(_tid())
+    ssw = " AND ".join(ses_where)
+
+    with get_db(register_pgvector=False) as conn:   # no embeddings touched
+        # ── OWNERSHIP: explicit 403, never silently-empty data ────────────
+        if role == "teacher":
+            tid = _tid()
+            if sid is not None and not qone(conn,
+                    "SELECT 1 AS ok FROM teacher_assignments "
+                    "WHERE teacher_id=%s AND subject_id=%s LIMIT 1", (tid, sid)):
+                return jsonify({"error": "You are not assigned to this subject"}), 403
+            if fid is not None and not qone(conn,
+                    "SELECT 1 AS ok FROM teacher_assignments "
+                    "WHERE teacher_id=%s AND faculty_id=%s LIMIT 1", (tid, fid)):
+                return jsonify({"error": "You are not assigned to this faculty"}), 403
+
+        subject_meta = None
+        if sid is not None:
+            subject_meta = qone(conn, "SELECT id, name, code FROM subjects WHERE id=%s", (sid,))
+            if not subject_meta:
+                return jsonify({"error": "Subject not found"}), 404
+
+        # ── 1. ROSTER — every active student in the cohort, including those
+        # with zero attendance (they render as a full row of dots, which is
+        # exactly the signal this report exists to surface).
+        # ::numeric not ::bigint — student_id is free TEXT and a long numeric
+        # id overflows bigint and 500s the whole report.
+        roster = qall(conn, f"""
+            SELECT s.student_id, s.full_name, s.department, s.semester, s.faculty_id
+            FROM students s
+            WHERE {cw}
+            ORDER BY NULLIF(regexp_replace(s.student_id, '\\D', '', 'g'), '')::numeric
+                     NULLS LAST, s.student_id
+        """, cohort_params)
+
+        # ── 2. CLASS DAYS, grouped by cohort key (faculty_id, semester).
+        # Arm 1: the camera path writes attendance with no session row
+        #        (21 of 23 rows have session_id IS NULL), so sessions alone
+        #        would miss classes that demonstrably happened.
+        # Arm 2: a session may exist with nobody marked (1 of 2 sessions),
+        #        which is a real class -> whole column of dots.
+        # Both arms cast semester to text so the UNION types line up.
+        class_day_rows = qall(conn, f"""
+            SELECT fac, sem, d FROM (
+                SELECT s.faculty_id AS fac, s.semester::text AS sem, a.date AS d
+                FROM attendance a
+                JOIN students s ON s.student_id = a.student_id
+                WHERE a.date BETWEEN %s AND %s
+                  {att_subject_clause}
+                  AND {cw}
+                UNION
+                SELECT ses.faculty_id AS fac, ses.semester::text AS sem,
+                       ses.session_date AS d
+                FROM attendance_sessions ses
+                WHERE {ssw}
+            ) x
+            ORDER BY d
+        """, [first_day, last_day] + att_subject_params + cohort_params + ses_params)
+
+        # ── 3. FACTS — one logical cell per (student, date).
+        # bool_or collapses the fan-out both partial unique indexes permit: a
+        # student may hold N per-subject rows PLUS one legacy subject_id IS NULL
+        # row on the same date. GROUP BY folds them into a single verdict.
+        fact_rows = qall(conn, f"""
+            SELECT a.student_id, a.date AS d,
+                   bool_or(a.status = 'Present') AS present
+            FROM attendance a
+            JOIN students s ON s.student_id = a.student_id
+            WHERE a.date BETWEEN %s AND %s
+              {att_subject_clause}
+              AND {cw}
+            GROUP BY a.student_id, a.date
+        """, [first_day, last_day] + att_subject_params + cohort_params)
+
+        # ── 4. Filter dropdowns, scoped to what the caller may actually see.
+        if role == "teacher":
+            faculties = qall(conn, """
+                SELECT DISTINCT f.id, f.name, f.code
+                FROM teacher_assignments ta JOIN faculties f ON f.id = ta.faculty_id
+                WHERE ta.teacher_id=%s ORDER BY f.name
+            """, (_tid(),))
+            subjects = qall(conn, """
+                SELECT DISTINCT sb.id, sb.name, sb.code
+                FROM teacher_assignments ta JOIN subjects sb ON sb.id = ta.subject_id
+                WHERE ta.teacher_id=%s ORDER BY sb.name
+            """, (_tid(),))
+        else:
+            faculties = qall(conn, "SELECT id, name, code FROM faculties ORDER BY name")
+            subjects  = qall(conn,
+                "SELECT id, name, code FROM subjects"
+                + (" WHERE faculty_id=%s" if fid is not None else "")
+                + " ORDER BY name", ([fid] if fid is not None else []))
+
+    # ── 4. RUNNING COUNTER (Python) ───────────────────────────────────────
+    # Class days keyed by cohort so each student is scored only against days
+    # their own class actually met.
+    days_by_group: dict = {}
+    for r in class_day_rows:
+        days_by_group.setdefault((r["fac"], r["sem"]), set()).add(r["d"])
+
+    all_days = sorted({r["d"] for r in class_day_rows})   # grid header = union
+
+    present_by_student: dict = {}
+    for r in fact_rows:
+        if r["present"]:
+            present_by_student.setdefault(r["student_id"], set()).add(r["d"])
+
+    students_out = []
+    for st in roster:
+        key = (st["faculty_id"],
+               str(st["semester"]) if st["semester"] is not None else None)
+        my_days      = sorted(days_by_group.get(key, set()))
+        present_days = present_by_student.get(st["student_id"], set())
+        cells, counter = {}, 0
+        for d in my_days:
+            if d in present_days:
+                counter += 1
+                cells[str(d.day)] = counter   # 1st attended class -> 1, 2nd -> 2 ...
+            else:
+                cells[str(d.day)] = "."       # class held, student absent
+            # Days not in my_days get no key -> frontend renders blank.
+        total = len(my_days)
+        students_out.append({
+            "student_id":    st["student_id"],
+            "full_name":     st["full_name"],
+            "department":    st["department"],
+            "semester":      st["semester"],
+            "cells":         cells,
+            "present":       counter,
+            "total_classes": total,
+            "percentage":    round(100.0 * counter / total, 1) if total else None,
+        })
+
+    return jsonify({
+        "year":          year,
+        "month":         month,
+        "month_name":    calendar.month_name[month],
+        "days_in_month": last_day.day,
+        "class_days":    [d.day for d in all_days],
+        "class_dates":   [d.isoformat() for d in all_days],
+        "scope":         "subject" if sid is not None else "all_subjects",
+        "subject":       subject_meta,
+        "faculty_id":    fid,
+        "semester":      sem_txt,
+        "students":      students_out,
+        "faculties":     faculties,
+        "subjects":      subjects,
+        "totals":        {"students": len(students_out), "class_days": len(all_days)},
+        # cohorts > 1 means the columns are a UNION across several classes and
+        # each row is scored against its own class. The UI warns in that case.
+        "meta":          {"cohorts": len(days_by_group)},
+    })
 
 
 # ══════════════════════════════════════════════════════════════════════════
