@@ -59,7 +59,7 @@ body {
   display: none;
 }
 
-/* ─── Session timeout modal ───────────────────────────────────────────── */
+/* ────── Session timeout modal ───────────────────────── */
 .session-timeout-modal {
   position: fixed;
   inset: 0;
