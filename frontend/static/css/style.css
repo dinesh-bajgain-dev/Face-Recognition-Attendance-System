@@ -446,7 +446,7 @@ body {
   margin-bottom: 0.75rem;
 }
 
-/* ── Canvas (Charts) ────────────────────────────────────────────────────── */
+/* ── Canvas (Charts) ───────────────────────────────────────────────────── */
 canvas {
   display: block;
   width: 100% !important;
