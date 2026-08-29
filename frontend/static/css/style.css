@@ -1636,7 +1636,7 @@ input[type="date"] {
   color: var(--text);
 }
 
-/* ── Attendance edit list ───────────────────────────────────────────── */
+/* ── Attendance edit list ──────────────────────────────────────────── */
 .att-edit-row {
   display: flex;
   align-items: center;
