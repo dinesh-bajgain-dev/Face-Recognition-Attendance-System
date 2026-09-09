@@ -3530,9 +3530,15 @@ async function openSubjectModal(id) {
   document.getElementById("smName").value = s ? s.name : "";
   document.getElementById("smCode").value = s ? s.code || "" : "";
   const smFac = document.getElementById("smFaculty");
-  if (smFac) smFac.value = s ? s.faculty_id || "" : "";
+  if (smFac) {
+    const facFilter = document.getElementById("subjFacultyFilter");
+    smFac.value = s ? s.faculty_id || "" : facFilter?.value || "";
+  }
   const smSem = document.getElementById("smSemester");
-  if (smSem) smSem.value = s ? s.semester || "" : "";
+  if (smSem) {
+    const semFilter = document.getElementById("subjSemesterFilter");
+    smSem.value = s ? s.semester || "" : semFilter?.value || "";
+  }
   setMsg("subjectModalErr", "", "");
   document.getElementById("subjectModal").style.display = "flex";
 }
