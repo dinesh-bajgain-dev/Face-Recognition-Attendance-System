@@ -266,16 +266,19 @@ function logout() {
 }
 
 /* ── Session idle timeout ────────────────────────────────────────────── */
-const SESSION_IDLE_MINUTES = 30;          // inactivity before warning
-const SESSION_WARN_SECONDS = 60;          // countdown before forced logout
+const SESSION_IDLE_MINUTES = 30; // inactivity before warning
+const SESSION_WARN_SECONDS = 60; // countdown before forced logout
 
-let _sessionIdleTimer    = null;
-let _sessionWarnTimer    = null;
+let _sessionIdleTimer = null;
+let _sessionWarnTimer = null;
 let _sessionWarnCountdown = SESSION_WARN_SECONDS;
 
 function _sessionIdleStart() {
   _sessionIdleStop();
-  _sessionIdleTimer = setTimeout(_sessionShowWarning, SESSION_IDLE_MINUTES * 60 * 1000);
+  _sessionIdleTimer = setTimeout(
+    _sessionShowWarning,
+    SESSION_IDLE_MINUTES * 60 * 1000,
+  );
 }
 
 function _sessionIdleStop() {
@@ -288,7 +291,7 @@ function _sessionIdleStop() {
 }
 
 function _sessionActivity() {
-  if (!authToken) return;          // not logged in — nothing to reset
+  if (!authToken) return; // not logged in — nothing to reset
   const modal = document.getElementById("sessionTimeoutModal");
   const warningShowing = modal && !modal.classList.contains("hidden");
   if (warningShowing) {
@@ -298,17 +301,23 @@ function _sessionActivity() {
   } else {
     // Still in the idle-wait phase — just restart the timer
     clearTimeout(_sessionIdleTimer);
-    _sessionIdleTimer = setTimeout(_sessionShowWarning, SESSION_IDLE_MINUTES * 60 * 1000);
+    _sessionIdleTimer = setTimeout(
+      _sessionShowWarning,
+      SESSION_IDLE_MINUTES * 60 * 1000,
+    );
   }
 }
 
 function _sessionShowWarning() {
   const modal = document.getElementById("sessionTimeoutModal");
-  if (!modal) { logout(); return; }
+  if (!modal) {
+    logout();
+    return;
+  }
   _sessionWarnCountdown = SESSION_WARN_SECONDS;
   const sec = document.getElementById("sessionWarnSec");
   const fill = document.getElementById("sessionWarnFill");
-  if (sec)  sec.textContent = _sessionWarnCountdown;
+  if (sec) sec.textContent = _sessionWarnCountdown;
   if (fill) {
     fill.style.transition = "none";
     fill.style.width = "100%";
@@ -334,9 +343,16 @@ function sessionStayLoggedIn() {
 
 // Wire global activity events once at load time
 (function _wireSessionListeners() {
-  const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll", "click"];
-  events.forEach(ev =>
-    document.addEventListener(ev, _sessionActivity, { passive: true })
+  const events = [
+    "mousemove",
+    "mousedown",
+    "keydown",
+    "touchstart",
+    "scroll",
+    "click",
+  ];
+  events.forEach((ev) =>
+    document.addEventListener(ev, _sessionActivity, { passive: true }),
   );
   // Also reset on tab becoming visible again (user switches back to this tab)
   document.addEventListener("visibilitychange", () => {
@@ -399,11 +415,22 @@ function navigate(page) {
     "t-reports": () => {
       loadTeacherReports();
       // Pre-load pending count for corrections badge without loading the full tab
-      api("/corrections").then((r) => r && r.json().then((d) => {
-        const pending = (d.corrections || []).filter((c) => c.status === "pending").length;
-        const badge = document.getElementById("tCorrPendingBadge");
-        if (badge) { badge.textContent = pending; badge.style.display = pending > 0 ? "inline" : "none"; }
-      })).catch(() => {});
+      api("/corrections")
+        .then(
+          (r) =>
+            r &&
+            r.json().then((d) => {
+              const pending = (d.corrections || []).filter(
+                (c) => c.status === "pending",
+              ).length;
+              const badge = document.getElementById("tCorrPendingBadge");
+              if (badge) {
+                badge.textContent = pending;
+                badge.style.display = pending > 0 ? "inline" : "none";
+              }
+            }),
+        )
+        .catch(() => {});
     },
     profile: () => {},
     enroll: () => {
@@ -907,9 +934,10 @@ async function enrollStudent() {
     webcamFiles = [];
     const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach(
-      (id) => { const el = document.getElementById(id); if (el) el.value = ""; },
-    );
+    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
   } catch (e) {
     setMsg("enrollMsg", "Error: " + e.message, "err");
     progress.style.display = "none";
@@ -1344,8 +1372,12 @@ function renderAttTable(records) {
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadReports() {
   // Always reset to Overview tab when Reports page is opened
-  document.querySelectorAll("#page-reports .sub-tab").forEach((t) => t.classList.remove("active"));
-  document.querySelectorAll("#page-reports .sub-tab-panel").forEach((p) => p.classList.remove("active"));
+  document
+    .querySelectorAll("#page-reports .sub-tab")
+    .forEach((t) => t.classList.remove("active"));
+  document
+    .querySelectorAll("#page-reports .sub-tab-panel")
+    .forEach((p) => p.classList.remove("active"));
   document.querySelector("#page-reports .sub-tab")?.classList.add("active");
   document.getElementById("rtab-overview")?.classList.add("active");
   // Populate faculty filter (needed by Defaulter List tab)
@@ -1506,7 +1538,7 @@ async function loadSettings() {
     const r = await api("/settings");
     const d = await r.json();
     const thresh = parseFloat(d.recognition_threshold);
-    const skip   = parseInt(d.frame_skip);
+    const skip = parseInt(d.frame_skip);
 
     // Slider positions
     const _ts = document.getElementById("threshSlider");
@@ -1516,26 +1548,35 @@ async function loadSettings() {
 
     // Threshold label — show both % and decimal so it matches .env value
     const _tv = document.getElementById("threshVal");
-    if (_tv) _tv.textContent = Math.round(thresh * 100) + "% (value: " + thresh.toFixed(2) + ")";
+    if (_tv)
+      _tv.textContent =
+        Math.round(thresh * 100) + "% (value: " + thresh.toFixed(2) + ")";
 
     // Frame skip label
     const _sv = document.getElementById("skipVal");
-    if (_sv) _sv.textContent = "every " + skip + (skip === 1 ? " frame" : " frames");
+    if (_sv)
+      _sv.textContent = "every " + skip + (skip === 1 ? " frame" : " frames");
 
     // System Info — show only info NOT already visible in the sliders
     const _si = document.getElementById("sysInfo");
     if (_si) {
       const emailColor = d.email_enabled ? "var(--green)" : "var(--text3)";
-      const emailLabel = d.email_enabled ? "Enabled" : "Disabled — set BREVO_API_KEY in .env";
+      const emailLabel = d.email_enabled
+        ? "Enabled"
+        : "Disabled — set BREVO_API_KEY in .env";
       _si.innerHTML = `
         <div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
           <span style="color:var(--text2)">Email</span>
           <span style="font-family:var(--mono);font-size:12px;color:${emailColor}">${emailLabel}</span>
         </div>
-        ${d.brevo_from ? `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
+        ${
+          d.brevo_from
+            ? `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)">
           <span style="color:var(--text2)">Sender</span>
           <span style="font-family:var(--mono);font-size:12px">${d.brevo_from}</span>
-        </div>` : ""}
+        </div>`
+            : ""
+        }
         <div style="display:flex;justify-content:space-between;padding:7px 0">
           <span style="color:var(--text2)">Version</span>
           <span style="font-family:var(--mono);font-size:12px">v3.2</span>
@@ -1832,9 +1873,10 @@ window.enrollStudent = async function () {
     webcamFiles = [];
     const filePreview = document.getElementById("filePreview") || null;
     if (filePreview) filePreview.innerHTML = "";
-    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach(
-      (id) => { const el = document.getElementById(id); if (el) el.value = ""; },
-    );
+    ["eId", "eName", "eFaculty", "eSem", "eEmail", "ePhone"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
   } catch (e) {
     setMsg("enrollMsg", "Error: " + e.message, "err");
     progress.style.display = "none";
@@ -1924,7 +1966,7 @@ async function startAutoCapture() {
   const sem = document.getElementById("eSem")?.value.trim() || "";
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
-  if (!sid || !name || !faculty_id || !sem || !email ){
+  if (!sid || !name || !faculty_id || !sem || !email) {
     toast("All fields are required before capturing", "err");
     return;
   }
@@ -2375,7 +2417,7 @@ window.enrollStudent = async function () {
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
 
-  if (!sid || !name || !faculty_id || !sem || !email ) {
+  if (!sid || !name || !faculty_id || !sem || !email) {
     setMsg("enrollMsg", "All fields are required.", "err");
     return;
   }
@@ -2781,7 +2823,7 @@ function goToStep2() {
   const sem = document.getElementById("eSem")?.value.trim() || "";
   const email = document.getElementById("eEmail").value.trim();
   const phone = document.getElementById("ePhone").value.trim();
-  if (!sid || !name || !faculty_id || !sem || !email ) {
+  if (!sid || !name || !faculty_id || !sem || !email) {
     toast("All fields are required", "err");
     return;
   }
@@ -3339,7 +3381,13 @@ function switchManageTab(tab, btn) {
     .forEach((p) => p.classList.remove("active"));
   if (btn) btn.classList.add("active");
   else {
-    const tabs = ["faculties", "subjects", "timeslots", "timetable", "calendar"];
+    const tabs = [
+      "faculties",
+      "subjects",
+      "timeslots",
+      "timetable",
+      "calendar",
+    ];
     const idx = tabs.indexOf(tab);
     document.querySelectorAll(".sub-tab")[idx]?.classList.add("active");
   }
@@ -4794,7 +4842,9 @@ function loadStudentPortal() {
 
 function _spNavigate(page, liEl) {
   // Update sidebar active state
-  document.querySelectorAll(".sp-nav-item").forEach((li) => li.classList.remove("active"));
+  document
+    .querySelectorAll(".sp-nav-item")
+    .forEach((li) => li.classList.remove("active"));
   if (liEl) {
     liEl.classList.add("active");
   } else {
@@ -4802,7 +4852,9 @@ function _spNavigate(page, liEl) {
     if (found) found.classList.add("active");
   }
   // Switch pages
-  document.querySelectorAll(".sp-page").forEach((p) => p.classList.remove("active"));
+  document
+    .querySelectorAll(".sp-page")
+    .forEach((p) => p.classList.remove("active"));
   const pg = document.getElementById(`sp-page-${page}`);
   if (pg) pg.classList.add("active");
 
@@ -4837,26 +4889,37 @@ async function loadSPDashboard() {
     const absent = total - present;
     const pct = stats.pct ? parseFloat(stats.pct) : 0;
 
-    const sv = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+    const sv = (id, v) => {
+      const e = document.getElementById(id);
+      if (e) e.textContent = v;
+    };
     sv("spStatPresent", present);
     sv("spStatAbsent", absent);
     sv("spStatPct", pct + "%");
     const pctEl = document.getElementById("spStatPct");
-    if (pctEl) pctEl.style.color = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
+    if (pctEl)
+      pctEl.style.color =
+        pct >= 75
+          ? "var(--green)"
+          : pct >= 65
+            ? "var(--amber)"
+            : "var(--danger)";
     sv("spStatToday", (d.today_classes || []).length);
 
     // Academic alerts
     const alertsEl = document.getElementById("spDashAlerts");
     if (alertsEl) {
       const alerts = d.alerts || [];
-      alertsEl.innerHTML = alerts.map((a) => {
-        const ap = parseFloat(a.pct || 0);
-        const cls = ap < 65 ? "sp-alert-critical" : "sp-alert-warning";
-        return `<div class="sp-alert ${cls}">
+      alertsEl.innerHTML = alerts
+        .map((a) => {
+          const ap = parseFloat(a.pct || 0);
+          const cls = ap < 65 ? "sp-alert-critical" : "sp-alert-warning";
+          return `<div class="sp-alert ${cls}">
           <strong>${escapeHtml(a.subject_code)}</strong> — ${escapeHtml(a.subject_name)}:
           ${ap}% attendance. ${ap < 65 ? "⚠ Critical — immediate action needed." : "Below 75% threshold."}
         </div>`;
-      }).join("");
+        })
+        .join("");
     }
 
     // Today's classes
@@ -4865,13 +4928,17 @@ async function loadSPDashboard() {
       const cls = d.today_classes || [];
       todayEl.innerHTML = !cls.length
         ? `<div class="text-muted text-12px">No classes scheduled today (${d.day || ""}).</div>`
-        : cls.map((c) => `<div class="sp-class-row">
+        : cls
+            .map(
+              (c) => `<div class="sp-class-row">
             <span class="sp-class-time">${(c.start_time || "").slice(0, 5)}–${(c.end_time || "").slice(0, 5)}</span>
             <div>
               <div class="text-13px font-500">${escapeHtml(c.subject_name || c.label)}</div>
               <div class="text-11px text-secondary">${c.teacher_name ? escapeHtml(c.teacher_name) : "—"}</div>
             </div>
-          </div>`).join("");
+          </div>`,
+            )
+            .join("");
     }
 
     // Upcoming holidays
@@ -4880,10 +4947,14 @@ async function loadSPDashboard() {
       const hols = d.holidays || [];
       holEl.innerHTML = !hols.length
         ? `<div class="text-muted text-12px">No holidays in the next 30 days.</div>`
-        : hols.map((h) => `<div class="sp-class-row">
+        : hols
+            .map(
+              (h) => `<div class="sp-class-row">
             <span class="sp-class-time">${h.date}</span>
             <div class="text-13px">${escapeHtml(h.name)}</div>
-          </div>`).join("");
+          </div>`,
+            )
+            .join("");
     }
 
     // Subject-wise bars
@@ -4899,8 +4970,8 @@ async function loadSPDashboard() {
     if (ct && !ct.value) ct.value = total;
     if (pp && !pp.value) pp.value = present;
     if (pt && !pt.value) pt.value = total;
-    calcRecovery(); calcPredict();
-
+    calcRecovery();
+    calcPredict();
   } catch (e) {
     console.error("loadSPDashboard:", e);
   }
@@ -4911,11 +4982,26 @@ function _spRenderSubjectBars(el, subs) {
     el.innerHTML = `<div class="text-muted text-12px">No attendance records yet.</div>`;
     return;
   }
-  el.innerHTML = subs.map((s) => {
-    const pct = s.pct !== null ? parseFloat(s.pct) : null;
-    const color = pct === null ? "var(--text3)" : pct < 65 ? "var(--danger)" : pct < 75 ? "var(--amber)" : "var(--green)";
-    const statusLabel = pct === null ? "" : pct < 65 ? " · Critical" : pct < 75 ? " · At Risk" : " · Safe";
-    return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
+  el.innerHTML = subs
+    .map((s) => {
+      const pct = s.pct !== null ? parseFloat(s.pct) : null;
+      const color =
+        pct === null
+          ? "var(--text3)"
+          : pct < 65
+            ? "var(--danger)"
+            : pct < 75
+              ? "var(--amber)"
+              : "var(--green)";
+      const statusLabel =
+        pct === null
+          ? ""
+          : pct < 65
+            ? " · Critical"
+            : pct < 75
+              ? " · At Risk"
+              : " · Safe";
+      return `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <span class="text-13px"><span class="subject-tag" style="font-size:11px">${escapeHtml(s.subject_code)}</span> ${escapeHtml(s.subject_name)}</span>
         <span style="font-size:12px;font-weight:600;color:${color}">${pct !== null ? pct + "%" : "—"}${statusLabel}</span>
@@ -4925,7 +5011,8 @@ function _spRenderSubjectBars(el, subs) {
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:2px">${s.present}/${s.total} classes attended</div>
     </div>`;
-  }).join("");
+    })
+    .join("");
 }
 
 // ── Attendance ─────────────────────────────────────────────────────────────
@@ -4949,7 +5036,12 @@ async function loadSPAttendance() {
     const summEl = document.getElementById("spAttSummary");
     if (summEl) {
       const pct = parseFloat(overall.pct || 0);
-      const color = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
+      const color =
+        pct >= 75
+          ? "var(--green)"
+          : pct >= 65
+            ? "var(--amber)"
+            : "var(--danger)";
       summEl.innerHTML = `<span>Present: <strong>${overall.present || 0}</strong></span>
         <span>Total: <strong>${overall.total || 0}</strong></span>
         <span>Overall: <strong style="color:${color}">${pct}%</strong></span>`;
@@ -4975,21 +5067,25 @@ async function loadSPAttendance() {
     const body = document.getElementById("spAttBody");
     if (body) {
       let records = d.recent || [];
-      if (subjectFilter) records = records.filter((r) => String(r.subject_id) === subjectFilter);
+      if (subjectFilter)
+        records = records.filter((r) => String(r.subject_id) === subjectFilter);
       body.innerHTML = !records.length
         ? `<tr><td colspan="4" class="text-center text-muted p-2rem">No records found.</td></tr>`
-        : records.map((rec) => {
-            const color = rec.status === "Present" ? "var(--green)" : "var(--danger)";
-            const sub = rec.subject_code
-              ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(rec.subject_code)}</span>`
-              : "—";
-            return `<tr>
+        : records
+            .map((rec) => {
+              const color =
+                rec.status === "Present" ? "var(--green)" : "var(--danger)";
+              const sub = rec.subject_code
+                ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(rec.subject_code)}</span>`
+                : "—";
+              return `<tr>
               <td class="mono text-12px">${rec.date}</td>
               <td>${sub} <span class="text-12px">${escapeHtml(rec.subject_name || "")}</span></td>
               <td style="color:${color};font-weight:600;font-size:12px">${rec.status}</td>
               <td class="text-12px text-secondary">${escapeHtml(rec.note || "")}</td>
             </tr>`;
-          }).join("");
+            })
+            .join("");
     }
   } catch (e) {
     console.error("loadSPAttendance:", e);
@@ -5030,38 +5126,63 @@ async function loadSPTimetable() {
     }
 
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const dayLabels = { Mon:"Monday", Tue:"Tuesday", Wed:"Wednesday", Thu:"Thursday", Fri:"Friday", Sat:"Saturday" };
+    const dayLabels = {
+      Mon: "Monday",
+      Tue: "Tuesday",
+      Wed: "Wednesday",
+      Thu: "Thursday",
+      Fri: "Friday",
+      Sat: "Saturday",
+    };
     const lookup = {};
-    entries.forEach((e) => { lookup[`${e.day_of_week}_${e.time_slot_id}`] = e; });
-    const today = new Date().toLocaleDateString("en-US", {weekday: "short"}).slice(0, 3);
-    const semLabel = d.semester ? ` — Semester ${d.semester}` : " — All Semesters";
+    entries.forEach((e) => {
+      lookup[`${e.day_of_week}_${e.time_slot_id}`] = e;
+    });
+    const today = new Date()
+      .toLocaleDateString("en-US", { weekday: "short" })
+      .slice(0, 3);
+    const semLabel = d.semester
+      ? ` — Semester ${d.semester}`
+      : " — All Semesters";
 
     grid.innerHTML = `
-      ${!d.semester ? `<div class="msg" style="margin-bottom:0.75rem;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:var(--amber)">
+      ${
+        !d.semester
+          ? `<div class="msg" style="margin-bottom:0.75rem;background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);color:var(--amber)">
         Semester not set on your account — showing all semesters for your faculty. Ask admin to update your semester.
-      </div>` : ""}
+      </div>`
+          : ""
+      }
       <div class="tt-grid" style="--tt-days:6">
         <div class="tt-head-cell tt-corner">Time${semLabel}</div>
         ${days.map((day) => `<div class="tt-head-cell${day === today ? " tt-today-col" : ""}">${dayLabels[day]}</div>`).join("")}
-        ${slots.map((slot) => `
+        ${slots
+          .map(
+            (slot) => `
           <div class="tt-slot-label">
             <div class="tt-slot-name">${escapeHtml(slot.label)}</div>
-            <div class="tt-slot-time">${(slot.start_time||"").slice(0,5)}–${(slot.end_time||"").slice(0,5)}</div>
+            <div class="tt-slot-time">${(slot.start_time || "").slice(0, 5)}–${(slot.end_time || "").slice(0, 5)}</div>
           </div>
-          ${days.map((day) => {
-            const e = lookup[`${day}_${slot.id}`];
-            if (e) return `<div class="tt-cell tt-cell-filled sp-tt-cell" title="${escapeHtml(e.teacher_name||"")}">
+          ${days
+            .map((day) => {
+              const e = lookup[`${day}_${slot.id}`];
+              if (e)
+                return `<div class="tt-cell tt-cell-filled sp-tt-cell" title="${escapeHtml(e.teacher_name || "")}">
               <div class="tt-cell-subject">${escapeHtml(e.subject_code || e.subject_name || "—")}</div>
               <div class="tt-cell-teacher">${escapeHtml(e.teacher_name || "")}</div>
               ${!d.semester && e.semester ? `<div style="font-size:9px;color:var(--text3)">Sem ${e.semester}</div>` : ""}
             </div>`;
-            return `<div class="tt-cell" style="background:var(--bg2)"></div>`;
-          }).join("")}
-        `).join("")}
+              return `<div class="tt-cell" style="background:var(--bg2)"></div>`;
+            })
+            .join("")}
+        `,
+          )
+          .join("")}
       </div>`;
   } catch (e) {
     console.error("loadSPTimetable:", e);
-    document.getElementById("spTimetableGrid").innerHTML = `<div class="msg err">Failed to load timetable. Please try again.</div>`;
+    document.getElementById("spTimetableGrid").innerHTML =
+      `<div class="msg err">Failed to load timetable. Please try again.</div>`;
   }
 }
 
@@ -5078,8 +5199,11 @@ function calcRecovery() {
   const target = parseFloat(document.getElementById("calcTarget")?.value || 75);
   const el = document.getElementById("calcResult");
   if (!el) return;
-  if (!total) { el.innerHTML = ""; return; }
-  const currentPct = total ? (present / total * 100) : 0;
+  if (!total) {
+    el.innerHTML = "";
+    return;
+  }
+  const currentPct = total ? (present / total) * 100 : 0;
   if (currentPct >= target) {
     el.innerHTML = `<div class="sp-calc-ok">✓ You are already at ${currentPct.toFixed(1)}% — above the ${target}% target.</div>`;
     return;
@@ -5087,7 +5211,7 @@ function calcRecovery() {
   // Solve: (present + x) / (total + x) >= target/100
   // x >= (target*total - 100*present) / (100 - target)
   const x = Math.ceil((target * total - 100 * present) / (100 - target));
-  const projected = ((present + x) / (total + x) * 100).toFixed(1);
+  const projected = (((present + x) / (total + x)) * 100).toFixed(1);
   el.innerHTML = `<div class="sp-calc-need">
     <div>Current: <strong>${currentPct.toFixed(1)}%</strong></div>
     <div>You need to attend <strong>${x} more consecutive classes</strong></div>
@@ -5102,13 +5226,22 @@ function calcPredict() {
   const remain = parseInt(document.getElementById("predRemain")?.value || 0);
   const el = document.getElementById("predResult");
   if (!el) return;
-  if (!total) { el.innerHTML = ""; return; }
+  if (!total) {
+    el.innerHTML = "";
+    return;
+  }
   // Assuming they attend all remaining classes except the ones they miss
   const futurePresent = present + (remain - miss);
   const futureTotal = total + remain;
-  const futurePct = futureTotal ? (futurePresent / futureTotal * 100) : 0;
-  const color = futurePct >= 75 ? "var(--green)" : futurePct >= 65 ? "var(--amber)" : "var(--danger)";
-  const risk = futurePct >= 75 ? "Safe" : futurePct >= 65 ? "At Risk" : "Critical";
+  const futurePct = futureTotal ? (futurePresent / futureTotal) * 100 : 0;
+  const color =
+    futurePct >= 75
+      ? "var(--green)"
+      : futurePct >= 65
+        ? "var(--amber)"
+        : "var(--danger)";
+  const risk =
+    futurePct >= 75 ? "Safe" : futurePct >= 65 ? "At Risk" : "Critical";
   el.innerHTML = `<div class="sp-calc-need">
     <div>After missing ${miss} classes: <strong style="color:${color}">${futurePct.toFixed(1)}%</strong></div>
     <div>Risk level: <strong style="color:${color}">${risk}</strong></div>
@@ -5131,16 +5264,23 @@ async function loadSPLeave() {
     const rows = d.leave_requests || [];
     body.innerHTML = !rows.length
       ? `<tr><td colspan="5" class="text-center text-muted p-2rem">No leave requests yet.</td></tr>`
-      : rows.map((lr) => {
-          const statusColor = lr.status === "approved" ? "var(--green)" : lr.status === "rejected" ? "var(--danger)" : "var(--amber)";
-          return `<tr>
+      : rows
+          .map((lr) => {
+            const statusColor =
+              lr.status === "approved"
+                ? "var(--green)"
+                : lr.status === "rejected"
+                  ? "var(--danger)"
+                  : "var(--amber)";
+            return `<tr>
             <td class="mono text-12px">${lr.from_date}</td>
             <td class="mono text-12px">${lr.to_date}</td>
             <td class="text-12px">${escapeHtml(lr.reason)}</td>
             <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${lr.status}</span></td>
             <td class="text-12px text-secondary">${escapeHtml(lr.review_note || "")}</td>
           </tr>`;
-        }).join("");
+          })
+          .join("");
   } catch (e) {
     body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Failed to load.</td></tr>`;
   }
@@ -5159,24 +5299,33 @@ async function submitLeaveRequest() {
   try {
     const r = await fetch(`${API}/leave-requests`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
       body: JSON.stringify({ from_date: fromDate, to_date: toDate, reason }),
     });
     const d = await r.json();
-    if (!r.ok) { errEl.textContent = d.error || "Failed to submit."; return; }
+    if (!r.ok) {
+      errEl.textContent = d.error || "Failed to submit.";
+      return;
+    }
     document.getElementById("leaveFrom").value = "";
     document.getElementById("leaveTo").value = "";
     document.getElementById("leaveReason").value = "";
     toast("Leave request submitted");
     loadSPLeave();
-  } catch { errEl.textContent = "Cannot reach server."; }
+  } catch {
+    errEl.textContent = "Cannot reach server.";
+  }
 }
 
 // ── Corrections ───────────────────────────────────────────────────────────
 
 async function loadSPCorrections() {
   const body = document.getElementById("spCorrBody");
-  if (body) body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
+  if (body)
+    body.innerHTML = `<tr><td colspan="5" class="text-center text-muted p-1rem">Loading…</td></tr>`;
 
   // Load subjects for the dropdown independently (don't rely on _spDashData)
   const subjSel = document.getElementById("corrSubject");
@@ -5194,7 +5343,9 @@ async function loadSPCorrections() {
           subjSel.add(o);
         });
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
   }
 
   try {
@@ -5203,23 +5354,38 @@ async function loadSPCorrections() {
     });
     if (!r.ok) throw new Error();
     const d = await r.json();
-    const rows = d.corrections || [];  // Backend already filters to this student's records
+    const rows = d.corrections || []; // Backend already filters to this student's records
     if (body) {
       body.innerHTML = !rows.length
         ? `<tr><td colspan="5" class="text-center text-muted p-2rem">No correction requests yet.</td></tr>`
-        : rows.map((c) => {
-            const statusColor = c.status === "approved" ? "var(--green)" : c.status === "rejected" ? "var(--danger)" : "var(--amber)";
-            const statusIcon = c.status === "approved" ? "✓ " : c.status === "rejected" ? "✗ " : "";
-            return `<tr>
+        : rows
+            .map((c) => {
+              const statusColor =
+                c.status === "approved"
+                  ? "var(--green)"
+                  : c.status === "rejected"
+                    ? "var(--danger)"
+                    : "var(--amber)";
+              const statusIcon =
+                c.status === "approved"
+                  ? "✓ "
+                  : c.status === "rejected"
+                    ? "✗ "
+                    : "";
+              return `<tr>
               <td class="mono text-12px">${c.date}</td>
               <td class="text-12px">${c.subject_code ? `<span class="subject-tag" style="font-size:10px">${escapeHtml(c.subject_code)}</span>` : "—"}</td>
               <td class="text-12px">${escapeHtml(c.reason)}</td>
               <td><span style="color:${statusColor};font-weight:600;font-size:12px;text-transform:capitalize">${statusIcon}${c.status}</span></td>
               <td class="text-12px text-secondary">${escapeHtml(c.review_note || "")}</td>
             </tr>`;
-          }).join("");
+            })
+            .join("");
     }
-  } catch { if (body) body.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Failed to load.</td></tr>`; }
+  } catch {
+    if (body)
+      body.innerHTML = `<tr><td colspan="5" class="text-center text-muted">Failed to load.</td></tr>`;
+  }
 }
 
 async function submitSPCorrection() {
@@ -5228,20 +5394,35 @@ async function submitSPCorrection() {
   const date = document.getElementById("corrDate")?.value;
   const subject_id = document.getElementById("corrSubject")?.value || null;
   const reason = document.getElementById("corrReason")?.value.trim();
-  if (!date || !reason) { errEl.textContent = "Date and reason are required."; return; }
+  if (!date || !reason) {
+    errEl.textContent = "Date and reason are required.";
+    return;
+  }
   try {
     const r = await fetch(`${API}/corrections`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
-      body: JSON.stringify({ date, subject_id: subject_id ? +subject_id : null, reason }),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        date,
+        subject_id: subject_id ? +subject_id : null,
+        reason,
+      }),
     });
     const d = await r.json();
-    if (!r.ok) { errEl.textContent = d.error || "Failed to submit."; return; }
+    if (!r.ok) {
+      errEl.textContent = d.error || "Failed to submit.";
+      return;
+    }
     document.getElementById("corrDate").value = "";
     document.getElementById("corrReason").value = "";
     toast("Correction request submitted");
     loadSPCorrections();
-  } catch { errEl.textContent = "Cannot reach server."; }
+  } catch {
+    errEl.textContent = "Cannot reach server.";
+  }
 }
 
 // ── Academic Calendar ──────────────────────────────────────────────────────
@@ -5261,19 +5442,26 @@ async function loadSPCalendar() {
     const upcoming = rows.filter((h) => h.date >= today);
     const past = rows.filter((h) => h.date < today).reverse();
 
-    const renderList = (items) => items.length
-      ? `<div class="sp-cal-list">${items.map((h) => `
+    const renderList = (items) =>
+      items.length
+        ? `<div class="sp-cal-list">${items
+            .map(
+              (h) => `
           <div class="sp-cal-row">
             <div class="sp-cal-date">${h.date}</div>
             <div class="text-13px">${escapeHtml(h.name)}</div>
-          </div>`).join("")}</div>`
-      : `<div class="text-muted text-12px">None.</div>`;
+          </div>`,
+            )
+            .join("")}</div>`
+        : `<div class="text-muted text-12px">None.</div>`;
 
     el.innerHTML = `
       <div class="sp-card mb-1"><div class="sp-card-title">Upcoming Holidays</div>${renderList(upcoming)}</div>
       <div class="sp-card"><div class="sp-card-title" style="color:var(--text3)">Past Holidays</div>${renderList(past.slice(0, 10))}</div>
     `;
-  } catch { el.innerHTML = `<div class="msg err">Failed to load calendar.</div>`; }
+  } catch {
+    el.innerHTML = `<div class="msg err">Failed to load calendar.</div>`;
+  }
 }
 
 // ── Profile ───────────────────────────────────────────────────────────────
@@ -5288,14 +5476,15 @@ async function loadSPProfile() {
     });
     if (!r.ok) throw new Error(await r.text());
     const d = await r.json();
-    const s = d.student || {};   // API wraps in {student: {...}}
+    const s = d.student || {}; // API wraps in {student: {...}}
     const stats = d.stats || {};
     const row = (label, value) => `<div class="sp-profile-row">
       <span class="sp-profile-label">${label}</span>
       <span class="sp-profile-value">${escapeHtml(String(value || "—"))}</span>
     </div>`;
     const pct = parseFloat(stats.pct || 0);
-    const pctColor = pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
+    const pctColor =
+      pct >= 75 ? "var(--green)" : pct >= 65 ? "var(--amber)" : "var(--danger)";
     el.innerHTML = `
       <div class="sp-avatar-lg">${(s.full_name || "S").charAt(0).toUpperCase()}</div>
       <div class="sp-profile-name">${escapeHtml(s.full_name || "")}</div>
@@ -5318,7 +5507,8 @@ async function loadSPProfile() {
     `;
   } catch (e) {
     console.error("loadSPProfile:", e);
-    document.getElementById("spProfileContent").innerHTML = `<div class="msg err">Failed to load profile. Please try again.</div>`;
+    document.getElementById("spProfileContent").innerHTML =
+      `<div class="msg err">Failed to load profile. Please try again.</div>`;
   }
 }
 
@@ -5350,8 +5540,15 @@ async function loadSPNotifications() {
       el.innerHTML = `<div class="sp-card"><div class="text-muted text-12px">No notifications right now.</div></div>`;
       return;
     }
-    const iconMap = { critical: "⚠️", warning: "⚠️", success: "✅", info: "ℹ️" };
-    el.innerHTML = `<div class="sp-notif-list">${notes.map((n) => `
+    const iconMap = {
+      critical: "⚠️",
+      warning: "⚠️",
+      success: "✅",
+      info: "ℹ️",
+    };
+    el.innerHTML = `<div class="sp-notif-list">${notes
+      .map(
+        (n) => `
       <div class="sp-notif-item sp-notif-${n.type}${n.is_new ? " sp-notif-unread" : ""}">
         <span class="sp-notif-icon">${iconMap[n.type] || "ℹ️"}</span>
         <div style="flex:1">
@@ -5359,8 +5556,12 @@ async function loadSPNotifications() {
           <div class="sp-notif-body">${escapeHtml(n.body)}</div>
           ${n.time ? `<div class="sp-notif-time">${n.time.slice(0, 16).replace("T", " ")}</div>` : ""}
         </div>
-      </div>`).join("")}</div>`;
-  } catch { el.innerHTML = `<div class="msg err">Failed to load notifications.</div>`; }
+      </div>`,
+      )
+      .join("")}</div>`;
+  } catch {
+    el.innerHTML = `<div class="msg err">Failed to load notifications.</div>`;
+  }
 }
 
 function _spUpdateNotifBadge(count) {
@@ -5378,7 +5579,9 @@ async function _spFetchUnreadCount() {
     if (!r.ok) return;
     const d = await r.json();
     _spUpdateNotifBadge(d.unread_count || 0);
-  } catch { /* silent */ }
+  } catch {
+    /* silent */
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -5468,7 +5671,7 @@ async function openTimetableModal() {
   document.getElementById("ttmErr").textContent = "";
   await _loadTimetableModalDropdowns();
   const m = document.getElementById("timetableModal");
-  m.style.display = "";   // clear any inline display:none from closeModal
+  m.style.display = ""; // clear any inline display:none from closeModal
   m.classList.add("open");
 }
 
@@ -5511,7 +5714,8 @@ async function _loadTimetableModalDropdowns() {
           `<option value="">Unassigned</option>` +
           (d.teachers || [])
             .map(
-              (t) => `<option value="${t.id}">${escapeHtml(t.full_name)}</option>`,
+              (t) =>
+                `<option value="${t.id}">${escapeHtml(t.full_name)}</option>`,
             )
             .join("");
         if (prev) teachSel.value = prev;
@@ -5555,7 +5759,12 @@ async function checkTimetableConflict() {
     conflEl.textContent = "Fill all required fields first";
     return;
   }
-  const payload = { faculty_id: +fid, semester: +sem, day_of_week: day, time_slot_id: +sid };
+  const payload = {
+    faculty_id: +fid,
+    semester: +sem,
+    day_of_week: day,
+    time_slot_id: +sid,
+  };
   if (tid) payload.teacher_id = +tid;
   const r = await api("/timetable/check", { method: "POST", json: payload });
   if (!r) return;
@@ -6037,9 +6246,11 @@ function switchTeacherReportTab(tab, btn) {
   const refreshBtn = document.getElementById("rptRefreshBtn");
   if (refreshBtn) {
     refreshBtn.onclick =
-      tab === "corrections" ? loadTeacherCorrections
-      : tab === "sheet"     ? () => loadAttendanceSheet("teacher")
-      : loadTeacherReports;
+      tab === "corrections"
+        ? loadTeacherCorrections
+        : tab === "sheet"
+          ? () => loadAttendanceSheet("teacher")
+          : loadTeacherReports;
   }
 }
 
@@ -6047,8 +6258,11 @@ async function loadTeacherCorrections() {
   const body = document.getElementById("tCorrBody");
   if (!body) return;
   body.innerHTML = `<tr><td colspan="6" class="text-center text-muted p-1rem">Loading…</td></tr>`;
-  const statusFilter = document.getElementById("tCorrStatusFilter")?.value || "";
-  const search = (document.getElementById("tCorrSearch")?.value || "").toLowerCase();
+  const statusFilter =
+    document.getElementById("tCorrStatusFilter")?.value || "";
+  const search = (
+    document.getElementById("tCorrSearch")?.value || ""
+  ).toLowerCase();
   try {
     const r = await api("/corrections");
     if (!r) return;
@@ -6064,26 +6278,31 @@ async function loadTeacherCorrections() {
     }
 
     if (statusFilter) rows = rows.filter((c) => c.status === statusFilter);
-    if (search) rows = rows.filter((c) =>
-      (c.student_id || "").toLowerCase().includes(search) ||
-      (c.student_name || "").toLowerCase().includes(search)
-    );
+    if (search)
+      rows = rows.filter(
+        (c) =>
+          (c.student_id || "").toLowerCase().includes(search) ||
+          (c.student_name || "").toLowerCase().includes(search),
+      );
 
     if (!rows.length) {
       body.innerHTML = `<tr><td colspan="6" class="text-center text-muted p-2rem">No correction requests found for your subjects.</td></tr>`;
       return;
     }
-    body.innerHTML = rows.map((c) => {
-      const badge = c.status === "pending"
-        ? `<span class="risk-badge risk-atrisk">Pending</span>`
-        : c.status === "approved"
-        ? `<span class="risk-badge risk-good">Approved</span>`
-        : `<span class="risk-badge risk-critical">Rejected</span>`;
-      const actions = c.status === "pending"
-        ? `<button class="btn-sm btn-primary" onclick="teacherReviewCorrection(${c.id},'approved')">Approve</button>
+    body.innerHTML = rows
+      .map((c) => {
+        const badge =
+          c.status === "pending"
+            ? `<span class="risk-badge risk-atrisk">Pending</span>`
+            : c.status === "approved"
+              ? `<span class="risk-badge risk-good">Approved</span>`
+              : `<span class="risk-badge risk-critical">Rejected</span>`;
+        const actions =
+          c.status === "pending"
+            ? `<button class="btn-sm btn-primary" onclick="teacherReviewCorrection(${c.id},'approved')">Approve</button>
            <button class="btn-sm btn-danger ml-4" onclick="teacherReviewCorrection(${c.id},'rejected')">Reject</button>`
-        : `<span class="text-12px text-secondary">${escapeHtml(c.review_note || "—")}</span>`;
-      return `<tr>
+            : `<span class="text-12px text-secondary">${escapeHtml(c.review_note || "—")}</span>`;
+        return `<tr>
         <td>
           <div class="text-13px font-500">${escapeHtml(c.student_name || c.student_id)}</div>
           <div class="mono text-11px text-secondary">${c.student_id}</div>
@@ -6094,22 +6313,31 @@ async function loadTeacherCorrections() {
         <td>${badge}</td>
         <td>${actions}</td>
       </tr>`;
-    }).join("");
+      })
+      .join("");
   } catch (e) {
     body.innerHTML = `<tr><td colspan="6" class="text-center text-muted">Failed to load.</td></tr>`;
   }
 }
 
 async function teacherReviewCorrection(id, status) {
-  const note = status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
+  const note =
+    status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
   const r = await api(`/corrections/${id}`, {
     method: "PUT",
     json: { status, review_note: note },
   });
   if (!r) return;
   const d = await r.json();
-  if (d.error) { toast(d.error, "err"); return; }
-  toast(status === "approved" ? "Correction approved — attendance updated" : "Correction rejected");
+  if (d.error) {
+    toast(d.error, "err");
+    return;
+  }
+  toast(
+    status === "approved"
+      ? "Correction approved — attendance updated"
+      : "Correction rejected",
+  );
   loadTeacherCorrections();
 }
 
@@ -6511,17 +6739,31 @@ function exportDefaultersCSV() {
 //        blank = no class held for that student's class that day
 // ══════════════════════════════════════════════════════════════════════════
 
-let _shData = null;   // last loaded sheet payload
+let _shData = null; // last loaded sheet payload
 let _shRole = "admin";
 
 // Element ids differ per panel: the teacher panel has no faculty/semester
 // pickers because their scope is enforced server-side from their assignments.
 function _shEls(role) {
   return role === "teacher"
-    ? { month: "tshMonth", faculty: null, semester: null, subject: "tshSubject",
-        grid: "tshGrid", warn: "tshWarn", summary: "tshSummary" }
-    : { month: "shMonth", faculty: "shFaculty", semester: "shSemester", subject: "shSubject",
-        grid: "shGrid", warn: "shWarn", summary: "shSummary" };
+    ? {
+        month: "tshMonth",
+        faculty: null,
+        semester: null,
+        subject: "tshSubject",
+        grid: "tshGrid",
+        warn: "tshWarn",
+        summary: "tshSummary",
+      }
+    : {
+        month: "shMonth",
+        faculty: "shFaculty",
+        semester: "shSemester",
+        subject: "shSubject",
+        grid: "shGrid",
+        warn: "shWarn",
+        summary: "shSummary",
+      };
 }
 
 // Local-time month string. NOT toISOString() — that is UTC, and in Nepal
@@ -6542,7 +6784,10 @@ async function loadAttendanceSheet(role) {
   const mv = monthEl?.value || _thisMonthStr();
   const [yearStr, monStr] = mv.split("-");
 
-  const qs = new URLSearchParams({ year: yearStr, month: String(parseInt(monStr, 10)) });
+  const qs = new URLSearchParams({
+    year: yearStr,
+    month: String(parseInt(monStr, 10)),
+  });
   // .set only when truthy — empty strings would be sent as real filters otherwise.
   const fac = els.faculty && document.getElementById(els.faculty)?.value;
   const sem = els.semester && document.getElementById(els.semester)?.value;
@@ -6553,7 +6798,7 @@ async function loadAttendanceSheet(role) {
 
   grid.innerHTML = `<div class="text-muted text-13px p-1rem">Loading…</div>`;
   const r = await api(`/reports/attendance-sheet?${qs}`);
-  if (!r) return;                      // api() returns null on 401 and logs out
+  if (!r) return; // api() returns null on 401 and logs out
   const d = await r.json();
   if (!r.ok || d.error) {
     _shData = null;
@@ -6561,8 +6806,18 @@ async function loadAttendanceSheet(role) {
     return;
   }
   _shData = d;
-  _shFillSelect(els.faculty, d.faculties, "All Faculties", (f) => `${f.code} — ${f.name}`);
-  _shFillSelect(els.subject, d.subjects, "All Subjects", (s) => `${s.code} — ${s.name}`);
+  _shFillSelect(
+    els.faculty,
+    d.faculties,
+    "All Faculties",
+    (f) => `${f.code} — ${f.name}`,
+  );
+  _shFillSelect(
+    els.subject,
+    d.subjects,
+    "All Subjects",
+    (s) => `${s.code} — ${s.name}`,
+  );
   _renderSheetPreview(d, els);
 }
 
@@ -6580,7 +6835,7 @@ function _shFillSelect(id, items, allLabel, label) {
     o.textContent = label(it);
     el.appendChild(o);
   });
-  el.value = cur;               // no-op if the old value is gone -> falls back to ""
+  el.value = cur; // no-op if the old value is gone -> falls back to ""
 }
 
 function _renderSheetPreview(d, els) {
@@ -6610,7 +6865,9 @@ function _renderSheetPreview(d, els) {
   }
 
   if (summary) {
-    const sub = d.subject ? `${d.subject.code} — ${d.subject.name}` : "All Subjects";
+    const sub = d.subject
+      ? `${d.subject.code} — ${d.subject.name}`
+      : "All Subjects";
     summary.textContent =
       `${d.month_name} ${d.year} · ${sub} · ${d.totals.students} students · ` +
       `${d.totals.class_days} class day${d.totals.class_days === 1 ? "" : "s"}`;
@@ -6630,18 +6887,31 @@ function _renderSheetPreview(d, els) {
 
   let h = `<table class="sheet-table"><thead><tr>
       <th class="sheet-num">#</th><th class="sheet-name">Name</th>`;
-  for (const n of days) h += `<th class="sheet-day${held.has(n) ? " sheet-day-held" : ""}">${n}</th>`;
+  for (const n of days)
+    h += `<th class="sheet-day${held.has(n) ? " sheet-day-held" : ""}">${n}</th>`;
   h += `<th class="sheet-tot">P</th><th class="sheet-tot">C</th><th class="sheet-pct">%</th></tr></thead><tbody>`;
 
   d.students.forEach((s, i) => {
     h += `<tr><td class="sheet-num">${i + 1}</td><td class="sheet-name">${escapeHtml(s.full_name)}</td>`;
     for (const n of days) {
       const v = s.cells[String(n)];
-      const cls = v === undefined ? "sheet-blank" : v === "." ? "sheet-absent" : "sheet-present";
+      const cls =
+        v === undefined
+          ? "sheet-blank"
+          : v === "."
+            ? "sheet-absent"
+            : "sheet-present";
       h += `<td class="sheet-cell ${cls}">${v === undefined ? "" : v}</td>`;
     }
     const pct = s.percentage === null ? "—" : `${s.percentage}%`;
-    const pctCls = s.percentage === null ? "" : s.percentage < 60 ? "sheet-crit" : s.percentage < 75 ? "sheet-risk" : "sheet-ok";
+    const pctCls =
+      s.percentage === null
+        ? ""
+        : s.percentage < 60
+          ? "sheet-crit"
+          : s.percentage < 75
+            ? "sheet-risk"
+            : "sheet-ok";
     h += `<td class="sheet-tot">${s.present}</td><td class="sheet-tot">${s.total_classes}</td>
           <td class="sheet-pct ${pctCls}">${pct}</td></tr>`;
   });
@@ -6650,19 +6920,26 @@ function _renderSheetPreview(d, els) {
 }
 
 function downloadSheetCSV() {
-  if (!_shData || !_shData.students.length) { toast("No sheet loaded to export", "err"); return; }
+  if (!_shData || !_shData.students.length) {
+    toast("No sheet loaded to export", "err");
+    return;
+  }
   const d = _shData;
   const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
 
   const rows = [
     ["#", "Student ID", "Name", ...days.map(String), "Present", "Classes", "%"],
     ...d.students.map((s, i) => [
-      i + 1, s.student_id, s.full_name,
+      i + 1,
+      s.student_id,
+      s.full_name,
       ...days.map((n) => {
         const v = s.cells[String(n)];
-        return v === undefined ? "" : v;   // blank = no class held
+        return v === undefined ? "" : v; // blank = no class held
       }),
-      s.present, s.total_classes, s.percentage === null ? "" : s.percentage,
+      s.present,
+      s.total_classes,
+      s.percentage === null ? "" : s.percentage,
     ]),
   ];
   // Same quoting idiom as exportReportCSV — escape embedded quotes, wrap every cell.
@@ -6681,7 +6958,10 @@ function downloadSheetCSV() {
 }
 
 function downloadSheetPrintable() {
-  if (!_shData || !_shData.students.length) { toast("No sheet loaded to print", "err"); return; }
+  if (!_shData || !_shData.students.length) {
+    toast("No sheet loaded to print", "err");
+    return;
+  }
   const d = _shData;
 
   // window.open runs synchronously in the click handler using already-cached
@@ -6689,11 +6969,16 @@ function downloadSheetPrintable() {
   // about:blank and we write into it; no HTTP request is made, so this is NOT
   // the broken unauthenticated window.open(API…) pattern used elsewhere.)
   const w = window.open("", "_blank");
-  if (!w) { toast("Popup blocked — allow popups for this site", "err"); return; }
+  if (!w) {
+    toast("Popup blocked — allow popups for this site", "err");
+    return;
+  }
 
   const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
   const held = new Set(d.class_days);
-  const subLabel = d.subject ? `${d.subject.code} — ${d.subject.name}` : "All Subjects";
+  const subLabel = d.subject
+    ? `${d.subject.code} — ${d.subject.name}`
+    : "All Subjects";
 
   let body = "";
   d.students.forEach((s, i) => {
@@ -6707,7 +6992,8 @@ function downloadSheetPrintable() {
   });
 
   let head = `<th class="n">#</th><th class="nm">NAME</th>`;
-  for (const n of days) head += `<th class="${held.has(n) ? "" : "no"}">${n}</th>`;
+  for (const n of days)
+    head += `<th class="${held.has(n) ? "" : "no"}">${n}</th>`;
   head += `<th class="t">P</th><th class="t">C</th><th class="t">%</th>`;
 
   // A4 landscape at 8mm margins = 281mm usable.
@@ -6839,8 +7125,11 @@ async function adminReviewCorrection(id, status) {
 // ── Leave Requests (admin/teacher view) ───────────────────────────────────
 
 async function loadAdminLeaveRequests() {
-  const statusFilter = document.getElementById("leaveStatusFilter")?.value || "";
-  const search = (document.getElementById("leaveSearchFilter")?.value || "").toLowerCase();
+  const statusFilter =
+    document.getElementById("leaveStatusFilter")?.value || "";
+  const search = (
+    document.getElementById("leaveSearchFilter")?.value || ""
+  ).toLowerCase();
   const body = document.getElementById("leaveAdminBody");
   if (!body) return;
   body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr>`;
@@ -6849,13 +7138,17 @@ async function loadAdminLeaveRequests() {
     const data = await res.json();
     let rows = data.leave_requests || [];
     if (statusFilter) rows = rows.filter((r) => r.status === statusFilter);
-    if (search) rows = rows.filter((r) =>
-      (r.student_id || "").toLowerCase().includes(search) ||
-      (r.student_name || "").toLowerCase().includes(search)
-    );
+    if (search)
+      rows = rows.filter(
+        (r) =>
+          (r.student_id || "").toLowerCase().includes(search) ||
+          (r.student_name || "").toLowerCase().includes(search),
+      );
 
     // Show pending count banner
-    const pendingCount = (data.leave_requests || []).filter((r) => r.status === "pending").length;
+    const pendingCount = (data.leave_requests || []).filter(
+      (r) => r.status === "pending",
+    ).length;
     const banner = document.getElementById("leavePendingBanner");
     if (banner) {
       if (pendingCount > 0) {
@@ -6871,17 +7164,20 @@ async function loadAdminLeaveRequests() {
       body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">No leave requests found.</td></tr>`;
       return;
     }
-    body.innerHTML = rows.map((r) => {
-      const badge = r.status === "pending"
-        ? `<span class="risk-badge risk-atrisk">Pending</span>`
-        : r.status === "approved"
-        ? `<span class="risk-badge risk-good">Approved</span>`
-        : `<span class="risk-badge risk-critical">Rejected</span>`;
-      const actions = r.status === "pending"
-        ? `<button class="btn-sm btn-primary" onclick="adminReviewLeave(${r.id},'approved')">Approve</button>
+    body.innerHTML = rows
+      .map((r) => {
+        const badge =
+          r.status === "pending"
+            ? `<span class="risk-badge risk-atrisk">Pending</span>`
+            : r.status === "approved"
+              ? `<span class="risk-badge risk-good">Approved</span>`
+              : `<span class="risk-badge risk-critical">Rejected</span>`;
+        const actions =
+          r.status === "pending"
+            ? `<button class="btn-sm btn-primary" onclick="adminReviewLeave(${r.id},'approved')">Approve</button>
            <button class="btn-sm btn-danger ml-4" onclick="adminReviewLeave(${r.id},'rejected')">Reject</button>`
-        : `<span class="text-12px text-secondary">${r.review_note ? escapeHtml(r.review_note) : "—"}</span>`;
-      return `<tr>
+            : `<span class="text-12px text-secondary">${r.review_note ? escapeHtml(r.review_note) : "—"}</span>`;
+        return `<tr>
         <td>${escapeHtml(r.student_name || r.student_id)}</td>
         <td class="mono text-12px">${r.from_date}</td>
         <td class="mono text-12px">${r.to_date || r.from_date}</td>
@@ -6890,21 +7186,26 @@ async function loadAdminLeaveRequests() {
         <td>${badge}</td>
         <td>${actions}</td>
       </tr>`;
-    }).join("");
+      })
+      .join("");
   } catch (e) {
     body.innerHTML = `<tr><td colspan="7" class="text-center text-muted p-2rem">Failed to load.</td></tr>`;
   }
 }
 
 async function adminReviewLeave(id, status) {
-  const note = status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
+  const note =
+    status === "rejected" ? prompt("Rejection reason (optional):") || "" : "";
   const res = await api(`/leave-requests/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status, review_note: note }),
   });
   const data = await res.json();
-  if (data.error) { toast(data.error, "err"); return; }
+  if (data.error) {
+    toast(data.error, "err");
+    return;
+  }
   toast(status === "approved" ? "Leave approved" : "Leave rejected");
   loadAdminLeaveRequests();
 }
@@ -6978,8 +7279,21 @@ let _academicYears = [];
 function _fmtDate(iso) {
   if (!iso) return "—";
   const [y, m, d] = iso.split("-");
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return `${months[parseInt(m,10)-1]} ${parseInt(d,10)}, ${y}`;
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return `${months[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
 }
 
 async function loadAcademicYears() {
@@ -7013,7 +7327,9 @@ async function loadAcademicYears() {
     return;
   }
 
-  list.innerHTML = _academicYears.map(y => `
+  list.innerHTML = _academicYears
+    .map(
+      (y) => `
     <div class="cal-year-card${y.is_current ? " cal-year-card--current" : ""}">
       <div class="cal-year-card-header">
         <div class="cal-year-name">${escapeHtml(y.name)}</div>
@@ -7041,7 +7357,9 @@ async function loadAcademicYears() {
         </div>
       </div>
     </div>
-  `).join("");
+  `,
+    )
+    .join("");
 }
 
 function openAcademicYearModal(id) {
@@ -7129,15 +7447,29 @@ async function loadHolidays() {
     return;
   }
   // Group consecutive dates of the same holiday name into ranges
-  list.innerHTML = rows.map(h => {
-    const [y, m, d] = h.date.split("-");
-    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    const monthAbbr = months[parseInt(m,10)-1];
-    return `
+  list.innerHTML = rows
+    .map((h) => {
+      const [y, m, d] = h.date.split("-");
+      const months = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+      const monthAbbr = months[parseInt(m, 10) - 1];
+      return `
       <div class="hol-row">
         <div class="hol-date-badge">
           <span class="hol-month">${monthAbbr}</span>
-          <span class="hol-day">${parseInt(d,10)}</span>
+          <span class="hol-day">${parseInt(d, 10)}</span>
           <span class="hol-year">${y}</span>
         </div>
         <div class="hol-name">${escapeHtml(h.name)}</div>
@@ -7145,7 +7477,8 @@ async function loadHolidays() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>
       </div>`;
-  }).join("");
+    })
+    .join("");
 }
 
 function _holDateHint() {
@@ -7154,13 +7487,16 @@ function _holDateHint() {
   const hint = document.getElementById("holDateHint");
   if (!hint) return;
   if (from && to && to > from) {
-    const d1 = new Date(from), d2 = new Date(to);
+    const d1 = new Date(from),
+      d2 = new Date(to);
     const days = Math.round((d2 - d1) / 86400000) + 1;
     hint.textContent = `${days} day holiday will be created (${from} to ${to})`;
   } else if (from && to && to === from) {
     hint.textContent = "Single-day holiday";
   } else if (from && (!to || to < from)) {
-    hint.textContent = to ? "To Date must be on or after From Date" : "Single-day holiday";
+    hint.textContent = to
+      ? "To Date must be on or after From Date"
+      : "Single-day holiday";
   } else {
     hint.textContent = "";
   }
@@ -7196,7 +7532,12 @@ async function saveHoliday() {
 
   const res = await api("/calendar/holidays", {
     method: "POST",
-    json: { name, from_date: fromDate, to_date: toDate || fromDate, academic_year_id: yearId },
+    json: {
+      name,
+      from_date: fromDate,
+      to_date: toDate || fromDate,
+      academic_year_id: yearId,
+    },
   });
   const data = await res.json();
   if (data.error) {
