@@ -2213,7 +2213,7 @@ def get_teacher_assignments(tid):
             WHERE ta.teacher_id = %s
             ORDER BY CASE ta.day_of_week
                 WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
-                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sun' THEN 5
                 ELSE 6 END, ts.start_time
         """, (tid,))
     return jsonify({"assignments": rows})
@@ -2408,7 +2408,7 @@ def delete_subject(sid):
 #  TIMETABLE  (collision-safe scheduling)
 # ══════════════════════════════════════════════════════════════════════════
 
-DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"]
 
 @app.route("/api/timetable")
 @require_auth
@@ -2570,8 +2570,8 @@ def teacher_me():
             LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
             WHERE ta.teacher_id = %s
             ORDER BY CASE ta.day_of_week
-                WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
-                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                WHEN 'Sun' THEN 0 WHEN 'Mon' THEN 1 WHEN 'Tue' THEN 2
+                WHEN 'Wed' THEN 3 WHEN 'Thu' THEN 4 WHEN 'Fri' THEN 5
                 ELSE 6 END, ts.start_time
         """, (tid,))
     t["assignments"] = assignments
@@ -2634,8 +2634,8 @@ def teacher_schedule():
             LEFT JOIN time_slots ts ON ts.id = ta.time_slot_id
             WHERE ta.teacher_id = %s
             ORDER BY CASE ta.day_of_week
-                WHEN 'Mon' THEN 0 WHEN 'Tue' THEN 1 WHEN 'Wed' THEN 2
-                WHEN 'Thu' THEN 3 WHEN 'Fri' THEN 4 WHEN 'Sat' THEN 5
+                WHEN 'Sun' THEN 0 WHEN 'Mon' THEN 1 WHEN 'Tue' THEN 2
+                WHEN 'Wed' THEN 3 WHEN 'Thu' THEN 4 WHEN 'Fri' THEN 5
                 ELSE 6 END, ts.start_time
         """, (tid,))
     schedule = {d: [] for d in DAYS}
