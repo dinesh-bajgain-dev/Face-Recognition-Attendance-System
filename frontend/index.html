@@ -146,13 +146,23 @@
     <div id="sessionTimeoutModal" class="session-timeout-modal hidden">
       <div class="session-timeout-card">
         <div class="session-timeout-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="32" height="32">
-            <circle cx="12" cy="12" r="10"/>
-            <path d="M12 6v6l4 2"/>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            width="32"
+            height="32"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
           </svg>
         </div>
         <h3>Session Expiring</h3>
-        <p>You've been inactive for <strong>30 minutes</strong>.<br>You will be logged out in</p>
+        <p>
+          You've been inactive for <strong>30 minutes</strong>.<br />You will be
+          logged out in
+        </p>
         <div class="session-countdown-ring">
           <span id="sessionWarnSec">60</span>
           <small>seconds</small>
@@ -160,7 +170,9 @@
         <div class="session-warn-bar">
           <div id="sessionWarnFill" class="session-warn-fill"></div>
         </div>
-        <button class="btn-primary" onclick="sessionStayLoggedIn()">Stay Logged In</button>
+        <button class="btn-primary" onclick="sessionStayLoggedIn()">
+          Stay Logged In
+        </button>
         <button class="btn-ghost" onclick="logout()">Log Out Now</button>
       </div>
     </div>
@@ -171,71 +183,249 @@
     <!-- ══════════════════════════════════════════════════════════════════
          STUDENT PORTAL
     ══════════════════════════════════════════════════════════════════ -->
-    <div id="student-panel" style="display:none">
-
+    <div id="student-panel" style="display: none">
       <!-- Top header bar -->
       <header class="sp-header">
         <div class="sp-header-logo">
-          <svg width="22" height="22" viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#e8e8ec"/><rect x="6" y="6" width="16" height="16" rx="3.5" fill="none" stroke="#0d0d0f" stroke-width="2.2"/></svg>
+          <svg width="22" height="22" viewBox="0 0 28 28" fill="none">
+            <rect width="28" height="28" rx="6" fill="#e8e8ec" />
+            <rect
+              x="6"
+              y="6"
+              width="16"
+              height="16"
+              rx="3.5"
+              fill="none"
+              stroke="#0d0d0f"
+              stroke-width="2.2"
+            />
+          </svg>
           <span>वेदनेत्रम्</span>
         </div>
         <div class="sp-header-right">
-          <span class="sp-notif-btn" onclick="_spNavigate('notifications')" title="Notifications">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span id="spNotifBadge" class="sp-notif-badge" style="display:none">0</span>
+          <span
+            class="sp-notif-btn"
+            onclick="_spNavigate('notifications')"
+            title="Notifications"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            <span id="spNotifBadge" class="sp-notif-badge" style="display: none"
+              >0</span
+            >
           </span>
-          <span id="spHeaderStudentName" class="text-13px text-secondary"></span>
-          <button class="btn-secondary text-12px" onclick="logout()">Sign out</button>
+          <span
+            id="spHeaderStudentName"
+            class="text-13px text-secondary"
+          ></span>
+          <button class="btn-secondary text-12px" onclick="logout()">
+            Sign out
+          </button>
         </div>
       </header>
 
       <!-- Layout: sidebar + main content -->
       <div class="sp-layout">
-
         <!-- Sidebar -->
         <nav class="sp-sidebar">
           <div class="sp-student-info">
             <div class="sp-avatar" id="spAvatarInitial">S</div>
             <div>
               <div id="spSidebarName" class="sp-sidebar-name">Student</div>
-              <div id="spSidebarId" class="sp-sidebar-id text-secondary text-11px"></div>
+              <div
+                id="spSidebarId"
+                class="sp-sidebar-id text-secondary text-11px"
+              ></div>
             </div>
           </div>
           <ul class="sp-nav">
-            <li class="sp-nav-item active" data-page="dashboard" onclick="_spNavigate('dashboard',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <li
+              class="sp-nav-item active"
+              data-page="dashboard"
+              onclick="_spNavigate('dashboard', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
               Dashboard
             </li>
-            <li class="sp-nav-item" data-page="attendance" onclick="_spNavigate('attendance',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="attendance"
+              onclick="_spNavigate('attendance', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M9 11l3 3L22 4" />
+                <path
+                  d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+                />
+              </svg>
               Attendance
             </li>
-            <li class="sp-nav-item" data-page="timetable" onclick="_spNavigate('timetable',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="timetable"
+              onclick="_spNavigate('timetable', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+              </svg>
               Timetable
             </li>
-            <li class="sp-nav-item" data-page="calculator" onclick="_spNavigate('calculator',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="calculator"
+              onclick="_spNavigate('calculator', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="4" y="2" width="16" height="20" rx="2" />
+                <line x1="8" y1="6" x2="16" y2="6" />
+                <line x1="8" y1="10" x2="16" y2="10" />
+                <line x1="8" y1="14" x2="12" y2="14" />
+                <line x1="8" y1="18" x2="10" y2="18" />
+              </svg>
               Calculator
             </li>
-            <li class="sp-nav-item" data-page="leave" onclick="_spNavigate('leave',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="leave"
+              onclick="_spNavigate('leave', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
               Leave Requests
             </li>
-            <li class="sp-nav-item" data-page="corrections" onclick="_spNavigate('corrections',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="corrections"
+              onclick="_spNavigate('corrections', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                />
+                <path
+                  d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                />
+              </svg>
               Corrections
             </li>
-            <li class="sp-nav-item" data-page="calendar" onclick="_spNavigate('calendar',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="calendar"
+              onclick="_spNavigate('calendar', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+              </svg>
               Academic Calendar
             </li>
-            <li class="sp-nav-item" data-page="profile" onclick="_spNavigate('profile',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="profile"
+              onclick="_spNavigate('profile', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
               Profile
             </li>
-            <li class="sp-nav-item" data-page="notifications" onclick="_spNavigate('notifications',this)">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+            <li
+              class="sp-nav-item"
+              data-page="notifications"
+              onclick="_spNavigate('notifications', this)"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
               Notifications
             </li>
           </ul>
@@ -243,33 +433,50 @@
 
         <!-- Main content -->
         <main class="sp-main">
-
           <!-- ── Dashboard ──────────────────────────────────────────── -->
           <div id="sp-page-dashboard" class="sp-page active">
             <div class="sp-page-title">Dashboard</div>
             <div id="spDashAlerts"></div>
             <!-- Stats row -->
             <div class="sp-stats-row" id="spStatsRow">
-              <div class="sp-stat-card"><div class="sp-stat-val green" id="spStatPresent">—</div><div class="sp-stat-label">Present Days</div></div>
-              <div class="sp-stat-card"><div class="sp-stat-val red" id="spStatAbsent">—</div><div class="sp-stat-label">Absent Days</div></div>
-              <div class="sp-stat-card"><div class="sp-stat-val accent" id="spStatPct">—</div><div class="sp-stat-label">Overall %</div></div>
-              <div class="sp-stat-card"><div class="sp-stat-val" id="spStatToday">—</div><div class="sp-stat-label">Classes Today</div></div>
+              <div class="sp-stat-card">
+                <div class="sp-stat-val green" id="spStatPresent">—</div>
+                <div class="sp-stat-label">Present Days</div>
+              </div>
+              <div class="sp-stat-card">
+                <div class="sp-stat-val red" id="spStatAbsent">—</div>
+                <div class="sp-stat-label">Absent Days</div>
+              </div>
+              <div class="sp-stat-card">
+                <div class="sp-stat-val accent" id="spStatPct">—</div>
+                <div class="sp-stat-label">Overall %</div>
+              </div>
+              <div class="sp-stat-card">
+                <div class="sp-stat-val" id="spStatToday">—</div>
+                <div class="sp-stat-label">Classes Today</div>
+              </div>
             </div>
             <!-- Today's Classes + Upcoming Holidays -->
             <div class="sp-grid-2">
               <div class="sp-card">
                 <div class="sp-card-title">Today's Classes</div>
-                <div id="spTodayClasses"><div class="text-muted text-12px">Loading…</div></div>
+                <div id="spTodayClasses">
+                  <div class="text-muted text-12px">Loading…</div>
+                </div>
               </div>
               <div class="sp-card">
                 <div class="sp-card-title">Upcoming Holidays</div>
-                <div id="spUpcomingHolidays"><div class="text-muted text-12px">Loading…</div></div>
+                <div id="spUpcomingHolidays">
+                  <div class="text-muted text-12px">Loading…</div>
+                </div>
               </div>
             </div>
             <!-- Subject-wise attendance -->
             <div class="sp-card mt-1">
               <div class="sp-card-title">Subject-wise Attendance</div>
-              <div id="spDashSubjects"><div class="text-muted text-12px">Loading…</div></div>
+              <div id="spDashSubjects">
+                <div class="text-muted text-12px">Loading…</div>
+              </div>
             </div>
           </div>
 
@@ -278,12 +485,28 @@
             <div class="sp-page-title">Attendance Records</div>
             <!-- Filters -->
             <div class="sp-filter-row">
-              <input type="date" id="spAttFrom" class="input-sm" onchange="loadSPAttendance()">
-              <input type="date" id="spAttTo" class="input-sm" onchange="loadSPAttendance()">
-              <select id="spAttSubject" class="input-sm" onchange="loadSPAttendance()">
+              <input
+                type="date"
+                id="spAttFrom"
+                class="input-sm"
+                onchange="loadSPAttendance()"
+              />
+              <input
+                type="date"
+                id="spAttTo"
+                class="input-sm"
+                onchange="loadSPAttendance()"
+              />
+              <select
+                id="spAttSubject"
+                class="input-sm"
+                onchange="loadSPAttendance()"
+              >
                 <option value="">All Subjects</option>
               </select>
-              <button class="btn-secondary btn-sm" onclick="loadSPAttendance()">Apply</button>
+              <button class="btn-secondary btn-sm" onclick="loadSPAttendance()">
+                Apply
+              </button>
             </div>
             <!-- Summary bar -->
             <div id="spAttSummary" class="sp-att-summary"></div>
@@ -296,9 +519,22 @@
             <div class="sp-card">
               <div class="sp-card-title">Daily Records</div>
               <div class="overflow-x-auto">
-                <table class="data-table" style="width:100%">
-                  <thead><tr><th>Date</th><th>Subject</th><th>Status</th><th>Note</th></tr></thead>
-                  <tbody id="spAttBody"><tr><td colspan="4" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                <table class="data-table" style="width: 100%">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Subject</th>
+                      <th>Status</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody id="spAttBody">
+                    <tr>
+                      <td colspan="4" class="text-center text-muted p-2rem">
+                        Loading…
+                      </td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -307,7 +543,9 @@
           <!-- ── Timetable ──────────────────────────────────────────── -->
           <div id="sp-page-timetable" class="sp-page">
             <div class="sp-page-title">My Timetable</div>
-            <div id="spTimetableGrid"><div class="text-muted text-12px">Loading…</div></div>
+            <div id="spTimetableGrid">
+              <div class="text-muted text-12px">Loading…</div>
+            </div>
           </div>
 
           <!-- ── Calculator ─────────────────────────────────────────── -->
@@ -317,20 +555,98 @@
               <!-- Recovery calculator -->
               <div class="sp-card">
                 <div class="sp-card-title">Recovery Calculator</div>
-                <p class="text-12px text-secondary mb-1">How many more classes do you need to reach 75%?</p>
-                <div class="form-group"><label>Classes Attended</label><input type="number" id="calcPresent" class="input-sm" style="width:100%" min="0" oninput="calcRecovery()"></div>
-                <div class="form-group"><label>Total Classes Held</label><input type="number" id="calcTotal" class="input-sm" style="width:100%" min="0" oninput="calcRecovery()"></div>
-                <div class="form-group"><label>Target Attendance %</label><input type="number" id="calcTarget" class="input-sm" style="width:100%" value="75" min="1" max="100" oninput="calcRecovery()"></div>
+                <p class="text-12px text-secondary mb-1">
+                  How many more classes do you need to reach 75%?
+                </p>
+                <div class="form-group">
+                  <label>Classes Attended</label
+                  ><input
+                    type="number"
+                    id="calcPresent"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    oninput="calcRecovery()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Total Classes Held</label
+                  ><input
+                    type="number"
+                    id="calcTotal"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    oninput="calcRecovery()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Target Attendance %</label
+                  ><input
+                    type="number"
+                    id="calcTarget"
+                    class="input-sm"
+                    style="width: 100%"
+                    value="75"
+                    min="1"
+                    max="100"
+                    oninput="calcRecovery()"
+                  />
+                </div>
                 <div id="calcResult" class="sp-calc-result"></div>
               </div>
               <!-- Absence predictor -->
               <div class="sp-card">
                 <div class="sp-card-title">Absence Predictor</div>
-                <p class="text-12px text-secondary mb-1">What happens if you miss upcoming classes?</p>
-                <div class="form-group"><label>Current Attended</label><input type="number" id="predPresent" class="input-sm" style="width:100%" min="0" oninput="calcPredict()"></div>
-                <div class="form-group"><label>Total Classes So Far</label><input type="number" id="predTotal" class="input-sm" style="width:100%" min="0" oninput="calcPredict()"></div>
-                <div class="form-group"><label>Classes You Plan to Miss</label><input type="number" id="predMiss" class="input-sm" style="width:100%" min="0" value="0" oninput="calcPredict()"></div>
-                <div class="form-group"><label>Total Remaining Classes</label><input type="number" id="predRemain" class="input-sm" style="width:100%" min="0" value="0" oninput="calcPredict()"></div>
+                <p class="text-12px text-secondary mb-1">
+                  What happens if you miss upcoming classes?
+                </p>
+                <div class="form-group">
+                  <label>Current Attended</label
+                  ><input
+                    type="number"
+                    id="predPresent"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    oninput="calcPredict()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Total Classes So Far</label
+                  ><input
+                    type="number"
+                    id="predTotal"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    oninput="calcPredict()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Classes You Plan to Miss</label
+                  ><input
+                    type="number"
+                    id="predMiss"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    value="0"
+                    oninput="calcPredict()"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Total Remaining Classes</label
+                  ><input
+                    type="number"
+                    id="predRemain"
+                    class="input-sm"
+                    style="width: 100%"
+                    min="0"
+                    value="0"
+                    oninput="calcPredict()"
+                  />
+                </div>
                 <div id="predResult" class="sp-calc-result"></div>
               </div>
             </div>
@@ -341,20 +657,61 @@
             <div class="sp-page-title">Leave Requests</div>
             <div class="sp-card mb-1">
               <div class="sp-card-title">Submit New Request</div>
-              <div class="sp-grid-2" style="gap:0.75rem">
-                <div class="form-group"><label>From Date *</label><input type="date" id="leaveFrom" class="input-sm" style="width:100%"></div>
-                <div class="form-group"><label>To Date (optional)</label><input type="date" id="leaveTo" class="input-sm" style="width:100%"></div>
+              <div class="sp-grid-2" style="gap: 0.75rem">
+                <div class="form-group">
+                  <label>From Date *</label
+                  ><input
+                    type="date"
+                    id="leaveFrom"
+                    class="input-sm"
+                    style="width: 100%"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>To Date (optional)</label
+                  ><input
+                    type="date"
+                    id="leaveTo"
+                    class="input-sm"
+                    style="width: 100%"
+                  />
+                </div>
               </div>
-              <div class="form-group"><label>Reason *</label><textarea id="leaveReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Explain the reason for your leave…"></textarea></div>
+              <div class="form-group">
+                <label>Reason *</label
+                ><textarea
+                  id="leaveReason"
+                  class="input-sm"
+                  rows="3"
+                  style="width: 100%; resize: vertical"
+                  placeholder="Explain the reason for your leave…"
+                ></textarea>
+              </div>
               <div id="leaveErr" class="msg err"></div>
-              <button class="btn-primary" onclick="submitLeaveRequest()">Submit Leave Request</button>
+              <button class="btn-primary" onclick="submitLeaveRequest()">
+                Submit Leave Request
+              </button>
             </div>
             <div class="sp-card">
               <div class="sp-card-title">My Leave Requests</div>
               <div class="overflow-x-auto">
-                <table class="data-table" style="width:100%">
-                  <thead><tr><th>From</th><th>To</th><th>Reason</th><th>Status</th><th>Note</th></tr></thead>
-                  <tbody id="spLeaveBody"><tr><td colspan="5" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                <table class="data-table" style="width: 100%">
+                  <thead>
+                    <tr>
+                      <th>From</th>
+                      <th>To</th>
+                      <th>Reason</th>
+                      <th>Status</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody id="spLeaveBody">
+                    <tr>
+                      <td colspan="5" class="text-center text-muted p-2rem">
+                        Loading…
+                      </td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -365,20 +722,62 @@
             <div class="sp-page-title">Attendance Corrections</div>
             <div class="sp-card mb-1">
               <div class="sp-card-title">Submit Correction Request</div>
-              <div class="sp-grid-2" style="gap:0.75rem">
-                <div class="form-group"><label>Date *</label><input type="date" id="corrDate" class="input-sm" style="width:100%"></div>
-                <div class="form-group"><label>Subject</label><select id="corrSubject" class="input-sm" style="width:100%"><option value="">— Any —</option></select></div>
+              <div class="sp-grid-2" style="gap: 0.75rem">
+                <div class="form-group">
+                  <label>Date *</label
+                  ><input
+                    type="date"
+                    id="corrDate"
+                    class="input-sm"
+                    style="width: 100%"
+                  />
+                </div>
+                <div class="form-group">
+                  <label>Subject</label
+                  ><select
+                    id="corrSubject"
+                    class="input-sm"
+                    style="width: 100%"
+                  >
+                    <option value="">— Any —</option>
+                  </select>
+                </div>
               </div>
-              <div class="form-group"><label>Reason *</label><textarea id="corrReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Why should attendance be corrected?"></textarea></div>
+              <div class="form-group">
+                <label>Reason *</label
+                ><textarea
+                  id="corrReason"
+                  class="input-sm"
+                  rows="3"
+                  style="width: 100%; resize: vertical"
+                  placeholder="Why should attendance be corrected?"
+                ></textarea>
+              </div>
               <div id="corrErr" class="msg err"></div>
-              <button class="btn-primary" onclick="submitSPCorrection()">Submit Request</button>
+              <button class="btn-primary" onclick="submitSPCorrection()">
+                Submit Request
+              </button>
             </div>
             <div class="sp-card">
               <div class="sp-card-title">My Correction Requests</div>
               <div class="overflow-x-auto">
-                <table class="data-table" style="width:100%">
-                  <thead><tr><th>Date</th><th>Subject</th><th>Reason</th><th>Status</th><th>Note</th></tr></thead>
-                  <tbody id="spCorrBody"><tr><td colspan="5" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+                <table class="data-table" style="width: 100%">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Subject</th>
+                      <th>Reason</th>
+                      <th>Status</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody id="spCorrBody">
+                    <tr>
+                      <td colspan="5" class="text-center text-muted p-2rem">
+                        Loading…
+                      </td>
+                    </tr>
+                  </tbody>
                 </table>
               </div>
             </div>
@@ -387,26 +786,33 @@
           <!-- ── Calendar ───────────────────────────────────────────── -->
           <div id="sp-page-calendar" class="sp-page">
             <div class="sp-page-title">Academic Calendar</div>
-            <div id="spCalendarContent"><div class="text-muted text-12px">Loading…</div></div>
+            <div id="spCalendarContent">
+              <div class="text-muted text-12px">Loading…</div>
+            </div>
           </div>
 
           <!-- ── Profile ────────────────────────────────────────────── -->
           <div id="sp-page-profile" class="sp-page">
             <div class="sp-page-title">My Profile</div>
-            <div class="sp-card" style="max-width:480px">
-              <div id="spProfileContent"><div class="text-muted text-12px">Loading…</div></div>
+            <div class="sp-card" style="max-width: 480px">
+              <div id="spProfileContent">
+                <div class="text-muted text-12px">Loading…</div>
+              </div>
             </div>
           </div>
 
           <!-- ── Notifications ──────────────────────────────────────── -->
           <div id="sp-page-notifications" class="sp-page">
             <div class="sp-page-title">Notifications</div>
-            <div id="spNotifsContent"><div class="text-muted text-12px">Loading…</div></div>
+            <div id="spNotifsContent">
+              <div class="text-muted text-12px">Loading…</div>
+            </div>
           </div>
-
         </main>
-      </div><!-- sp-layout -->
-    </div><!-- student-panel -->
+      </div>
+      <!-- sp-layout -->
+    </div>
+    <!-- student-panel -->
 
     <!-- ══════════════════════════════════════════════════════════════════
          MAIN APP (Admin + Teacher)
@@ -616,13 +1022,35 @@
           >Manual Mark
         </a>
         <a class="nav-item" data-page="t-logs" onclick="navigate('t-logs')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M3 3v18h18" /><polyline points="7 16 11 11 14 14 18 8" /></svg
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M3 3v18h18" />
+            <polyline points="7 16 11 11 14 14 18 8" /></svg
           >Attendance Logs
         </a>
-        <a class="nav-item" data-page="t-reports" onclick="navigate('t-reports')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg
+        <a
+          class="nav-item"
+          data-page="t-reports"
+          onclick="navigate('t-reports')"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M9 11l3 3L22 4" />
+            <path
+              d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"
+            /></svg
           >Reports
         </a>
       </div>
@@ -924,8 +1352,15 @@
                 <video id="captureCam" autoplay muted playsinline></video>
                 <canvas id="captureOverlay"></canvas>
                 <div class="capture-cam-placeholder" id="capturePlaceholder">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" stroke-width="1" opacity="0.15">
+                  <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1"
+                    opacity="0.15"
+                  >
                     <path d="M23 7 16 12 23 17z" />
                     <rect x="1" y="5" width="15" height="14" rx="2" />
                   </svg>
@@ -946,10 +1381,16 @@
               <div class="ecap-pose-row">
                 <div class="pose-pip" id="pip-front">
                   <div class="pip-icon">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" stroke-width="2">
-                      <circle cx="12" cy="8" r="4"/>
-                      <path d="M4 20v-1a8 8 0 0 1 16 0v1"/>
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 20v-1a8 8 0 0 1 16 0v1" />
                     </svg>
                   </div>
                   <span>Front</span>
@@ -1007,27 +1448,53 @@
 
               <!-- Action buttons -->
               <div class="ecap-actions">
-                <button class="ecap-btn-start" id="startCaptureBtn" onclick="startAutoCapture()">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-                    <polygon points="5,3 19,12 5,21"/>
+                <button
+                  class="ecap-btn-start"
+                  id="startCaptureBtn"
+                  onclick="startAutoCapture()"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <polygon points="5,3 19,12 5,21" />
                   </svg>
                   Start
                 </button>
-                <button class="ecap-btn-stop hidden" id="stopCaptureBtn" onclick="stopAutoCapture()">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12"/>
+                <button
+                  class="ecap-btn-stop hidden"
+                  id="stopCaptureBtn"
+                  onclick="stopAutoCapture()"
+                >
+                  <svg
+                    width="11"
+                    height="11"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <rect x="6" y="6" width="12" height="12" />
                   </svg>
                   Stop
                 </button>
-                <button class="ecap-btn-reset hidden" id="resetCaptureBtn" onclick="resetCapture()">
+                <button
+                  class="ecap-btn-reset hidden"
+                  id="resetCaptureBtn"
+                  onclick="resetCapture()"
+                >
                   ↺ Reset
                 </button>
               </div>
 
               <!-- Nav -->
               <div class="ecap-nav-row">
-                <button class="btn-secondary" onclick="goToStep1()">← Back</button>
-                <button class="btn-primary" onclick="goToStep3()">Review &amp; Enroll →</button>
+                <button class="btn-secondary" onclick="goToStep1()">
+                  ← Back
+                </button>
+                <button class="btn-primary" onclick="goToStep3()">
+                  Review &amp; Enroll →
+                </button>
               </div>
             </div>
           </div>
@@ -1152,70 +1619,168 @@
         <header class="page-header">
           <h1>Reports & Analytics</h1>
           <div class="header-actions">
-            <input type="date" id="repFrom" class="select-input" onchange="loadReports()" />
+            <input
+              type="date"
+              id="repFrom"
+              class="select-input"
+              onchange="loadReports()"
+            />
             <span class="text-muted">to</span>
-            <input type="date" id="repTo"   class="select-input" onchange="loadReports()" />
+            <input
+              type="date"
+              id="repTo"
+              class="select-input"
+              onchange="loadReports()"
+            />
             <select id="repDept" class="select-input" onchange="loadReports()">
               <option value="">All Departments</option>
             </select>
-            <button class="btn-secondary" onclick="exportReport()">Export CSV</button>
+            <button class="btn-secondary" onclick="exportReport()">
+              Export CSV
+            </button>
           </div>
         </header>
 
-        <div class="sub-tabs" style="margin-bottom:1rem">
-          <div class="sub-tab active" onclick="switchReportTab('overview', this)">Overview</div>
-          <div class="sub-tab" onclick="switchReportTab('defaulters', this)">Defaulter List</div>
-          <div class="sub-tab" onclick="switchReportTab('corrections', this)">Corrections</div>
-          <div class="sub-tab" onclick="switchReportTab('leave', this)">Leave Requests</div>
-          <div class="sub-tab" onclick="switchReportTab('sheet', this)">Attendance Sheet</div>
+        <div class="sub-tabs" style="margin-bottom: 1rem">
+          <div
+            class="sub-tab active"
+            onclick="switchReportTab('overview', this)"
+          >
+            Overview
+          </div>
+          <div class="sub-tab" onclick="switchReportTab('defaulters', this)">
+            Defaulter List
+          </div>
+          <div class="sub-tab" onclick="switchReportTab('corrections', this)">
+            Corrections
+          </div>
+          <div class="sub-tab" onclick="switchReportTab('leave', this)">
+            Leave Requests
+          </div>
+          <div class="sub-tab" onclick="switchReportTab('sheet', this)">
+            Attendance Sheet
+          </div>
         </div>
 
         <!-- Overview tab -->
         <div class="sub-tab-panel active" id="rtab-overview">
           <div class="stats-row">
-            <div class="stat-card"><div class="stat-label">Avg. Attendance</div><div class="stat-value" id="repAvgAtt">0%</div></div>
-            <div class="stat-card accent-green"><div class="stat-label">Highest</div><div class="stat-value" id="repHighest">0%</div></div>
-            <div class="stat-card accent-red"><div class="stat-label">Below 75%</div><div class="stat-value" id="repBelowCount">0</div></div>
-            <div class="stat-card accent-amber"><div class="stat-label">Total Recognitions</div><div class="stat-value" id="repTotalRecog">0</div></div>
+            <div class="stat-card">
+              <div class="stat-label">Avg. Attendance</div>
+              <div class="stat-value" id="repAvgAtt">0%</div>
+            </div>
+            <div class="stat-card accent-green">
+              <div class="stat-label">Highest</div>
+              <div class="stat-value" id="repHighest">0%</div>
+            </div>
+            <div class="stat-card accent-red">
+              <div class="stat-label">Below 75%</div>
+              <div class="stat-value" id="repBelowCount">0</div>
+            </div>
+            <div class="stat-card accent-amber">
+              <div class="stat-label">Total Recognitions</div>
+              <div class="stat-value" id="repTotalRecog">0</div>
+            </div>
           </div>
           <div class="reports-chart-grid">
-            <div class="card"><div class="section-title">Monthly Attendance Trend</div><canvas id="monthlyChart" height="220"></canvas></div>
-            <div class="card"><div class="section-title">Attendance by Department</div><canvas id="deptChart" height="220"></canvas></div>
+            <div class="card">
+              <div class="section-title">Monthly Attendance Trend</div>
+              <canvas id="monthlyChart" height="220"></canvas>
+            </div>
+            <div class="card">
+              <div class="section-title">Attendance by Department</div>
+              <canvas id="deptChart" height="220"></canvas>
+            </div>
           </div>
-          <div class="card"><div class="section-title">Per-Student Summary</div><div id="statsTableWrap"></div></div>
+          <div class="card">
+            <div class="section-title">Per-Student Summary</div>
+            <div id="statsTableWrap"></div>
+          </div>
         </div>
 
         <!-- Defaulter List tab -->
         <div class="sub-tab-panel" id="rtab-defaulters">
-          <div class="toolbar-row" style="margin-bottom:1rem">
-            <select id="defFaculty" class="input-sm w-180px" onchange="loadDefaulters()"><option value="">All Faculties</option></select>
-            <select id="defSemester" class="input-sm w-150px" onchange="loadDefaulters()">
-              <option value="">All Semesters</option>
-              <option value="1">Sem 1</option><option value="2">Sem 2</option>
-              <option value="3">Sem 3</option><option value="4">Sem 4</option>
-              <option value="5">Sem 5</option><option value="6">Sem 6</option>
-              <option value="7">Sem 7</option><option value="8">Sem 8</option>
+          <div class="toolbar-row" style="margin-bottom: 1rem">
+            <select
+              id="defFaculty"
+              class="input-sm w-180px"
+              onchange="loadDefaulters()"
+            >
+              <option value="">All Faculties</option>
             </select>
-            <select id="defSubject" class="input-sm w-200px" onchange="loadDefaulters()"><option value="">All Subjects</option></select>
+            <select
+              id="defSemester"
+              class="input-sm w-150px"
+              onchange="loadDefaulters()"
+            >
+              <option value="">All Semesters</option>
+              <option value="1">Sem 1</option>
+              <option value="2">Sem 2</option>
+              <option value="3">Sem 3</option>
+              <option value="4">Sem 4</option>
+              <option value="5">Sem 5</option>
+              <option value="6">Sem 6</option>
+              <option value="7">Sem 7</option>
+              <option value="8">Sem 8</option>
+            </select>
+            <select
+              id="defSubject"
+              class="input-sm w-200px"
+              onchange="loadDefaulters()"
+            >
+              <option value="">All Subjects</option>
+            </select>
             <div class="flex flex-center gap-0-5rem">
               <label class="text-13px text-secondary">Threshold %</label>
-              <input type="number" id="defThreshold" value="75" min="0" max="100" class="input-sm" style="width:70px" onchange="loadDefaulters()">
+              <input
+                type="number"
+                id="defThreshold"
+                value="75"
+                min="0"
+                max="100"
+                class="input-sm"
+                style="width: 70px"
+                onchange="loadDefaulters()"
+              />
             </div>
-            <button class="btn-secondary" onclick="exportDefaultersCSV()">Export CSV</button>
+            <button class="btn-secondary" onclick="exportDefaultersCSV()">
+              Export CSV
+            </button>
           </div>
           <div id="defSummary" class="text-13px text-secondary mb-0-5rem"></div>
           <div class="card">
             <table class="data-table" id="defTable">
-              <thead><tr><th>Student ID</th><th>Name</th><th>Department</th><th>Sem</th><th>Subject</th><th>Present</th><th>Total</th><th style="text-align:center">%</th></tr></thead>
-              <tbody id="defBody"><tr><td colspan="8" class="text-center text-muted p-2rem">Select filters above to load defaulters</td></tr></tbody>
+              <thead>
+                <tr>
+                  <th>Student ID</th>
+                  <th>Name</th>
+                  <th>Department</th>
+                  <th>Sem</th>
+                  <th>Subject</th>
+                  <th>Present</th>
+                  <th>Total</th>
+                  <th style="text-align: center">%</th>
+                </tr>
+              </thead>
+              <tbody id="defBody">
+                <tr>
+                  <td colspan="8" class="text-center text-muted p-2rem">
+                    Select filters above to load defaulters
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
 
         <!-- Corrections tab (admin view) -->
         <div class="sub-tab-panel" id="rtab-corrections">
-          <div class="toolbar-row" style="margin-bottom:1rem">
-            <select id="corrStatusFilter" class="input-sm" onchange="loadAdminCorrections()">
+          <div class="toolbar-row" style="margin-bottom: 1rem">
+            <select
+              id="corrStatusFilter"
+              class="input-sm"
+              onchange="loadAdminCorrections()"
+            >
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
@@ -1224,58 +1789,146 @@
           </div>
           <div class="card">
             <table class="data-table" id="corrTable">
-              <thead><tr><th>Student</th><th>Subject</th><th>Date</th><th>Reason</th><th>Status</th><th>Reviewed</th><th>Actions</th></tr></thead>
-              <tbody id="corrBody"><tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>Subject</th>
+                  <th>Date</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Reviewed</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="corrBody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted p-2rem">
+                    Loading…
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
 
         <!-- Leave Requests tab (admin view) -->
         <div class="sub-tab-panel" id="rtab-leave">
-          <div class="toolbar-row" style="margin-bottom:1rem">
-            <select id="leaveStatusFilter" class="input-sm" onchange="loadAdminLeaveRequests()">
+          <div class="toolbar-row" style="margin-bottom: 1rem">
+            <select
+              id="leaveStatusFilter"
+              class="input-sm"
+              onchange="loadAdminLeaveRequests()"
+            >
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
             </select>
-            <input type="text" id="leaveSearchFilter" class="input-sm" placeholder="Search student…" oninput="loadAdminLeaveRequests()" style="width:180px">
+            <input
+              type="text"
+              id="leaveSearchFilter"
+              class="input-sm"
+              placeholder="Search student…"
+              oninput="loadAdminLeaveRequests()"
+              style="width: 180px"
+            />
           </div>
-          <div id="leavePendingBanner" class="msg" style="margin-bottom:0.75rem;display:none"></div>
+          <div
+            id="leavePendingBanner"
+            class="msg"
+            style="margin-bottom: 0.75rem; display: none"
+          ></div>
           <div class="card">
             <table class="data-table">
-              <thead><tr><th>Student</th><th>From</th><th>To</th><th>Reason</th><th>Submitted</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody id="leaveAdminBody"><tr><td colspan="7" class="text-center text-muted p-2rem">Loading…</td></tr></tbody>
+              <thead>
+                <tr>
+                  <th>Student</th>
+                  <th>From</th>
+                  <th>To</th>
+                  <th>Reason</th>
+                  <th>Submitted</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="leaveAdminBody">
+                <tr>
+                  <td colspan="7" class="text-center text-muted p-2rem">
+                    Loading…
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
         </div>
 
         <!-- Attendance Sheet tab -->
         <div class="sub-tab-panel" id="rtab-sheet">
-          <div class="toolbar-row" style="margin-bottom:1rem">
+          <div class="toolbar-row" style="margin-bottom: 1rem">
             <div class="flex flex-center gap-0-5rem">
               <label class="text-13px text-secondary">Month</label>
-              <input type="month" id="shMonth" class="input-sm" style="width:150px" onchange="loadAttendanceSheet()">
+              <input
+                type="month"
+                id="shMonth"
+                class="input-sm"
+                style="width: 150px"
+                onchange="loadAttendanceSheet()"
+              />
             </div>
-            <select id="shFaculty" class="input-sm w-180px" onchange="loadAttendanceSheet()"><option value="">All Faculties</option></select>
-            <select id="shSemester" class="input-sm w-150px" onchange="loadAttendanceSheet()">
-              <option value="">All Semesters</option>
-              <option value="1">Sem 1</option><option value="2">Sem 2</option>
-              <option value="3">Sem 3</option><option value="4">Sem 4</option>
-              <option value="5">Sem 5</option><option value="6">Sem 6</option>
-              <option value="7">Sem 7</option><option value="8">Sem 8</option>
+            <select
+              id="shFaculty"
+              class="input-sm w-180px"
+              onchange="loadAttendanceSheet()"
+            >
+              <option value="">All Faculties</option>
             </select>
-            <select id="shSubject" class="input-sm w-200px" onchange="loadAttendanceSheet()"><option value="">All Subjects</option></select>
-            <button class="btn-secondary" onclick="downloadSheetCSV()">↓ Download CSV</button>
-            <button class="btn-primary" onclick="downloadSheetPrintable()">🖨 Download Attendance Sheet</button>
+            <select
+              id="shSemester"
+              class="input-sm w-150px"
+              onchange="loadAttendanceSheet()"
+            >
+              <option value="">All Semesters</option>
+              <option value="1">Sem 1</option>
+              <option value="2">Sem 2</option>
+              <option value="3">Sem 3</option>
+              <option value="4">Sem 4</option>
+              <option value="5">Sem 5</option>
+              <option value="6">Sem 6</option>
+              <option value="7">Sem 7</option>
+              <option value="8">Sem 8</option>
+            </select>
+            <select
+              id="shSubject"
+              class="input-sm w-200px"
+              onchange="loadAttendanceSheet()"
+            >
+              <option value="">All Subjects</option>
+            </select>
+            <button class="btn-secondary" onclick="downloadSheetCSV()">
+              ↓ Download CSV
+            </button>
+            <button class="btn-primary" onclick="downloadSheetPrintable()">
+              🖨 Download Attendance Sheet
+            </button>
           </div>
-          <div id="shWarn" class="msg" style="margin-bottom:0.75rem;display:none"></div>
+          <div
+            id="shWarn"
+            class="msg"
+            style="margin-bottom: 0.75rem; display: none"
+          ></div>
           <div id="shSummary" class="text-13px text-secondary mb-0-5rem"></div>
-          <div class="card" style="overflow-x:auto">
-            <div id="shGrid"><div class="text-muted text-13px p-1rem">Pick a month to load the register.</div></div>
+          <div class="card" style="overflow-x: auto">
+            <div id="shGrid">
+              <div class="text-muted text-13px p-1rem">
+                Pick a month to load the register.
+              </div>
+            </div>
           </div>
           <div class="sheet-legend">
-            <span><b>1</b>, <b>2</b>, <b>3</b> … running count of classes attended</span>
+            <span
+              ><b>1</b>, <b>2</b>, <b>3</b> … running count of classes
+              attended</span
+            >
             <span><b>.</b> class was held — student absent</span>
             <span><b>blank</b> no class held that day</span>
           </div>
@@ -1286,11 +1939,24 @@
       <section class="page" id="page-manage">
         <header class="page-header"><h1>Manage</h1></header>
         <div class="sub-tabs">
-          <div class="sub-tab active" onclick="switchManageTab('faculties', this)">Faculties</div>
-          <div class="sub-tab" onclick="switchManageTab('subjects', this)">Subjects</div>
-          <div class="sub-tab" onclick="switchManageTab('timeslots', this)">Time Slots</div>
-          <div class="sub-tab" onclick="switchManageTab('timetable', this)">Timetable</div>
-          <div class="sub-tab" onclick="switchManageTab('calendar', this)">Calendar</div>
+          <div
+            class="sub-tab active"
+            onclick="switchManageTab('faculties', this)"
+          >
+            Faculties
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('subjects', this)">
+            Subjects
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('timeslots', this)">
+            Time Slots
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('timetable', this)">
+            Timetable
+          </div>
+          <div class="sub-tab" onclick="switchManageTab('calendar', this)">
+            Calendar
+          </div>
         </div>
 
         <!-- Faculties tab -->
@@ -1343,10 +2009,10 @@
                 <thead>
                   <tr>
                     <th>Name</th>
-                    <th style="width:90px">Code</th>
-                    <th style="width:110px">Faculty</th>
-                    <th style="width:70px;text-align:center">Sem</th>
-                    <th style="width:130px">Actions</th>
+                    <th style="width: 90px">Code</th>
+                    <th style="width: 110px">Faculty</th>
+                    <th style="width: 70px; text-align: center">Sem</th>
+                    <th style="width: 130px">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="subjectTableBody"></tbody>
@@ -1358,27 +2024,46 @@
         <!-- Timetable tab -->
         <div class="sub-tab-panel" id="mtab-timetable">
           <div class="toolbar-row">
-            <select id="ttFacultyFilter" class="input-sm w-180px" onchange="loadTimetable()">
+            <select
+              id="ttFacultyFilter"
+              class="input-sm w-180px"
+              onchange="loadTimetable()"
+            >
               <option value="">All Faculties</option>
             </select>
-            <select id="ttSemesterFilter" class="input-sm w-160px" onchange="loadTimetable()">
+            <select
+              id="ttSemesterFilter"
+              class="input-sm w-160px"
+              onchange="loadTimetable()"
+            >
               <option value="">All Semesters</option>
-              <option value="1">Semester 1</option><option value="2">Semester 2</option>
-              <option value="3">Semester 3</option><option value="4">Semester 4</option>
-              <option value="5">Semester 5</option><option value="6">Semester 6</option>
-              <option value="7">Semester 7</option><option value="8">Semester 8</option>
+              <option value="1">Semester 1</option>
+              <option value="2">Semester 2</option>
+              <option value="3">Semester 3</option>
+              <option value="4">Semester 4</option>
+              <option value="5">Semester 5</option>
+              <option value="6">Semester 6</option>
+              <option value="7">Semester 7</option>
+              <option value="8">Semester 8</option>
             </select>
           </div>
           <div id="timetableGrid" class="timetable-scroll">
-            <div class="text-muted text-center p-2rem">Select a faculty and semester to view timetable</div>
+            <div class="text-muted text-center p-2rem">
+              Select a faculty and semester to view timetable
+            </div>
           </div>
         </div>
 
         <!-- Time Slots tab -->
         <div class="sub-tab-panel" id="mtab-timeslots">
           <div class="toolbar-row">
-            <input type="text" id="tsmSearch" placeholder="Search time slots…"
-              style="flex:1;max-width:300px" oninput="loadTimeslots()" />
+            <input
+              type="text"
+              id="tsmSearch"
+              placeholder="Search time slots…"
+              style="flex: 1; max-width: 300px"
+              oninput="loadTimeslots()"
+            />
             <button class="btn-danger" onclick="deleteAllTimeslots()">
               Delete All
             </button>
@@ -1410,9 +2095,16 @@
               <div class="cal-col-header">
                 <div>
                   <div class="cal-col-title">Academic Years</div>
-                  <div class="cal-col-sub">Manage your institution's academic year periods</div>
+                  <div class="cal-col-sub">
+                    Manage your institution's academic year periods
+                  </div>
                 </div>
-                <button class="btn-primary btn-sm" onclick="openAcademicYearModal()">+ Add Year</button>
+                <button
+                  class="btn-primary btn-sm"
+                  onclick="openAcademicYearModal()"
+                >
+                  + Add Year
+                </button>
               </div>
               <div id="academicYearsList" class="cal-years-list">
                 <div class="text-muted text-12px p-1rem">Loading…</div>
@@ -1424,13 +2116,33 @@
               <div class="cal-col-header">
                 <div>
                   <div class="cal-col-title">Holidays</div>
-                  <div class="cal-col-sub">Public holidays and institution closures</div>
+                  <div class="cal-col-sub">
+                    Public holidays and institution closures
+                  </div>
                 </div>
-                <button class="btn-primary btn-sm" onclick="openHolidayModal()">+ Add Holiday</button>
+                <button class="btn-primary btn-sm" onclick="openHolidayModal()">
+                  + Add Holiday
+                </button>
               </div>
               <div class="cal-filter-row">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-                <select id="holYearFilter" class="input-sm" style="flex:1" onchange="loadHolidays()">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <polygon
+                    points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+                  />
+                </svg>
+                <select
+                  id="holYearFilter"
+                  class="input-sm"
+                  style="flex: 1"
+                  onchange="loadHolidays()"
+                >
                   <option value="">All Academic Years</option>
                 </select>
               </div>
@@ -1451,12 +2163,31 @@
               <div class="section-title">Recognition</div>
 
               <!-- Threshold -->
-              <div class="form-group" style="margin-top:0.75rem">
-                <label style="display:flex;justify-content:space-between;align-items:baseline">
+              <div class="form-group" style="margin-top: 0.75rem">
+                <label
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                  "
+                >
                   <span>Confidence Threshold</span>
-                  <span id="threshVal" style="font-family:var(--mono);color:var(--blue);font-size:13px"></span>
+                  <span
+                    id="threshVal"
+                    style="
+                      font-family: var(--mono);
+                      color: var(--blue);
+                      font-size: 13px;
+                    "
+                  ></span>
                 </label>
-                <p style="margin:0.2rem 0 0.4rem;font-size:12px;color:var(--text3)">
+                <p
+                  style="
+                    margin: 0.2rem 0 0.4rem;
+                    font-size: 12px;
+                    color: var(--text3);
+                  "
+                >
                   Minimum face-match similarity required to recognise a student.
                   Higher = stricter, fewer false positives.
                 </p>
@@ -1468,25 +2199,57 @@
                   step="0.01"
                   oninput="
                     const pct = Math.round(this.value * 100);
-                    document.getElementById('threshVal').textContent = pct + '% (value: ' + parseFloat(this.value).toFixed(2) + ')';
+                    document.getElementById('threshVal').textContent =
+                      pct +
+                      '% (value: ' +
+                      parseFloat(this.value).toFixed(2) +
+                      ')';
                   "
-                  style="width:100%;margin:0.25rem 0"
+                  style="width: 100%; margin: 0.25rem 0"
                 />
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:2px">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 11px;
+                    color: var(--text3);
+                    margin-top: 2px;
+                  "
+                >
                   <span>50% — lenient</span>
-                  <span style="color:var(--text2)">Recommended: 80%</span>
+                  <span style="color: var(--text2)">Recommended: 80%</span>
                   <span>99% — strict</span>
                 </div>
               </div>
 
               <!-- Frame Skip -->
-              <div class="form-group" style="margin-top:0.75rem">
-                <label style="display:flex;justify-content:space-between;align-items:baseline">
+              <div class="form-group" style="margin-top: 0.75rem">
+                <label
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: baseline;
+                  "
+                >
                   <span>Frame Skip</span>
-                  <span id="skipVal" style="font-family:var(--mono);color:var(--blue);font-size:13px"></span>
+                  <span
+                    id="skipVal"
+                    style="
+                      font-family: var(--mono);
+                      color: var(--blue);
+                      font-size: 13px;
+                    "
+                  ></span>
                 </label>
-                <p style="margin:0.2rem 0 0.4rem;font-size:12px;color:var(--text3)">
-                  Process every Nth camera frame. Higher = less CPU, slightly lower recognition speed.
+                <p
+                  style="
+                    margin: 0.2rem 0 0.4rem;
+                    font-size: 12px;
+                    color: var(--text3);
+                  "
+                >
+                  Process every Nth camera frame. Higher = less CPU, slightly
+                  lower recognition speed.
                 </p>
                 <input
                   type="range"
@@ -1496,24 +2259,37 @@
                   step="1"
                   oninput="
                     const v = parseInt(this.value);
-                    document.getElementById('skipVal').textContent = 'every ' + v + (v === 1 ? ' frame' : ' frames');
+                    document.getElementById('skipVal').textContent =
+                      'every ' + v + (v === 1 ? ' frame' : ' frames');
                   "
-                  style="width:100%;margin:0.25rem 0"
+                  style="width: 100%; margin: 0.25rem 0"
                 />
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:2px">
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 11px;
+                    color: var(--text3);
+                    margin-top: 2px;
+                  "
+                >
                   <span>1 — every frame (max accuracy)</span>
                   <span>10 — every 10th (low CPU)</span>
                 </div>
               </div>
 
-              <button class="btn-primary" style="margin-top:0.5rem" onclick="saveSettings()">
+              <button
+                class="btn-primary"
+                style="margin-top: 0.5rem"
+                onclick="saveSettings()"
+              >
                 Save Settings
               </button>
             </div>
 
-            <div class="card" style="margin-top:1rem">
+            <div class="card" style="margin-top: 1rem">
               <div class="section-title">Change Password</div>
-              <div class="form-group" style="margin-top:0.75rem">
+              <div class="form-group" style="margin-top: 0.75rem">
                 <label>Current Password</label>
                 <input type="password" id="oldPw" placeholder="••••••" />
               </div>
@@ -1521,24 +2297,40 @@
                 <label>New Password</label>
                 <input type="password" id="newPw" placeholder="••••••" />
               </div>
-              <button class="btn-primary" onclick="changeAdminPw()">Update Password</button>
+              <button class="btn-primary" onclick="changeAdminPw()">
+                Update Password
+              </button>
             </div>
           </div>
 
           <div>
             <div class="card">
               <div class="section-title">System Info</div>
-              <div id="sysInfo" style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.5rem"></div>
+              <div
+                id="sysInfo"
+                style="
+                  margin-top: 0.75rem;
+                  display: flex;
+                  flex-direction: column;
+                  gap: 0.5rem;
+                "
+              ></div>
             </div>
 
-            <div class="card" style="margin-top:1rem">
+            <div class="card" style="margin-top: 1rem">
               <div class="section-title">Email Notifications</div>
-              <div id="emailStatusBanner" style="margin-top:0.75rem"></div>
-              <div class="form-group" style="margin-top:0.75rem">
+              <div id="emailStatusBanner" style="margin-top: 0.75rem"></div>
+              <div class="form-group" style="margin-top: 0.75rem">
                 <label>Send test email to</label>
-                <input type="email" id="testEmailAddr" placeholder="you@example.com" />
+                <input
+                  type="email"
+                  id="testEmailAddr"
+                  placeholder="you@example.com"
+                />
               </div>
-              <button class="btn-secondary" onclick="sendTestEmail()">Send Test</button>
+              <button class="btn-secondary" onclick="sendTestEmail()">
+                Send Test
+              </button>
               <div id="emailTestMsg" class="msg mt-0-5rem"></div>
             </div>
           </div>
@@ -1554,7 +2346,9 @@
             <h1>Teacher Dashboard</h1>
             <div id="tDashDay" class="text-secondary text-13px"></div>
           </div>
-          <button class="btn-secondary btn-sm" onclick="loadTeacherDashboard()">Refresh</button>
+          <button class="btn-secondary btn-sm" onclick="loadTeacherDashboard()">
+            Refresh
+          </button>
         </header>
 
         <!-- Stats row -->
@@ -1571,18 +2365,32 @@
         <!-- My Assigned Classes -->
         <div class="dash-section-header mt-1rem">
           <span class="dash-section-title">My Assigned Classes</span>
-          <div style="display:flex;gap:0.5rem">
-            <button class="btn-secondary btn-sm active" id="acViewCard" onclick="switchAssignedView('card',this)">Cards</button>
-            <button class="btn-secondary btn-sm" id="acViewTable" onclick="switchAssignedView('table',this)">Timetable</button>
+          <div style="display: flex; gap: 0.5rem">
+            <button
+              class="btn-secondary btn-sm active"
+              id="acViewCard"
+              onclick="switchAssignedView('card', this)"
+            >
+              Cards
+            </button>
+            <button
+              class="btn-secondary btn-sm"
+              id="acViewTable"
+              onclick="switchAssignedView('table', this)"
+            >
+              Timetable
+            </button>
           </div>
         </div>
         <div id="tAssignedCards" class="teacher-class-grid"></div>
-        <div id="tAssignedTable" class="hidden" style="overflow-x:auto"></div>
+        <div id="tAssignedTable" class="hidden" style="overflow-x: auto"></div>
 
         <!-- Weekly schedule toggle -->
         <div class="dash-section-header mt-1rem">
           <span class="dash-section-title">Weekly Schedule</span>
-          <button class="btn-secondary btn-sm" onclick="toggleWeeklySchedule()">Show / Hide</button>
+          <button class="btn-secondary btn-sm" onclick="toggleWeeklySchedule()">
+            Show / Hide
+          </button>
         </div>
         <div id="tWeeklySchedule" class="hidden"></div>
       </section>
@@ -1591,25 +2399,86 @@
       <section class="page" id="page-t-recognize">
         <header class="page-header">
           <h1>Take Attendance</h1>
-          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-            <span id="sessionMarkedCount" style="font-family:var(--mono);font-size:13px;color:var(--green);font-weight:700"></span>
-            <span style="font-size:12px;color:var(--text3)" id="sessionMarkedLabel"></span>
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              flex-wrap: wrap;
+            "
+          >
+            <span
+              id="sessionMarkedCount"
+              style="
+                font-family: var(--mono);
+                font-size: 13px;
+                color: var(--green);
+                font-weight: 700;
+              "
+            ></span>
+            <span
+              style="font-size: 12px; color: var(--text3)"
+              id="sessionMarkedLabel"
+            ></span>
           </div>
         </header>
 
         <!-- Attendance method selector -->
         <div class="att-method-bar" id="attMethodBar">
           <div class="att-method-label">Attendance Method:</div>
-          <button class="att-method-btn active" id="mBtn-camera" onclick="selectAttMethod('camera',this)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          <button
+            class="att-method-btn active"
+            id="mBtn-camera"
+            onclick="selectAttMethod('camera', this)"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M23 7l-7 5 7 5V7z" />
+              <rect x="1" y="5" width="15" height="14" rx="2" />
+            </svg>
             Live Camera
           </button>
-          <button class="att-method-btn" id="mBtn-photo" onclick="selectAttMethod('photo',this)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
+          <button
+            class="att-method-btn"
+            id="mBtn-photo"
+            onclick="selectAttMethod('photo', this)"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21,15 16,10 5,21" />
+            </svg>
             Classroom Photo
           </button>
-          <button class="att-method-btn" id="mBtn-manual" onclick="selectAttMethod('manual',this)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg>
+          <button
+            class="att-method-btn"
+            id="mBtn-manual"
+            onclick="selectAttMethod('manual', this)"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4" />
+            </svg>
             Manual List
           </button>
         </div>
@@ -1622,44 +2491,112 @@
         <!-- Photo attendance panel -->
         <div id="photoAttPanel" class="hidden">
           <div class="card mb-1rem">
-            <div class="section-title mb-0-5rem">Classroom Photo Attendance</div>
-            <p class="text-13px text-secondary mb-0-75rem">Take or upload a photo of the classroom. The system will detect all faces and match them against enrolled students.</p>
+            <div class="section-title mb-0-5rem">
+              Classroom Photo Attendance
+            </div>
+            <p class="text-13px text-secondary mb-0-75rem">
+              Take or upload a photo of the classroom. The system will detect
+              all faces and match them against enrolled students.
+            </p>
             <div class="photo-att-area">
               <div class="photo-att-left">
-                <div class="video-wrapper-full" style="position:relative">
-                  <video id="photoAttVideo" autoplay playsinline muted class="video-mirror"></video>
+                <div class="video-wrapper-full" style="position: relative">
+                  <video
+                    id="photoAttVideo"
+                    autoplay
+                    playsinline
+                    muted
+                    class="video-mirror"
+                  ></video>
                   <canvas id="photoAttCanvas" class="hidden"></canvas>
                   <div id="photoAttOverlay" class="video-overlay-full">
                     <div class="flex-col-centered gap-0-5rem">
-                      <button class="btn-primary" onclick="startPhotoCamera()">Open Camera</button>
-                      <span class="text-white-50 text-12px">or upload a photo below</span>
+                      <button class="btn-primary" onclick="startPhotoCamera()">
+                        Open Camera
+                      </button>
+                      <span class="text-white-50 text-12px"
+                        >or upload a photo below</span
+                      >
                     </div>
                   </div>
                 </div>
                 <div class="photo-att-controls mt-0-5rem">
-                  <button class="btn-primary" id="btnCapturePhoto" onclick="captureClassPhoto()" style="display:none">📸 Capture Photo</button>
-                  <button class="btn-secondary hidden" id="btnSwitchPhotoCam" onclick="switchPhotoCamera()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                  <button
+                    class="btn-primary"
+                    id="btnCapturePhoto"
+                    onclick="captureClassPhoto()"
+                    style="display: none"
+                  >
+                    📸 Capture Photo
+                  </button>
+                  <button
+                    class="btn-secondary hidden"
+                    id="btnSwitchPhotoCam"
+                    onclick="switchPhotoCamera()"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M1 4v6h6" />
+                      <path d="M23 20v-6h-6" />
+                      <path
+                        d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"
+                      />
+                    </svg>
                     Switch Cam
                   </button>
-                  <label class="btn-secondary" style="cursor:pointer">
-                    Upload Photo <input type="file" id="photoUploadInput" accept="image/*" class="hidden" onchange="handlePhotoUpload(event)">
+                  <label class="btn-secondary" style="cursor: pointer">
+                    Upload Photo
+                    <input
+                      type="file"
+                      id="photoUploadInput"
+                      accept="image/*"
+                      class="hidden"
+                      onchange="handlePhotoUpload(event)"
+                    />
                   </label>
                 </div>
               </div>
               <div class="photo-att-right">
                 <div id="photoAttPreview" class="photo-att-preview">
-                  <div class="text-muted text-13px text-center p-2rem">Capture or upload a photo to detect faces</div>
+                  <div class="text-muted text-13px text-center p-2rem">
+                    Capture or upload a photo to detect faces
+                  </div>
                 </div>
                 <div id="photoAttResult" class="hidden">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem">
+                  <div
+                    style="
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      margin-bottom: 0.5rem;
+                    "
+                  >
                     <div class="section-title">Detected Students</div>
-                    <span id="photoDetectedCount" class="pill pill-green"></span>
+                    <span
+                      id="photoDetectedCount"
+                      class="pill pill-green"
+                    ></span>
                   </div>
-                  <div id="photoDetectedList" style="max-height:240px;overflow-y:auto"></div>
-                  <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
-                    <button class="btn-secondary" onclick="retakePhoto()">Retake</button>
-                    <button class="btn-primary" onclick="submitPhotoAttendance()">Submit Attendance</button>
+                  <div
+                    id="photoDetectedList"
+                    style="max-height: 240px; overflow-y: auto"
+                  ></div>
+                  <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem">
+                    <button class="btn-secondary" onclick="retakePhoto()">
+                      Retake
+                    </button>
+                    <button
+                      class="btn-primary"
+                      onclick="submitPhotoAttendance()"
+                    >
+                      Submit Attendance
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1670,15 +2607,34 @@
         <!-- Manual list panel -->
         <div id="manualAttPanel" class="hidden">
           <div class="card mb-1rem">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem">
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.75rem;
+              "
+            >
               <div class="section-title">Manual Attendance</div>
-              <div style="display:flex;gap:0.5rem">
-                <button class="btn-secondary btn-sm" onclick="markAllPresent()">Mark All Present</button>
-                <button class="btn-secondary btn-sm" onclick="markAllAbsent()">Mark All Absent</button>
-                <button class="btn-primary btn-sm" onclick="submitManualAttendance()">Submit</button>
+              <div style="display: flex; gap: 0.5rem">
+                <button class="btn-secondary btn-sm" onclick="markAllPresent()">
+                  Mark All Present
+                </button>
+                <button class="btn-secondary btn-sm" onclick="markAllAbsent()">
+                  Mark All Absent
+                </button>
+                <button
+                  class="btn-primary btn-sm"
+                  onclick="submitManualAttendance()"
+                >
+                  Submit
+                </button>
               </div>
             </div>
-            <div id="manualStudentList" style="max-height:60vh;overflow-y:auto"></div>
+            <div
+              id="manualStudentList"
+              style="max-height: 60vh; overflow-y: auto"
+            ></div>
           </div>
         </div>
 
@@ -1689,12 +2645,42 @@
               <div class="teacher-header-flex">
                 <div class="section-title">Camera Feed</div>
                 <div class="flex-wrap-gap-0-5rem">
-                  <button class="btn-secondary hidden" id="btnSwitchCam" onclick="switchCamera()" title="Switch front/back camera">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/></svg>
+                  <button
+                    class="btn-secondary hidden"
+                    id="btnSwitchCam"
+                    onclick="switchCamera()"
+                    title="Switch front/back camera"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                    >
+                      <path d="M1 4v6h6" />
+                      <path d="M23 20v-6h-6" />
+                      <path
+                        d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"
+                      />
+                    </svg>
                     Switch
                   </button>
-                  <button class="btn-primary" id="btnTRecogAuto" onclick="toggleTeacherAuto()">▶ Start Auto</button>
-                  <button class="btn-secondary hidden" id="btnTRecogStop" onclick="stopTeacherWebcam()">⏹ Stop Camera</button>
+                  <button
+                    class="btn-primary"
+                    id="btnTRecogAuto"
+                    onclick="toggleTeacherAuto()"
+                  >
+                    ▶ Start Auto
+                  </button>
+                  <button
+                    class="btn-secondary hidden"
+                    id="btnTRecogStop"
+                    onclick="stopTeacherWebcam()"
+                  >
+                    ⏹ Stop Camera
+                  </button>
                 </div>
               </div>
 
@@ -1941,48 +2927,130 @@
         <header class="page-header">
           <div>
             <h1>Reports</h1>
-            <div class="text-secondary text-13px">Student performance, analytics &amp; correction requests</div>
+            <div class="text-secondary text-13px">
+              Student performance, analytics &amp; correction requests
+            </div>
           </div>
-          <div style="display:flex;gap:0.5rem;flex-wrap:wrap;align-items:center">
-            <button class="btn-secondary btn-sm" onclick="exportReportCSV()">↓ Export CSV</button>
-            <button class="btn-primary btn-sm" id="rptRefreshBtn" onclick="loadTeacherReports()">Refresh</button>
+          <div
+            style="
+              display: flex;
+              gap: 0.5rem;
+              flex-wrap: wrap;
+              align-items: center;
+            "
+          >
+            <button class="btn-secondary btn-sm" onclick="exportReportCSV()">
+              ↓ Export CSV
+            </button>
+            <button
+              class="btn-primary btn-sm"
+              id="rptRefreshBtn"
+              onclick="loadTeacherReports()"
+            >
+              Refresh
+            </button>
           </div>
         </header>
 
         <!-- Sub-tabs -->
-        <div class="sub-tabs" style="margin-bottom:1rem">
-          <div class="sub-tab active" id="trtab-btn-performance" onclick="switchTeacherReportTab('performance',this)">Performance</div>
-          <div class="sub-tab" id="trtab-btn-corrections" onclick="switchTeacherReportTab('corrections',this)">
-            Corrections <span id="tCorrPendingBadge" style="display:none;background:var(--danger);color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 6px;margin-left:4px"></span>
+        <div class="sub-tabs" style="margin-bottom: 1rem">
+          <div
+            class="sub-tab active"
+            id="trtab-btn-performance"
+            onclick="switchTeacherReportTab('performance', this)"
+          >
+            Performance
           </div>
-          <div class="sub-tab" id="trtab-btn-sheet" onclick="switchTeacherReportTab('sheet',this)">Attendance Sheet</div>
+          <div
+            class="sub-tab"
+            id="trtab-btn-corrections"
+            onclick="switchTeacherReportTab('corrections', this)"
+          >
+            Corrections
+            <span
+              id="tCorrPendingBadge"
+              style="
+                display: none;
+                background: var(--danger);
+                color: #fff;
+                font-size: 10px;
+                font-weight: 700;
+                border-radius: 10px;
+                padding: 1px 6px;
+                margin-left: 4px;
+              "
+            ></span>
+          </div>
+          <div
+            class="sub-tab"
+            id="trtab-btn-sheet"
+            onclick="switchTeacherReportTab('sheet', this)"
+          >
+            Attendance Sheet
+          </div>
         </div>
 
         <!-- ── Attendance Sheet tab ────────────────────── -->
-        <div id="trtab-sheet" style="display:none">
-          <div class="card" style="padding:0.75rem 1rem;margin-bottom:1rem">
-            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
-              <div class="form-group" style="margin:0;min-width:150px">
-                <label style="font-size:11px">Month</label>
-                <input type="month" id="tshMonth" class="input-sm" style="width:100%" onchange="loadAttendanceSheet('teacher')">
+        <div id="trtab-sheet" style="display: none">
+          <div class="card" style="padding: 0.75rem 1rem; margin-bottom: 1rem">
+            <div
+              style="
+                display: flex;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+                align-items: flex-end;
+              "
+            >
+              <div class="form-group" style="margin: 0; min-width: 150px">
+                <label style="font-size: 11px">Month</label>
+                <input
+                  type="month"
+                  id="tshMonth"
+                  class="input-sm"
+                  style="width: 100%"
+                  onchange="loadAttendanceSheet('teacher')"
+                />
               </div>
-              <div class="form-group" style="margin:0;min-width:200px">
-                <label style="font-size:11px">Subject</label>
-                <select id="tshSubject" class="input-sm" style="width:100%" onchange="loadAttendanceSheet('teacher')">
+              <div class="form-group" style="margin: 0; min-width: 200px">
+                <label style="font-size: 11px">Subject</label>
+                <select
+                  id="tshSubject"
+                  class="input-sm"
+                  style="width: 100%"
+                  onchange="loadAttendanceSheet('teacher')"
+                >
                   <option value="">All Subjects</option>
                 </select>
               </div>
-              <button class="btn-secondary btn-sm" onclick="downloadSheetCSV()">↓ Download CSV</button>
-              <button class="btn-primary btn-sm" onclick="downloadSheetPrintable()">🖨 Download Attendance Sheet</button>
+              <button class="btn-secondary btn-sm" onclick="downloadSheetCSV()">
+                ↓ Download CSV
+              </button>
+              <button
+                class="btn-primary btn-sm"
+                onclick="downloadSheetPrintable()"
+              >
+                🖨 Download Attendance Sheet
+              </button>
             </div>
           </div>
-          <div id="tshWarn" class="msg" style="margin-bottom:0.75rem;display:none"></div>
+          <div
+            id="tshWarn"
+            class="msg"
+            style="margin-bottom: 0.75rem; display: none"
+          ></div>
           <div id="tshSummary" class="text-13px text-secondary mb-0-5rem"></div>
-          <div class="card" style="overflow-x:auto">
-            <div id="tshGrid"><div class="text-muted text-13px p-1rem">Pick a month to load the register.</div></div>
+          <div class="card" style="overflow-x: auto">
+            <div id="tshGrid">
+              <div class="text-muted text-13px p-1rem">
+                Pick a month to load the register.
+              </div>
+            </div>
           </div>
           <div class="sheet-legend">
-            <span><b>1</b>, <b>2</b>, <b>3</b> … running count of classes attended</span>
+            <span
+              ><b>1</b>, <b>2</b>, <b>3</b> … running count of classes
+              attended</span
+            >
             <span><b>.</b> class was held — student absent</span>
             <span><b>blank</b> no class held that day</span>
           </div>
@@ -1991,61 +3059,123 @@
         <!-- ── Performance tab ─────────────────────────── -->
         <div id="trtab-performance">
           <!-- Filters -->
-          <div class="card" style="padding:0.75rem 1rem;margin-bottom:1rem">
-            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
-              <div class="form-group" style="margin:0;min-width:120px">
-                <label style="font-size:11px">From</label>
-                <input type="date" id="rptFrom" class="input-sm" style="width:100%">
+          <div class="card" style="padding: 0.75rem 1rem; margin-bottom: 1rem">
+            <div
+              style="
+                display: flex;
+                gap: 0.75rem;
+                flex-wrap: wrap;
+                align-items: flex-end;
+              "
+            >
+              <div class="form-group" style="margin: 0; min-width: 120px">
+                <label style="font-size: 11px">From</label>
+                <input
+                  type="date"
+                  id="rptFrom"
+                  class="input-sm"
+                  style="width: 100%"
+                />
               </div>
-              <div class="form-group" style="margin:0;min-width:120px">
-                <label style="font-size:11px">To</label>
-                <input type="date" id="rptTo" class="input-sm" style="width:100%">
+              <div class="form-group" style="margin: 0; min-width: 120px">
+                <label style="font-size: 11px">To</label>
+                <input
+                  type="date"
+                  id="rptTo"
+                  class="input-sm"
+                  style="width: 100%"
+                />
               </div>
-              <div class="form-group" style="margin:0;min-width:200px">
-                <label style="font-size:11px">Faculty</label>
-                <select id="rptFaculty" class="input-sm" style="width:100%" onchange="loadTeacherReports()">
+              <div class="form-group" style="margin: 0; min-width: 200px">
+                <label style="font-size: 11px">Faculty</label>
+                <select
+                  id="rptFaculty"
+                  class="input-sm"
+                  style="width: 100%"
+                  onchange="loadTeacherReports()"
+                >
                   <option value="">All Faculties</option>
                 </select>
               </div>
-              <div class="form-group" style="margin:0;min-width:130px">
-                <label style="font-size:11px">Semester</label>
-                <select id="rptSemester" class="input-sm" style="width:100%">
+              <div class="form-group" style="margin: 0; min-width: 130px">
+                <label style="font-size: 11px">Semester</label>
+                <select id="rptSemester" class="input-sm" style="width: 100%">
                   <option value="">All Semesters</option>
-                  <option value="1">Semester 1</option><option value="2">Semester 2</option>
-                  <option value="3">Semester 3</option><option value="4">Semester 4</option>
-                  <option value="5">Semester 5</option><option value="6">Semester 6</option>
-                  <option value="7">Semester 7</option><option value="8">Semester 8</option>
+                  <option value="1">Semester 1</option>
+                  <option value="2">Semester 2</option>
+                  <option value="3">Semester 3</option>
+                  <option value="4">Semester 4</option>
+                  <option value="5">Semester 5</option>
+                  <option value="6">Semester 6</option>
+                  <option value="7">Semester 7</option>
+                  <option value="8">Semester 8</option>
                 </select>
               </div>
-              <div class="form-group" style="margin:0;min-width:160px">
-                <label style="font-size:11px">Subject</label>
-                <select id="rptSubject" class="input-sm" style="width:100%">
+              <div class="form-group" style="margin: 0; min-width: 160px">
+                <label style="font-size: 11px">Subject</label>
+                <select id="rptSubject" class="input-sm" style="width: 100%">
                   <option value="">All Subjects</option>
                 </select>
               </div>
-              <div class="form-group" style="margin:0;min-width:160px">
-                <label style="font-size:11px">Student</label>
-                <input type="text" id="rptStudentFilter" class="input-sm" placeholder="Search name / ID…"
-                  oninput="_filterRptTable()" style="width:100%">
+              <div class="form-group" style="margin: 0; min-width: 160px">
+                <label style="font-size: 11px">Student</label>
+                <input
+                  type="text"
+                  id="rptStudentFilter"
+                  class="input-sm"
+                  placeholder="Search name / ID…"
+                  oninput="_filterRptTable()"
+                  style="width: 100%"
+                />
               </div>
-              <button class="btn-primary btn-sm" onclick="loadTeacherReports()">Apply</button>
+              <button class="btn-primary btn-sm" onclick="loadTeacherReports()">
+                Apply
+              </button>
             </div>
           </div>
 
           <!-- Summary metrics -->
-          <div class="metrics-grid" id="rptMetrics" style="margin-bottom:1rem"></div>
+          <div
+            class="metrics-grid"
+            id="rptMetrics"
+            style="margin-bottom: 1rem"
+          ></div>
 
           <!-- Risk summary row -->
-          <div id="rptRiskSummary" style="display:flex;gap:0.75rem;margin-bottom:1rem;flex-wrap:wrap"></div>
+          <div
+            id="rptRiskSummary"
+            style="
+              display: flex;
+              gap: 0.75rem;
+              margin-bottom: 1rem;
+              flex-wrap: wrap;
+            "
+          ></div>
 
           <!-- Student performance table -->
-          <div class="card" style="padding:0">
-            <div style="padding:0.75rem 1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-              <span style="font-size:13px;font-weight:600">Student Performance</span>
-              <input type="text" id="rptSearch" placeholder="Search students…" class="input-sm"
-                oninput="_filterRptTable()" style="width:180px">
+          <div class="card" style="padding: 0">
+            <div
+              style="
+                padding: 0.75rem 1rem;
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+              "
+            >
+              <span style="font-size: 13px; font-weight: 600"
+                >Student Performance</span
+              >
+              <input
+                type="text"
+                id="rptSearch"
+                placeholder="Search students…"
+                class="input-sm"
+                oninput="_filterRptTable()"
+                style="width: 180px"
+              />
             </div>
-            <div style="overflow-x:auto">
+            <div style="overflow-x: auto">
               <table class="data-table" id="rptTable">
                 <thead>
                   <tr>
@@ -2059,7 +3189,18 @@
                   </tr>
                 </thead>
                 <tbody id="rptBody">
-                  <tr><td colspan="7" style="text-align:center;color:var(--text3);padding:2rem">Loading…</td></tr>
+                  <tr>
+                    <td
+                      colspan="7"
+                      style="
+                        text-align: center;
+                        color: var(--text3);
+                        padding: 2rem;
+                      "
+                    >
+                      Loading…
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -2067,19 +3208,34 @@
         </div>
 
         <!-- ── Corrections tab ─────────────────────────── -->
-        <div id="trtab-corrections" style="display:none">
-          <div class="toolbar-row" style="margin-bottom:1rem">
-            <select id="tCorrStatusFilter" class="input-sm" onchange="loadTeacherCorrections()">
+        <div id="trtab-corrections" style="display: none">
+          <div class="toolbar-row" style="margin-bottom: 1rem">
+            <select
+              id="tCorrStatusFilter"
+              class="input-sm"
+              onchange="loadTeacherCorrections()"
+            >
               <option value="">All Statuses</option>
               <option value="pending">Pending</option>
               <option value="approved">Approved</option>
               <option value="rejected">Rejected</option>
             </select>
-            <input type="text" id="tCorrSearch" class="input-sm" placeholder="Search student…"
-              oninput="loadTeacherCorrections()" style="width:180px">
-            <button class="btn-secondary btn-sm" onclick="loadTeacherCorrections()">Refresh</button>
+            <input
+              type="text"
+              id="tCorrSearch"
+              class="input-sm"
+              placeholder="Search student…"
+              oninput="loadTeacherCorrections()"
+              style="width: 180px"
+            />
+            <button
+              class="btn-secondary btn-sm"
+              onclick="loadTeacherCorrections()"
+            >
+              Refresh
+            </button>
           </div>
-          <div class="card" style="padding:0">
+          <div class="card" style="padding: 0">
             <table class="data-table">
               <thead>
                 <tr>
@@ -2092,7 +3248,11 @@
                 </tr>
               </thead>
               <tbody id="tCorrBody">
-                <tr><td colspan="6" class="text-center text-muted p-2rem">Loading…</td></tr>
+                <tr>
+                  <td colspan="6" class="text-center text-muted p-2rem">
+                    Loading…
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -2107,7 +3267,10 @@
 
     <!-- Teacher Create/Edit Modal -->
     <div class="modal-overlay" id="teacherModal">
-      <div class="modal-box" style="width:660px;max-height:90vh;overflow-y:auto">
+      <div
+        class="modal-box"
+        style="width: 660px; max-height: 90vh; overflow-y: auto"
+      >
         <div class="modal-title" id="teacherModalTitle">Add Teacher</div>
         <input type="hidden" id="tmId" />
 
@@ -2123,11 +3286,19 @@
           </div>
           <div class="form-group">
             <label>Password *</label
-            ><input type="password" id="tmPassword" placeholder="Min 6 chars (leave blank to keep)" />
+            ><input
+              type="password"
+              id="tmPassword"
+              placeholder="Min 6 chars (leave blank to keep)"
+            />
           </div>
           <div class="form-group">
             <label>Email</label
-            ><input type="email" id="tmEmail" placeholder="teacher@college.edu" />
+            ><input
+              type="email"
+              id="tmEmail"
+              placeholder="teacher@college.edu"
+            />
           </div>
           <div class="form-group">
             <label>Phone</label
@@ -2142,14 +3313,23 @@
           </div>
         </div>
 
-        <p class="text-13px text-secondary" style="margin-top:1rem">
-          Class and subject assignments are managed from <strong>Manage → Timetable</strong>.
+        <p class="text-13px text-secondary" style="margin-top: 1rem">
+          Class and subject assignments are managed from
+          <strong>Manage → Timetable</strong>.
         </p>
 
-        <div id="teacherModalErr" class="msg err" style="margin-top:0.75rem"></div>
+        <div
+          id="teacherModalErr"
+          class="msg err"
+          style="margin-top: 0.75rem"
+        ></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('teacherModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveTeacher()">Save Teacher</button>
+          <button class="btn-secondary" onclick="closeModal('teacherModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveTeacher()">
+            Save Teacher
+          </button>
         </div>
       </div>
     </div>
@@ -2255,29 +3435,43 @@
 
     <!-- Student Edit Modal (admin) -->
     <div class="modal-overlay" id="editModal" onclick="closeEditModal(event)">
-      <div class="modal-box" style="width:560px;max-width:95%">
+      <div class="modal-box" style="width: 560px; max-width: 95%">
         <!-- Header -->
         <div class="modal-header">
           <h2 id="editModalTitle">Edit Student</h2>
           <button class="modal-close" onclick="_closeEditModal()">✕</button>
         </div>
         <!-- Tabs -->
-        <div style="padding:0.75rem 1.5rem 0">
+        <div style="padding: 0.75rem 1.5rem 0">
           <div class="modal-tabs">
-            <button class="mtab active" onclick="switchModalTab('profile',this)">Profile</button>
-            <button class="mtab" onclick="switchModalTab('attendance',this)">Attendance</button>
-            <button class="mtab" onclick="switchModalTab('actlog',this)">Activity Log</button>
+            <button
+              class="mtab active"
+              onclick="switchModalTab('profile', this)"
+            >
+              Profile
+            </button>
+            <button class="mtab" onclick="switchModalTab('attendance', this)">
+              Attendance
+            </button>
+            <button class="mtab" onclick="switchModalTab('actlog', this)">
+              Activity Log
+            </button>
           </div>
         </div>
         <!-- Body -->
-        <div class="modal-body" style="padding-top:0">
+        <div class="modal-body" style="padding-top: 0">
           <!-- Profile tab -->
           <div id="mtab-profile">
             <input type="hidden" id="editSid" />
             <div class="modal-form-grid">
               <div class="form-group">
                 <label>Student ID</label>
-                <input type="text" id="editSidDisplay" readonly style="opacity:.55;cursor:default" />
+                <input
+                  type="text"
+                  id="editSidDisplay"
+                  readonly
+                  style="opacity: 0.55; cursor: default"
+                />
               </div>
               <div class="form-group">
                 <label>Full Name <span class="req">*</span></label>
@@ -2300,7 +3494,7 @@
                 <label>Phone</label>
                 <input type="text" id="editPhone" />
               </div>
-              <div class="form-group" style="grid-column:1/-1">
+              <div class="form-group" style="grid-column: 1/-1">
                 <label>Status</label>
                 <select id="editStatus">
                   <option value="active">Active</option>
@@ -2310,15 +3504,27 @@
                 </select>
               </div>
             </div>
-            <div id="editModalErr" class="msg err" style="margin-top:.75rem"></div>
+            <div
+              id="editModalErr"
+              class="msg err"
+              style="margin-top: 0.75rem"
+            ></div>
           </div>
           <!-- Attendance tab -->
-          <div id="mtab-attendance" style="display:none">
-            <div id="attEditList" style="max-height:220px;overflow-y:auto;margin-bottom:1rem">
+          <div id="mtab-attendance" style="display: none">
+            <div
+              id="attEditList"
+              style="max-height: 220px; overflow-y: auto; margin-bottom: 1rem"
+            >
               <p class="muted">Loading…</p>
             </div>
-            <div style="border-top:1px solid var(--border);padding-top:.75rem">
-              <div class="modal-form-grid" style="grid-template-columns:1fr 1fr">
+            <div
+              style="border-top: 1px solid var(--border); padding-top: 0.75rem"
+            >
+              <div
+                class="modal-form-grid"
+                style="grid-template-columns: 1fr 1fr"
+              >
                 <div class="form-group">
                   <label>Date</label>
                   <input type="date" id="attEditDate" />
@@ -2330,28 +3536,52 @@
                     <option value="Absent">Absent</option>
                   </select>
                 </div>
-                <div class="form-group" style="grid-column:1/-1">
+                <div class="form-group" style="grid-column: 1/-1">
                   <label>Note (optional)</label>
-                  <input type="text" id="attEditNote" placeholder="e.g. Medical leave" />
+                  <input
+                    type="text"
+                    id="attEditNote"
+                    placeholder="e.g. Medical leave"
+                  />
                 </div>
               </div>
-              <div id="attEditMsg" class="msg" style="margin-bottom:.5rem"></div>
-              <button class="btn-primary" onclick="saveAttendanceEdit()">Set Attendance</button>
+              <div
+                id="attEditMsg"
+                class="msg"
+                style="margin-bottom: 0.5rem"
+              ></div>
+              <button class="btn-primary" onclick="saveAttendanceEdit()">
+                Set Attendance
+              </button>
             </div>
           </div>
           <!-- Activity Log tab -->
-          <div id="mtab-actlog" style="display:none">
-            <div id="actLogList" style="max-height:320px;overflow-y:auto">
+          <div id="mtab-actlog" style="display: none">
+            <div id="actLogList" style="max-height: 320px; overflow-y: auto">
               <p class="muted">Loading…</p>
             </div>
           </div>
         </div>
         <!-- Footer -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:1rem 1.5rem;border-top:1px solid var(--border)">
-          <button class="btn-danger" onclick="confirmDeleteStudent()">Delete Student</button>
-          <div style="display:flex;gap:.5rem">
-            <button class="btn-secondary" onclick="_closeEditModal()">Cancel</button>
-            <button class="btn-primary" onclick="saveStudentEdit()">Save Changes</button>
+        <div
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-top: 1px solid var(--border);
+          "
+        >
+          <button class="btn-danger" onclick="confirmDeleteStudent()">
+            Delete Student
+          </button>
+          <div style="display: flex; gap: 0.5rem">
+            <button class="btn-secondary" onclick="_closeEditModal()">
+              Cancel
+            </button>
+            <button class="btn-primary" onclick="saveStudentEdit()">
+              Save Changes
+            </button>
           </div>
         </div>
       </div>
@@ -2453,7 +3683,7 @@
 
     <!-- Timetable Assign Slot Modal -->
     <div class="modal-overlay" id="timetableModal">
-      <div class="modal-box" style="width:480px">
+      <div class="modal-box" style="width: 480px">
         <div class="modal-title">Assign Timetable Slot</div>
         <div class="modal-form-grid">
           <div class="form-group">
@@ -2466,19 +3696,26 @@
             <label>Semester *</label>
             <select id="ttmSemester" onchange="ttmLoadSubjects()">
               <option value="">Select semester</option>
-              <option value="1">Semester 1</option><option value="2">Semester 2</option>
-              <option value="3">Semester 3</option><option value="4">Semester 4</option>
-              <option value="5">Semester 5</option><option value="6">Semester 6</option>
-              <option value="7">Semester 7</option><option value="8">Semester 8</option>
+              <option value="1">Semester 1</option>
+              <option value="2">Semester 2</option>
+              <option value="3">Semester 3</option>
+              <option value="4">Semester 4</option>
+              <option value="5">Semester 5</option>
+              <option value="6">Semester 6</option>
+              <option value="7">Semester 7</option>
+              <option value="8">Semester 8</option>
             </select>
           </div>
           <div class="form-group">
             <label>Day *</label>
             <select id="ttmDay">
               <option value="">Select day</option>
-              <option value="Sun">Sunday</option><option value="Mon">Monday</option>
-              <option value="Tue">Tuesday</option><option value="Wed">Wednesday</option>
-              <option value="Thu">Thursday</option><option value="Fri">Friday</option>
+              <option value="Sun">Sunday</option>
+              <option value="Mon">Monday</option>
+              <option value="Tue">Tuesday</option>
+              <option value="Wed">Wednesday</option>
+              <option value="Thu">Thursday</option>
+              <option value="Fri">Friday</option>
             </select>
           </div>
           <div class="form-group">
@@ -2500,56 +3737,102 @@
             </select>
           </div>
         </div>
-        <div id="ttmConflict" class="msg err" style="margin:0.5rem 0"></div>
-        <button class="btn-secondary btn-sm" style="margin-bottom:0.5rem" onclick="checkTimetableConflict()">Check Availability</button>
+        <div id="ttmConflict" class="msg err" style="margin: 0.5rem 0"></div>
+        <button
+          class="btn-secondary btn-sm"
+          style="margin-bottom: 0.5rem"
+          onclick="checkTimetableConflict()"
+        >
+          Check Availability
+        </button>
         <div id="ttmErr" class="msg err"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('timetableModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveTimetableEntry()">Save Entry</button>
+          <button class="btn-secondary" onclick="closeModal('timetableModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveTimetableEntry()">
+            Save Entry
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Attendance Session Start Modal -->
     <div class="modal-overlay" id="sessionStartModal">
-      <div class="modal-box" style="width:420px">
-        <div class="modal-title" id="sessionStartTitle">Start Attendance Session</div>
+      <div class="modal-box" style="width: 420px">
+        <div class="modal-title" id="sessionStartTitle">
+          Start Attendance Session
+        </div>
         <div class="form-group">
           <label>Subject</label>
-          <div id="sessionSubjectDisplay" class="text-13px text-secondary p-0-5rem bg-bg2 border-radius-6px"></div>
-          <input type="hidden" id="sessionSubjectId">
-          <input type="hidden" id="sessionFacultyId">
-          <input type="hidden" id="sessionSemester">
-          <input type="hidden" id="sessionDayOfWeek">
-          <input type="hidden" id="sessionTimeSlotId">
+          <div
+            id="sessionSubjectDisplay"
+            class="text-13px text-secondary p-0-5rem bg-bg2 border-radius-6px"
+          ></div>
+          <input type="hidden" id="sessionSubjectId" />
+          <input type="hidden" id="sessionFacultyId" />
+          <input type="hidden" id="sessionSemester" />
+          <input type="hidden" id="sessionDayOfWeek" />
+          <input type="hidden" id="sessionTimeSlotId" />
         </div>
         <div class="form-group">
           <label>Date</label>
-          <input type="date" id="sessionDate">
+          <input type="date" id="sessionDate" />
         </div>
         <div class="form-group">
           <label>Attendance Method</label>
           <div class="att-method-grid">
             <label class="att-method-option">
-              <input type="radio" name="sessionMethod" value="manual" checked>
+              <input type="radio" name="sessionMethod" value="manual" checked />
               <div class="att-method-card">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="3" y="4" width="18" height="18" rx="2" />
+                  <path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4" />
+                </svg>
                 <span>Manual</span>
                 <small>Mark each student</small>
               </div>
             </label>
             <label class="att-method-option">
-              <input type="radio" name="sessionMethod" value="camera">
+              <input type="radio" name="sessionMethod" value="camera" />
               <div class="att-method-card">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path d="M23 7l-7 5 7 5V7z" />
+                  <rect x="1" y="5" width="15" height="14" rx="2" />
+                </svg>
                 <span>Live Camera</span>
                 <small>Auto face scan</small>
               </div>
             </label>
             <label class="att-method-option">
-              <input type="radio" name="sessionMethod" value="photo">
+              <input type="radio" name="sessionMethod" value="photo" />
               <div class="att-method-card">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <polyline points="21,15 16,10 5,21" />
+                </svg>
                 <span>Photo</span>
                 <small>Classroom photo</small>
               </div>
@@ -2558,147 +3841,289 @@
         </div>
         <div id="sessionStartErr" class="msg err"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('sessionStartModal')">Cancel</button>
-          <button class="btn-primary" onclick="confirmStartSession()">Start Session</button>
+          <button
+            class="btn-secondary"
+            onclick="closeModal('sessionStartModal')"
+          >
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="confirmStartSession()">
+            Start Session
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Import Students Modal -->
     <div class="modal-overlay" id="importStudentsModal">
-      <div class="modal-box" style="width:500px">
+      <div class="modal-box" style="width: 500px">
         <div class="modal-title">Import Students from CSV</div>
-        <p class="text-13px text-secondary" style="margin-bottom:1rem">
-          CSV columns: <code>student_id, full_name, email, phone, department, faculty_id, semester, status</code><br>
-          Existing students (matched by student_id) will be updated, not duplicated.
+        <p class="text-13px text-secondary" style="margin-bottom: 1rem">
+          CSV columns:
+          <code
+            >student_id, full_name, email, phone, department, faculty_id,
+            semester, status</code
+          ><br />
+          Existing students (matched by student_id) will be updated, not
+          duplicated.
         </p>
         <div class="form-group">
           <label>CSV File</label>
-          <input type="file" id="importCsvFile" accept=".csv" class="input-sm" style="width:100%">
+          <input
+            type="file"
+            id="importCsvFile"
+            accept=".csv"
+            class="input-sm"
+            style="width: 100%"
+          />
         </div>
-        <div id="importProgress" style="display:none">
-          <div class="text-13px text-secondary" id="importProgressMsg">Uploading…</div>
+        <div id="importProgress" style="display: none">
+          <div class="text-13px text-secondary" id="importProgressMsg">
+            Uploading…
+          </div>
         </div>
-        <div id="importResult" style="display:none;margin-top:0.75rem"></div>
-        <div id="importErr" class="msg err" style="margin-top:0.5rem"></div>
+        <div id="importResult" style="display: none; margin-top: 0.75rem"></div>
+        <div id="importErr" class="msg err" style="margin-top: 0.5rem"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('importStudentsModal')">Close</button>
-          <button class="btn-primary" onclick="submitStudentImport()">Import</button>
+          <button
+            class="btn-secondary"
+            onclick="closeModal('importStudentsModal')"
+          >
+            Close
+          </button>
+          <button class="btn-primary" onclick="submitStudentImport()">
+            Import
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Academic Year Modal -->
     <div class="modal-overlay" id="academicYearModal">
-      <div class="modal-box" style="width:460px">
+      <div class="modal-box" style="width: 460px">
         <div class="modal-title" id="acYearTitle">Add Academic Year</div>
-        <input type="hidden" id="acYearId">
+        <input type="hidden" id="acYearId" />
         <div class="form-group">
           <label>Academic Year Name *</label>
-          <input type="text" id="acYearName" class="input-sm" style="width:100%" placeholder="e.g. 2025-26 or 2025/2026">
+          <input
+            type="text"
+            id="acYearName"
+            class="input-sm"
+            style="width: 100%"
+            placeholder="e.g. 2025-26 or 2025/2026"
+          />
         </div>
-        <div class="form-row" style="gap:0.75rem">
-          <div class="form-group" style="flex:1">
+        <div class="form-row" style="gap: 0.75rem">
+          <div class="form-group" style="flex: 1">
             <label>Start Date *</label>
-            <input type="date" id="acYearStart" class="input-sm" style="width:100%">
+            <input
+              type="date"
+              id="acYearStart"
+              class="input-sm"
+              style="width: 100%"
+            />
           </div>
-          <div class="form-group" style="flex:1">
+          <div class="form-group" style="flex: 1">
             <label>End Date *</label>
-            <input type="date" id="acYearEnd" class="input-sm" style="width:100%">
+            <input
+              type="date"
+              id="acYearEnd"
+              class="input-sm"
+              style="width: 100%"
+            />
           </div>
         </div>
         <div class="form-group">
-          <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
-            <input type="checkbox" id="acYearCurrent" style="width:16px;height:16px">
+          <label
+            style="
+              display: flex;
+              align-items: center;
+              gap: 0.5rem;
+              cursor: pointer;
+            "
+          >
+            <input
+              type="checkbox"
+              id="acYearCurrent"
+              style="width: 16px; height: 16px"
+            />
             <span>Mark as the <strong>current</strong> academic year</span>
           </label>
-          <p class="text-12px text-secondary" style="margin:0.25rem 0 0 1.5rem">
+          <p
+            class="text-12px text-secondary"
+            style="margin: 0.25rem 0 0 1.5rem"
+          >
             Marking as current will unmark any previously current year.
           </p>
         </div>
         <div id="acYearErr" class="msg err"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('academicYearModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveAcademicYear()">Save Academic Year</button>
+          <button
+            class="btn-secondary"
+            onclick="closeModal('academicYearModal')"
+          >
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveAcademicYear()">
+            Save Academic Year
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Holiday Modal -->
     <div class="modal-overlay" id="holidayModal">
-      <div class="modal-box" style="width:440px">
+      <div class="modal-box" style="width: 440px">
         <div class="modal-title">Add Holiday</div>
         <div class="form-group">
           <label>Holiday Name *</label>
-          <input type="text" id="holName" class="input-sm" style="width:100%" placeholder="e.g. Dashain Holiday">
+          <input
+            type="text"
+            id="holName"
+            class="input-sm"
+            style="width: 100%"
+            placeholder="e.g. Dashain Holiday"
+          />
         </div>
-        <div class="form-row" style="gap:0.75rem">
-          <div class="form-group" style="flex:1">
+        <div class="form-row" style="gap: 0.75rem">
+          <div class="form-group" style="flex: 1">
             <label>From Date *</label>
-            <input type="date" id="holFromDate" class="input-sm" style="width:100%" oninput="_holDateHint()">
+            <input
+              type="date"
+              id="holFromDate"
+              class="input-sm"
+              style="width: 100%"
+              oninput="_holDateHint()"
+            />
           </div>
-          <div class="form-group" style="flex:1">
+          <div class="form-group" style="flex: 1">
             <label>To Date </label>
-            <input type="date" id="holToDate" class="input-sm" style="width:100%" oninput="_holDateHint()">
+            <input
+              type="date"
+              id="holToDate"
+              class="input-sm"
+              style="width: 100%"
+              oninput="_holDateHint()"
+            />
           </div>
         </div>
-        <div id="holDateHint" class="text-12px text-secondary" style="margin-top:-0.25rem;margin-bottom:0.5rem"></div>
+        <div
+          id="holDateHint"
+          class="text-12px text-secondary"
+          style="margin-top: -0.25rem; margin-bottom: 0.5rem"
+        ></div>
         <div class="form-group">
           <label>Academic Year (optional)</label>
-          <select id="holYearSelect" class="input-sm" style="width:100%"><option value="">— None —</option></select>
+          <select id="holYearSelect" class="input-sm" style="width: 100%">
+            <option value="">— None —</option>
+          </select>
         </div>
         <div id="holErr" class="msg err"></div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('holidayModal')">Cancel</button>
-          <button class="btn-primary" onclick="saveHoliday()">Save Holiday</button>
+          <button class="btn-secondary" onclick="closeModal('holidayModal')">
+            Cancel
+          </button>
+          <button class="btn-primary" onclick="saveHoliday()">
+            Save Holiday
+          </button>
         </div>
       </div>
     </div>
 
     <!-- Student Correction Request Modal -->
     <div class="modal-overlay" id="studentCorrectionModal">
-      <div class="modal-box" style="width:440px">
+      <div class="modal-box" style="width: 440px">
         <div class="modal-title">Request Attendance Correction</div>
-        <p class="text-13px text-secondary" style="margin-bottom:1rem">
-          Submit a request if you were present but marked absent. Your teacher will review it.
+        <p class="text-13px text-secondary" style="margin-bottom: 1rem">
+          Submit a request if you were present but marked absent. Your teacher
+          will review it.
         </p>
         <div class="form-row">
-          <div class="form-group" style="flex:1">
+          <div class="form-group" style="flex: 1">
             <label>Date</label>
-            <input type="date" id="corrDate" class="input-sm" style="width:100%">
+            <input
+              type="date"
+              id="corrDate"
+              class="input-sm"
+              style="width: 100%"
+            />
           </div>
-          <div class="form-group" style="flex:1">
+          <div class="form-group" style="flex: 1">
             <label>Subject (optional)</label>
-            <select id="corrSubject" class="input-sm" style="width:100%"><option value="">— Select —</option></select>
+            <select id="corrSubject" class="input-sm" style="width: 100%">
+              <option value="">— Select —</option>
+            </select>
           </div>
         </div>
         <div class="form-group">
           <label>Reason</label>
-          <textarea id="corrReason" class="input-sm" rows="3" style="width:100%;resize:vertical" placeholder="Explain why you believe attendance should be corrected…"></textarea>
+          <textarea
+            id="corrReason"
+            class="input-sm"
+            rows="3"
+            style="width: 100%; resize: vertical"
+            placeholder="Explain why you believe attendance should be corrected…"
+          ></textarea>
         </div>
         <div id="corrErr" class="msg err"></div>
-        <div id="corrSuccess" class="msg ok" style="display:none">Request submitted successfully.</div>
+        <div id="corrSuccess" class="msg ok" style="display: none">
+          Request submitted successfully.
+        </div>
         <div class="modal-footer">
-          <button class="btn-secondary" onclick="closeModal('studentCorrectionModal')">Close</button>
-          <button class="btn-primary" onclick="submitCorrectionRequest()">Submit Request</button>
+          <button
+            class="btn-secondary"
+            onclick="closeModal('studentCorrectionModal')"
+          >
+            Close
+          </button>
+          <button class="btn-primary" onclick="submitCorrectionRequest()">
+            Submit Request
+          </button>
         </div>
       </div>
     </div>
 
     <!-- QR Code Display Modal -->
     <div class="modal-overlay" id="qrModal">
-      <div class="modal-box" style="width:380px;text-align:center">
+      <div class="modal-box" style="width: 380px; text-align: center">
         <div class="modal-title">Session QR Code</div>
-        <p class="text-13px text-secondary" style="margin-bottom:0.75rem">
-          Students scan this code to mark themselves present. Code refreshes every <span id="qrExpirySec">90</span>s.
+        <p class="text-13px text-secondary" style="margin-bottom: 0.75rem">
+          Students scan this code to mark themselves present. Code refreshes
+          every <span id="qrExpirySec">90</span>s.
         </p>
-        <div id="qrCanvas" style="margin:0 auto 1rem;width:220px;height:220px;background:#fff;display:flex;align-items:center;justify-content:center;border-radius:8px;padding:12px">
+        <div
+          id="qrCanvas"
+          style="
+            margin: 0 auto 1rem;
+            width: 220px;
+            height: 220px;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            padding: 12px;
+          "
+        >
           <div class="text-muted text-13px">Generating…</div>
         </div>
-        <div id="qrExpiryBar" style="height:4px;background:var(--accent);border-radius:2px;transition:width 1s linear;margin-bottom:0.75rem"></div>
-        <div id="qrCountdown" class="text-13px text-secondary" style="margin-bottom:1rem"></div>
+        <div
+          id="qrExpiryBar"
+          style="
+            height: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 1s linear;
+            margin-bottom: 0.75rem;
+          "
+        ></div>
+        <div
+          id="qrCountdown"
+          class="text-13px text-secondary"
+          style="margin-bottom: 1rem"
+        ></div>
         <button class="btn-secondary" onclick="refreshQR()">Refresh Now</button>
-        <div class="modal-footer" style="margin-top:1rem">
+        <div class="modal-footer" style="margin-top: 1rem">
           <button class="btn-secondary" onclick="closeQRModal()">Close</button>
         </div>
       </div>
