@@ -4006,7 +4006,7 @@ async function openEditAssignment(aid) {
     current.subject_id,
   );
   const dayOpts = sel(
-    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => ({ v: d, l: d })),
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"].map((d) => ({ v: d, l: d })),
     current.day_of_week,
   );
   const slotOpts = sel(
@@ -4336,7 +4336,7 @@ async function loadTeacherDashboard() {
     // Weekly schedule
     const weekEl = document.getElementById("tWeeklySchedule");
     if (weekEl && schedData) {
-      const days = schedData.days || ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const days = schedData.days || ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
       const sched = schedData.schedule || {};
       const otherSlots = sched["Other"] || [];
       const slotHtml = (cls) => `
@@ -4434,9 +4434,9 @@ async function _loadAssignedClasses() {
       )
       .join("");
 
-    // Timetable view (Mon–Sat grid)
+    // Timetable view (Sun–Fri grid)
     if (tableEl) {
-      const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
       const grouped = {};
       days.forEach((d) => (grouped[d] = []));
       const unscheduled = [];
@@ -5125,14 +5125,14 @@ async function loadSPTimetable() {
       return;
     }
 
-    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
     const dayLabels = {
+      Sun: "Sunday",
       Mon: "Monday",
       Tue: "Tuesday",
       Wed: "Wednesday",
       Thu: "Thursday",
       Fri: "Friday",
-      Sat: "Saturday",
     };
     const lookup = {};
     entries.forEach((e) => {
@@ -5617,7 +5617,7 @@ async function loadTimetable() {
 function _renderTimetableGrid(facId, sem) {
   const grid = document.getElementById("timetableGrid");
   if (!grid) return;
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
 
   // Build lookup: day+slotId → entry
   const lookup = {};
@@ -5626,12 +5626,12 @@ function _renderTimetableGrid(facId, sem) {
   });
 
   const dayLabels = {
+    Sun: "Sunday",
     Mon: "Monday",
     Tue: "Tuesday",
     Wed: "Wednesday",
     Thu: "Thursday",
     Fri: "Friday",
-    Sat: "Saturday",
   };
 
   grid.innerHTML = `
