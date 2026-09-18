@@ -75,14 +75,27 @@ def qexec(conn, sql, p=()):
     with conn.cursor() as c:
         c.execute(sql, p); return c.rowcount
 
-def total_attendance_days(conn, dept=None):
+def total_attendance_days(conn, dept=None, faculty_id=None, semester=None):
+    filters = []
+    params = []
+
     if dept:
-        row = qone(conn, """
+        filters.append("s.department = %s")
+        params.append(dept)
+    if faculty_id:
+        filters.append("s.faculty_id = %s")
+        params.append(int(faculty_id))
+    if semester:
+        filters.append("s.semester::text = %s")
+        params.append(str(semester))
+
+    if filters:
+        sql = """
             SELECT COUNT(DISTINCT a.date) AS total_days
             FROM attendance a
             JOIN students s ON s.student_id = a.student_id
-            WHERE s.department = %s
-        """, (dept,))
+            WHERE """ + " AND ".join(filters)
+        row = qone(conn, sql, tuple(params))
     else:
         row = qone(conn, "SELECT COUNT(DISTINCT date) AS total_days FROM attendance")
     return int(row["total_days"] or 0) if row else 0
@@ -1093,6 +1106,7 @@ def student_login():
 def list_students():
     q    = request.args.get("q","").strip()
     dept = request.args.get("department","").strip()
+    faculty_id = request.args.get("faculty_id", "").strip()
     sem  = request.args.get("semester","").strip()
     stat = request.args.get("status","").strip()
     sql  = """SELECT student_id, full_name, department, email, phone,
@@ -1103,6 +1117,7 @@ def list_students():
         where.append("(full_name ILIKE %s OR student_id ILIKE %s)")
         params += [f"%{q}%", f"%{q}%"]
     if dept: where.append("department=%s"); params.append(dept)
+    if faculty_id: where.append("faculty_id=%s"); params.append(int(faculty_id))
     if sem:  where.append("semester=%s");   params.append(sem)
     if stat: where.append("status=%s");     params.append(stat)
     if where: sql += " WHERE " + " AND ".join(where)
@@ -1690,6 +1705,8 @@ def sse_events():
 def get_attendance():
     target = request.args.get("date", date.today().isoformat())
     dept   = request.args.get("department","").strip()
+    faculty_id = request.args.get("faculty_id", "").strip()
+    semester = request.args.get("semester", "").strip()
     sql = """
         SELECT s.student_id, s.full_name, s.department,
                a.date::text, a.time::text, a.status, a.note
@@ -1698,7 +1715,18 @@ def get_attendance():
                ON  a.student_id = s.student_id AND a.date = %s
     """
     params = [target]
-    if dept: sql += " WHERE s.department=%s"; params.append(dept)
+    filters = []
+    if dept:
+        filters.append("s.department=%s")
+        params.append(dept)
+    if faculty_id:
+        filters.append("s.faculty_id=%s")
+        params.append(int(faculty_id))
+    if semester:
+        filters.append("s.semester::text=%s")
+        params.append(str(semester))
+    if filters:
+        sql += " WHERE " + " AND ".join(filters)
     sql += " ORDER BY s.full_name"
     with get_db() as conn:
         rows = qall(conn, sql, params)
@@ -1749,31 +1777,51 @@ def faculty_summary():
 @app.route("/api/attendance/history")
 @require_auth
 def attendance_history():
-    dept = request.args.get("department","").strip()
+    dept = request.args.get("department", "").strip()
+    faculty_id = request.args.get("faculty_id", "").strip()
+    semester = request.args.get("semester", "").strip()
     with get_db() as conn:
+        where = []
+        params = []
         if dept:
-            rows  = qall(conn, """
+            where.append("s.department=%s")
+            params.append(dept)
+        if faculty_id:
+            where.append("s.faculty_id=%s")
+            params.append(int(faculty_id))
+        if semester:
+            where.append("s.semester::text=%s")
+            params.append(str(semester))
+
+        if where:
+            rows = qall(conn, f"""
                 SELECT a.date::text,
                        COUNT(*) FILTER(WHERE a.status='Present') AS present
-                FROM   attendance a JOIN students s ON s.student_id=a.student_id
-                WHERE  s.department=%s GROUP BY a.date ORDER BY a.date DESC LIMIT 30
-            """, (dept,))
-            total = qone(conn,"SELECT COUNT(*) AS n FROM students WHERE department=%s",(dept,))["n"]
+                FROM attendance a
+                JOIN students s ON s.student_id=a.student_id
+                WHERE {' AND '.join(where)}
+                GROUP BY a.date
+                ORDER BY a.date DESC LIMIT 30
+            """, params)
+            total = qone(conn, f"""
+                SELECT COUNT(*) AS n FROM students s WHERE {' AND '.join(where)}
+            """, params)["n"]
         else:
-            rows  = qall(conn,"""
+            rows = qall(conn, """
                 SELECT date::text, COUNT(*) FILTER(WHERE status='Present') AS present
                 FROM attendance GROUP BY date ORDER BY date DESC LIMIT 30
             """)
-            total = qone(conn,"SELECT COUNT(*) AS n FROM students")["n"]
-    return jsonify({"history":[{"date":r["date"],"present":r["present"],
-                                "absent":max(0,total-r["present"])} for r in rows]})
+            total = qone(conn, "SELECT COUNT(*) AS n FROM students")["n"]
+    return jsonify({"history": [{"date": r["date"], "present": r["present"], "absent": max(0, total - r["present"])} for r in rows]})
 
 @app.route("/api/attendance/stats")
 @require_auth
 def attendance_stats():
-    dept = request.args.get("department","").strip()
+    dept = request.args.get("department", "").strip()
+    faculty_id = request.args.get("faculty_id", "").strip()
+    semester = request.args.get("semester", "").strip()
     with get_db() as conn:
-        total_days = total_attendance_days(conn, dept or None)
+        total_days = total_attendance_days(conn, dept or None, faculty_id or None, semester or None)
         sql = """
             SELECT s.student_id, s.full_name, s.department,
                    COUNT(a.id) FILTER(WHERE a.status='Present') AS present_days,
@@ -1783,7 +1831,18 @@ def attendance_stats():
             FROM students s LEFT JOIN attendance a ON a.student_id=s.student_id
         """
         params = [total_days, total_days]
-        if dept: sql += " WHERE s.department=%s"; params.append(dept)
+        filters = []
+        if dept:
+            filters.append("s.department=%s")
+            params.append(dept)
+        if faculty_id:
+            filters.append("s.faculty_id=%s")
+            params.append(int(faculty_id))
+        if semester:
+            filters.append("s.semester::text=%s")
+            params.append(str(semester))
+        if filters:
+            sql += " WHERE " + " AND ".join(filters)
         sql += " GROUP BY s.student_id,s.full_name,s.department ORDER BY pct DESC NULLS LAST"
         rows = qall(conn, sql, params)
     return jsonify({"stats": rows})
@@ -1793,7 +1852,9 @@ def attendance_stats():
 def export_csv():
     from_d = request.args.get("from", date.today().isoformat())
     to_d   = request.args.get("to",   date.today().isoformat())
-    dept   = request.args.get("department","").strip()
+    dept   = request.args.get("department", "").strip()
+    faculty_id = request.args.get("faculty_id", "").strip()
+    semester = request.args.get("semester", "").strip()
     with get_db() as conn:
         sql = """
             SELECT s.student_id,s.full_name,s.department,
@@ -1803,7 +1864,18 @@ def export_csv():
                 AND a.date BETWEEN %s AND %s
         """
         params = [from_d, to_d]
-        if dept: sql += " WHERE s.department=%s"; params.append(dept)
+        filters = []
+        if dept: 
+            filters.append("s.department=%s")
+            params.append(dept)
+        if faculty_id:
+            filters.append("s.faculty_id=%s")
+            params.append(int(faculty_id))
+        if semester:
+            filters.append("s.semester::text=%s")
+            params.append(str(semester))
+        if filters:
+            sql += " WHERE " + " AND ".join(filters)
         sql += " ORDER BY s.department, a.date, s.full_name"
         rows = qall(conn, sql, params)
     if dept:
