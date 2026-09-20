@@ -1098,6 +1098,20 @@
           <h1>Dashboard</h1>
           <div class="flex flex-center gap-0-75rem">
             <span id="dashDate" class="text-secondary text-13px"></span>
+            <select id="dashFaculty" class="input-sm w-160px" onchange="loadDashboard()">
+              <option value="">All Faculties</option>
+            </select>
+            <select id="dashSemester" class="input-sm w-150px" onchange="loadDashboard()">
+              <option value="">All Semesters</option>
+              <option value="1">Semester 1</option>
+              <option value="2">Semester 2</option>
+              <option value="3">Semester 3</option>
+              <option value="4">Semester 4</option>
+              <option value="5">Semester 5</option>
+              <option value="6">Semester 6</option>
+              <option value="7">Semester 7</option>
+              <option value="8">Semester 8</option>
+            </select>
             <select
               id="dashDeptFilter"
               class="input-sm w-160px"
@@ -1632,6 +1646,20 @@
               class="select-input"
               onchange="loadReports()"
             />
+            <select id="repFaculty" class="select-input" onchange="loadReports()">
+              <option value="">All Faculties</option>
+            </select>
+            <select id="repSemester" class="select-input" onchange="loadReports()">
+              <option value="">All Semesters</option>
+              <option value="1">Semester 1</option>
+              <option value="2">Semester 2</option>
+              <option value="3">Semester 3</option>
+              <option value="4">Semester 4</option>
+              <option value="5">Semester 5</option>
+              <option value="6">Semester 6</option>
+              <option value="7">Semester 7</option>
+              <option value="8">Semester 8</option>
+            </select>
             <select id="repDept" class="select-input" onchange="loadReports()">
               <option value="">All Departments</option>
             </select>
