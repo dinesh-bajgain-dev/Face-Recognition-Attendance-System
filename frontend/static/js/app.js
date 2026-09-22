@@ -467,7 +467,9 @@ async function loadDashboard() {
     const [att, hist, persons] = await Promise.all([
       api(`/attendance?${attParams}`).then((r) => r.json()),
       api(`/attendance/history?${histParams}`).then((r) => r.json()),
-      api(`/students${studentParams.toString() ? "?" + studentParams.toString() : ""}`).then((r) => r.json()),
+      api(
+        `/students${studentParams.toString() ? "?" + studentParams.toString() : ""}`,
+      ).then((r) => r.json()),
     ]);
     // Populate dept filter if empty
     const ddf = document.getElementById("dashDeptFilter");
