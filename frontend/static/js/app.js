@@ -446,15 +446,28 @@ function navigate(page) {
 ═══════════════════════════════════════════════════════════════════════ */
 async function loadDashboard() {
   try {
+    const facultyFilter = document.getElementById("dashFaculty")?.value || "";
+    const semesterFilter = document.getElementById("dashSemester")?.value || "";
     const deptFilter = document.getElementById("dashDeptFilter")?.value || "";
+    const attParams = new URLSearchParams({ date: todayStr() });
+    if (deptFilter) attParams.set("department", deptFilter);
+    if (facultyFilter) attParams.set("faculty_id", facultyFilter);
+    if (semesterFilter) attParams.set("semester", semesterFilter);
+
+    const histParams = new URLSearchParams();
+    if (deptFilter) histParams.set("department", deptFilter);
+    if (facultyFilter) histParams.set("faculty_id", facultyFilter);
+    if (semesterFilter) histParams.set("semester", semesterFilter);
+
+    const studentParams = new URLSearchParams();
+    if (deptFilter) studentParams.set("department", deptFilter);
+    if (facultyFilter) studentParams.set("faculty_id", facultyFilter);
+    if (semesterFilter) studentParams.set("semester", semesterFilter);
+
     const [att, hist, persons] = await Promise.all([
-      api(
-        `/attendance?date=${todayStr()}${deptFilter ? "&department=" + encodeURIComponent(deptFilter) : ""}`,
-      ).then((r) => r.json()),
-      api(`/attendance/history`).then((r) => r.json()),
-      api(
-        `/students${deptFilter ? "?department=" + encodeURIComponent(deptFilter) : ""}`,
-      ).then((r) => r.json()),
+      api(`/attendance?${attParams}`).then((r) => r.json()),
+      api(`/attendance/history?${histParams}`).then((r) => r.json()),
+      api(`/students${studentParams.toString() ? "?" + studentParams.toString() : ""}`).then((r) => r.json()),
     ]);
     // Populate dept filter if empty
     const ddf = document.getElementById("dashDeptFilter");
@@ -467,6 +480,20 @@ async function loadDashboard() {
           o.value = d;
           o.text = d;
           ddf.add(o);
+        });
+      } catch {}
+    }
+
+    const fdf = document.getElementById("dashFaculty");
+    if (fdf && fdf.options.length <= 1) {
+      try {
+        const fr = await api("/faculties");
+        const fd = await fr.json();
+        (fd.faculties || []).forEach((f) => {
+          const o = document.createElement("option");
+          o.value = f.id;
+          o.text = f.name;
+          fdf.add(o);
         });
       } catch {}
     }
@@ -1380,12 +1407,27 @@ async function loadReports() {
     .forEach((p) => p.classList.remove("active"));
   document.querySelector("#page-reports .sub-tab")?.classList.add("active");
   document.getElementById("rtab-overview")?.classList.add("active");
+
+  const faculty = document.getElementById("repFaculty")?.value || "";
+  const semester = document.getElementById("repSemester")?.value || "";
+  const department = document.getElementById("repDept")?.value || "";
+
   // Populate faculty filter (needed by Defaulter List tab)
   _populateFacultyDropdowns();
   try {
+    const statsParams = new URLSearchParams();
+    if (faculty) statsParams.set("faculty_id", faculty);
+    if (semester) statsParams.set("semester", semester);
+    if (department) statsParams.set("department", department);
+
+    const histParams = new URLSearchParams();
+    if (faculty) histParams.set("faculty_id", faculty);
+    if (semester) histParams.set("semester", semester);
+    if (department) histParams.set("department", department);
+
     const [stats, hist] = await Promise.all([
-      api("/attendance/stats").then((r) => r.json()),
-      api("/attendance/history").then((r) => r.json()),
+      api(`/attendance/stats?${statsParams}`).then((r) => r.json()),
+      api(`/attendance/history?${histParams}`).then((r) => r.json()),
     ]);
 
     const rows = stats.stats || [];
@@ -3341,8 +3383,10 @@ async function _populateFacultyDropdowns() {
   populate("tmFaculty"); // teacher modal — value = faculty id
   populate("smFaculty"); // subject modal — value = faculty id
   populate("eFaculty"); // enrollment — value = faculty id (backend resolves code for department)
+  populate("dashFaculty"); // admin dashboard — value = faculty id
   populate("defFaculty"); // defaulter list filter
   populate("ttFacultyFilter"); // timetable filter
+  populate("repFaculty"); // admin reports filter
 }
 
 async function loadSubjectsForModal() {
