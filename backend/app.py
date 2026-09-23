@@ -75,6 +75,34 @@ def qexec(conn, sql, p=()):
     with conn.cursor() as c:
         c.execute(sql, p); return c.rowcount
 
+def sync_teacher_assignments_from_timetable(conn, teacher_id=None):
+    """Backfill teacher assignments from timetable rows created by the admin."""
+    params = []
+    teacher_clause = ""
+    if teacher_id is not None:
+        teacher_clause = "AND cs.teacher_id=%s"
+        params.append(teacher_id)
+
+    qexec(conn, f"""
+        INSERT INTO teacher_assignments
+            (teacher_id, faculty_id, semester, subject_id, time_slot_id, day_of_week, is_primary)
+        SELECT cs.teacher_id, cs.faculty_id, cs.semester, cs.subject_id,
+               cs.time_slot_id, cs.day_of_week, false
+        FROM class_schedules cs
+        WHERE cs.teacher_id IS NOT NULL {teacher_clause}
+          AND NOT EXISTS (
+              SELECT 1
+              FROM teacher_assignments ta
+              WHERE ta.teacher_id = cs.teacher_id
+                AND ta.faculty_id = cs.faculty_id
+                AND ta.semester::text = cs.semester::text
+                AND ta.subject_id IS NOT DISTINCT FROM cs.subject_id
+                AND ta.time_slot_id IS NOT DISTINCT FROM cs.time_slot_id
+                AND ta.day_of_week IS NOT DISTINCT FROM cs.day_of_week
+          )
+              ON CONFLICT DO NOTHING
+    """, params)
+
 def total_attendance_days(conn, dept=None, faculty_id=None, semester=None):
     filters = []
     params = []
@@ -2152,6 +2180,7 @@ def delete_all_timeslots():
 @require_auth
 def list_teachers():
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn)
         rows = qall(conn, """
             SELECT t.id, t.teacher_id, t.full_name, t.email, t.phone, t.status,
                    COALESCE(
@@ -2186,6 +2215,7 @@ def list_teachers():
 @require_auth
 def get_teacher(tid):
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         t = qone(conn,
             "SELECT id, teacher_id, full_name, email, phone, status FROM teachers WHERE id=%s",
             (tid,))
@@ -2273,6 +2303,7 @@ def delete_teacher(tid):
 @require_auth
 def get_teacher_assignments(tid):
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         rows = qall(conn, """
             SELECT ta.id, ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
                    ta.semester, ta.subject_id, s.name AS subject_name, s.code AS subject_code,
@@ -2597,6 +2628,8 @@ def create_timetable_entry():
                 VALUES (%s,%s,%s,%s,%s,%s)
                 RETURNING id, faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id
             """, (faculty_id, semester, day_of_week, time_slot_id, teacher_id, subject_id))
+            if teacher_id:
+                sync_teacher_assignments_from_timetable(conn, teacher_id)
         except Exception as e:
             if "unique" in str(e).lower():
                 return jsonify({"error": "Timetable collision — slot already occupied"}), 409
@@ -2608,7 +2641,31 @@ def create_timetable_entry():
 @require_auth
 def delete_timetable_entry(entry_id):
     with get_db() as conn:
-        row = qone(conn, "DELETE FROM class_schedules WHERE id=%s RETURNING id", (entry_id,))
+        row = qone(conn, """
+            DELETE FROM class_schedules
+            WHERE id=%s
+            RETURNING id, teacher_id, faculty_id, semester, day_of_week, time_slot_id, subject_id
+        """, (entry_id,))
+        if row and row["teacher_id"]:
+            qexec(conn, """
+                DELETE FROM teacher_assignments ta
+                WHERE ta.teacher_id=%s
+                  AND ta.faculty_id=%s
+                  AND ta.semester::text=%s
+                  AND ta.subject_id IS NOT DISTINCT FROM %s
+                  AND ta.time_slot_id IS NOT DISTINCT FROM %s
+                  AND ta.day_of_week IS NOT DISTINCT FROM %s
+                  AND NOT EXISTS (
+                      SELECT 1 FROM class_schedules cs
+                      WHERE cs.teacher_id=ta.teacher_id
+                        AND cs.faculty_id=ta.faculty_id
+                        AND cs.semester::text=ta.semester::text
+                        AND cs.subject_id IS NOT DISTINCT FROM ta.subject_id
+                        AND cs.time_slot_id IS NOT DISTINCT FROM ta.time_slot_id
+                        AND cs.day_of_week IS NOT DISTINCT FROM ta.day_of_week
+                  )
+            """, (row["teacher_id"], row["faculty_id"], str(row["semester"]),
+                  row["subject_id"], row["time_slot_id"], row["day_of_week"]))
     if not row: return jsonify({"error": "Entry not found"}), 404
     _log_activity(g.user["username"], "delete_timetable", "schedule", target_id=str(entry_id))
     return jsonify({"deleted": True})
@@ -2624,6 +2681,7 @@ def teacher_me():
         return jsonify({"error": "Teacher access only"}), 403
     tid = _tid()
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         t = qone(conn,
             "SELECT id, teacher_id, full_name, email, phone, status FROM teachers WHERE id=%s", (tid,))
         if not t: return jsonify({"error": "Not found"}), 404
@@ -2658,6 +2716,7 @@ def teacher_today():
     today_str  = date.today().isoformat()
     tid        = _tid()
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         classes = qall(conn, """
             SELECT ta.id AS assignment_id,
                    ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
@@ -2694,6 +2753,7 @@ def teacher_schedule():
         return jsonify({"error": "Teacher access only"}), 403
     tid = _tid()
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         assignments = qall(conn, """
             SELECT ta.id AS assignment_id,
                    ta.faculty_id, f.name AS faculty_name, f.code AS faculty_code,
@@ -2726,6 +2786,7 @@ def teacher_stats():
         return jsonify({"error": "Teacher access only"}), 403
     tid = _tid()
     with get_db() as conn:
+        sync_teacher_assignments_from_timetable(conn, tid)
         total_sessions = qone(conn,
             "SELECT COUNT(*) AS n FROM attendance_sessions WHERE teacher_id=%s", (tid,))
         today_marked = qone(conn, """
