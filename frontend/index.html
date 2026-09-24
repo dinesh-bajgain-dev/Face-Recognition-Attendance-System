@@ -2406,9 +2406,34 @@
           <div class="text-muted text-center p-2rem text-13px">Loading…</div>
         </div>
 
-        <!-- My Assigned Classes -->
+        <!-- Tomorrow's classes -->
         <div class="dash-section-header mt-1rem">
-          <span class="dash-section-title">My Assigned Classes</span>
+          <span class="dash-section-title">Tomorrow's Classes</span>
+        </div>
+        <div id="tTomorrowClasses" class="teacher-assigned-list"></div>
+
+        <!-- All assigned classes -->
+        <div class="dash-section-header mt-1rem">
+          <span class="dash-section-title">All Classes</span>
+          <button
+            class="btn-secondary btn-sm assigned-toggle"
+            id="allClassesToggle"
+            onclick="toggleAllTeacherClasses()"
+            aria-expanded="false"
+          >
+            <span>Show all classes</span>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              aria-hidden="true"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
         </div>
         <div id="tAssignedCards" class="teacher-assigned-list"></div>
 
