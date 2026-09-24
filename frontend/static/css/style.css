@@ -4835,6 +4835,31 @@ select#tmSubject option[value=""]:first-child {
   flex: 0 0 auto;
 }
 
+.assigned-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.assigned-toggle svg {
+  transition: transform 0.2s ease;
+}
+
+.assigned-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.teacher-assigned-list.is-collapsed .teacher-assigned-row:nth-child(n + 3) {
+  display: none;
+}
+
+.teacher-assigned-empty {
+  color: var(--text3);
+  font-size: 12px;
+  padding: 0.8rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
 @media (max-width: 620px) {
   .teacher-assigned-row {
     align-items: flex-start;
