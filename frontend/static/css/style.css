@@ -4796,6 +4796,57 @@ select#tmSubject option[value=""]:first-child {
   margin-bottom: 1rem;
 }
 
+.teacher-assigned-list {
+  margin-bottom: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.teacher-assigned-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 52px;
+  padding: 0.65rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.teacher-assigned-info {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.teacher-assigned-subject {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.teacher-assigned-meta {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+
+.teacher-assigned-action {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 620px) {
+  .teacher-assigned-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  .teacher-assigned-action {
+    width: 100%;
+  }
+}
+
 .teacher-class-card {
   background: var(--bg2);
   border: 1px solid var(--border);
