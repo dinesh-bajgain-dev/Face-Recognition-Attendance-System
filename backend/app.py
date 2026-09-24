@@ -395,6 +395,17 @@ def init_db():
                 c.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS notifications_read_at TIMESTAMPTZ")
             except Exception:
                 pass
+        # Admin session tokens — proper tokens instead of password_hash as token
+        with conn.cursor() as c:
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS admin_sessions (
+                    token      TEXT PRIMARY KEY,
+                    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+                );
+                CREATE INDEX IF NOT EXISTS idx_admin_sessions_user ON admin_sessions(user_id);
+            """)
     finally:
         conn.close()
 
@@ -994,12 +1005,20 @@ def require_auth(fn):
             """, (token,))
             user = teacher_session
             if not user:
-                user = qone(conn,
-                    "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
-                # Password hashes are not valid teacher session tokens. This
-                # prevents shared passwords from selecting the wrong teacher.
-                if user and user.get("role") == "teacher":
-                    user = None
+                # Admin/user session token lookup (no longer uses password_hash as token)
+                admin_sess = qone(conn, """
+                    SELECT u.id, u.username, u.role
+                    FROM admin_sessions a
+                    JOIN users u ON u.id = a.user_id
+                    WHERE a.token=%s AND a.expires_at > NOW()
+                """, (token,))
+                user = admin_sess
+            if not user:
+                # Legacy fallback: old clients that still carry password_hash as token
+                legacy = qone(conn,
+                    "SELECT id,username,role FROM users WHERE password_hash=%s AND role!='teacher'",
+                    (token,))
+                user = legacy
             if not user:
                 # Student session token — check sessions table
                 sess = qone(conn,
@@ -1076,10 +1095,15 @@ def login():
     # Admin / user login — checked against the users table by username
     with get_db() as conn:
         user = qone(conn,
-            "SELECT id,username,role,password_hash FROM users WHERE username=%s AND password_hash=%s",
+            "SELECT id,username,role FROM users WHERE username=%s AND password_hash=%s",
             (username, _hash(password)))
-    if not user: return jsonify({"error": "Invalid credentials"}), 401
-    return jsonify({"token": user["password_hash"], "role": user["role"], "username": user["username"]})
+        if not user: return jsonify({"error": "Invalid credentials"}), 401
+        token = secrets.token_urlsafe(32)
+        qexec(conn, """
+            INSERT INTO admin_sessions (token, user_id)
+            VALUES (%s, %s)
+        """, (token, user["id"]))
+    return jsonify({"token": token, "role": user["role"], "username": user["username"]})
 
 @app.route("/api/auth/me")
 @require_auth
@@ -1109,6 +1133,8 @@ def change_password():
             if not user: return jsonify({"error":"Current password is incorrect"}), 401
             qexec(conn, "UPDATE users SET password_hash=%s WHERE id=%s",
                   (_hash(new_pw), g.user["id"]))
+            # Invalidate all existing admin sessions so stale tokens stop working
+            qexec(conn, "DELETE FROM admin_sessions WHERE user_id=%s", (g.user["id"],))
     _log_activity(g.user.get("username","?"), "change_password", "user", str(g.user["id"]))
     return jsonify({"updated": True})
 
