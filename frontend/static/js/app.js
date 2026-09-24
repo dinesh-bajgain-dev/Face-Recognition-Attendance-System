@@ -45,7 +45,13 @@ window.onload = () => {
 };
 
 /* ── Utilities ───────────────────────────────────────────────────────── */
-const todayStr = () => new Date().toISOString().split("T")[0];
+const todayStr = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 function updateClock() {
   const el = document.getElementById("clockDisplay");
@@ -4418,104 +4424,44 @@ async function loadTeacherDashboard() {
           .join("")}
       </div>${otherHtml}`;
     }
-
-    // Tomorrow and all classes use the same full schedule response.
-    _renderTomorrowClasses(schedData);
-    _loadAssignedClasses(schedData);
   } catch (e) {
     console.error("loadTeacherDashboard:", e);
   }
 }
 
-function _renderAssignedRow(a) {
-  return `<div class="teacher-assigned-row">
-    <div class="teacher-assigned-info">
-      <span class="teacher-assigned-subject">${escapeHtml(a.subject_name || "—")}</span>
-      <span class="teacher-assigned-meta">${escapeHtml(a.faculty_code || a.faculty_name || "")} · Sem ${a.semester}</span>
-      ${a.day_of_week || a.time_slot_label ? `<span class="teacher-assigned-meta">${a.day_of_week ? escapeHtml(a.day_of_week) : ""}${a.day_of_week && a.time_slot_label ? " · " : ""}${escapeHtml(a.time_slot_label || "")}</span>` : ""}
-      ${a.student_count != null ? `<span class="teacher-assigned-meta">${a.student_count} students</span>` : ""}
-    </div>
-    <div class="teacher-assigned-action">
-      <button class="btn-primary btn-sm" onclick="openSessionModal(${a.assignment_id || a.id})">Start Attendance</button>
-    </div>
-  </div>`;
-}
-
-function _renderCompactClassList(element, classes, emptyText) {
-  if (!element) return;
-  element.innerHTML = classes.length
-    ? classes.map(_renderAssignedRow).join("")
-    : `<div class="teacher-assigned-empty">${emptyText}</div>`;
-}
-
-function _tomorrowDay() {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  return tomorrow.toLocaleDateString("en-US", { weekday: "short" });
-}
-
-function _renderTomorrowClasses(schedData) {
-  const tomorrowEl = document.getElementById("tTomorrowClasses");
-  if (!tomorrowEl) return;
-  const tomorrow = _tomorrowDay();
-  const classes = (schedData?.schedule || {})[tomorrow] || [];
-  _renderCompactClassList(
-    tomorrowEl,
-    classes,
-    `No classes scheduled for ${tomorrow}.`,
-  );
-}
-
-async function _loadAssignedClasses(schedData) {
-  const cardEl = document.getElementById("tAssignedCards");
-  if (!cardEl) return;
-  cardEl.classList.add("is-collapsed");
-  cardEl.innerHTML = `<div class="text-muted text-center p-1rem text-13px">Loading…</div>`;
-
-  try {
-    let assignments = schedData?.all || [];
-    if (!assignments.length) {
-      const r = await api("/teacher/me");
-      if (!r?.ok) return;
-      const data = await r.json();
-      assignments = data.teacher?.assignments || data.assignments || [];
-    }
-
-    if (!assignments.length) {
-      cardEl.innerHTML = `<div class="teacher-assigned-empty">No classes assigned yet.</div>`;
-      return;
-    }
-
-    cardEl.innerHTML = assignments.map(_renderAssignedRow).join("");
-  } catch (e) {
-    console.error("_loadAssignedClasses:", e);
-    if (cardEl)
-      cardEl.innerHTML = `<div class="text-muted text-13px p-1rem">Failed to load assignments</div>`;
-  }
-}
-
-function toggleAllTeacherClasses() {
-  const list = document.getElementById("tAssignedCards");
-  const toggle = document.getElementById("allClassesToggle");
-  if (!list || !toggle) return;
-  const expanded = toggle.getAttribute("aria-expanded") === "true";
-  toggle.setAttribute("aria-expanded", String(!expanded));
-  toggle.querySelector("span").textContent = expanded
-    ? "Show all classes"
-    : "Hide classes";
-  list.classList.toggle("is-collapsed", expanded);
+function _isCurrentClass(cls, now = new Date()) {
+  if (!cls?.start_time || !cls?.end_time) return false;
+  const today = now.toLocaleDateString("en-US", { weekday: "short" });
+  if (cls.day_of_week && cls.day_of_week !== today) return false;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const start = String(cls.start_time).slice(0, 5).split(":");
+  const end = String(cls.end_time).slice(0, 5).split(":");
+  const startMinutes = Number(start[0]) * 60 + Number(start[1]);
+  const endMinutes = Number(end[0]) * 60 + Number(end[1]);
+  return currentMinutes >= startMinutes && currentMinutes < endMinutes;
 }
 
 function _renderClassCard(cls) {
   const sess = cls.session;
   const sessStatus = sess ? sess.status : null;
   const markedCount = sess ? sess.marked_count || 0 : 0;
+  const activeNow = _isCurrentClass(cls);
   const statusHtml =
     sessStatus === "open"
       ? `<span class="pill pill-amber">Session Open · ${markedCount} marked</span>`
       : sessStatus === "closed"
         ? `<span class="pill pill-green">Done · ${markedCount} marked</span>`
         : `<span class="pill" style="background:var(--bg3);color:var(--text3)">Not started</span>`;
+
+  const actionHtml =
+    !activeNow && sessStatus !== "closed"
+      ? `<button class="btn-secondary btn-sm" disabled>Not started</button>`
+      : sessStatus === "open"
+        ? `<button class="btn-primary btn-sm" onclick="continueSession(${sess.id}, '${escapeHtml(cls.subject_name || "")}')">Continue</button>
+         <button class="btn-secondary btn-sm" onclick="openQRModal(${sess.id})" title="Show QR code for students to scan">QR Code</button>`
+        : sessStatus === "closed"
+          ? `<button class="btn-secondary btn-sm" onclick="viewSessionReport(${sess.id})">View Report</button>`
+          : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.assignment_id || cls.id})">Start Attendance</button>`;
 
   return `<div class="teacher-class-card">
     <div class="tcc-header">
@@ -4534,14 +4480,7 @@ function _renderClassCard(cls) {
         : ""
     }
     <div class="tcc-actions">
-      ${
-        sessStatus === "open"
-          ? `<button class="btn-primary btn-sm" onclick="continueSession(${sess.id}, '${escapeHtml(cls.subject_name || "")}')">Continue</button>
-           <button class="btn-secondary btn-sm" onclick="openQRModal(${sess.id})" title="Show QR code for students to scan">QR Code</button>`
-          : sessStatus === "closed"
-            ? `<button class="btn-secondary btn-sm" onclick="viewSessionReport(${sess.id})">View Report</button>`
-            : `<button class="btn-primary btn-sm" onclick="openSessionModal(${cls.id || cls.assignment_id})">Start Attendance</button>`
-      }
+      ${actionHtml}
     </div>
   </div>`;
 }
@@ -4657,7 +4596,13 @@ async function doTeacherRecognize() {
   const b64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
 
   try {
-    const r = await api("/recognize", { method: "POST", json: { image: b64 } });
+    const r = await api("/recognize", {
+      method: "POST",
+      json: {
+        image: b64,
+        ...(_activeSession?.id ? { session_id: _activeSession.id } : {}),
+      },
+    });
     if (!r) return;
     const d = await r.json();
 
@@ -6871,13 +6816,15 @@ function _renderSheetPreview(d, els) {
     grid.innerHTML = `<div class="text-muted text-13px p-1rem">No students match these filters.</div>`;
     return;
   }
-  if (!d.totals.class_days) {
+  if (!d.totals.class_days && !(d.holidays || []).length) {
     grid.innerHTML = `<div class="text-muted text-13px p-1rem">No classes were held in ${escapeHtml(d.month_name)} ${d.year} for this selection.</div>`;
     return;
   }
 
   const days = Array.from({ length: d.days_in_month }, (_, i) => i + 1);
   const held = new Set(d.class_days);
+  const specialLabel = (value) =>
+    [...value].map((letter) => `<span>${letter}</span>`).join("");
 
   let h = `<table class="sheet-table"><thead><tr>
       <th class="sheet-num">#</th><th class="sheet-name">Name</th>`;
@@ -6885,17 +6832,28 @@ function _renderSheetPreview(d, els) {
     h += `<th class="sheet-day${held.has(n) ? " sheet-day-held" : ""}">${n}</th>`;
   h += `<th class="sheet-tot">P</th><th class="sheet-tot">C</th><th class="sheet-pct">%</th></tr></thead><tbody>`;
 
-  d.students.forEach((s, i) => {
+  const students = [...d.students];
+
+  students.forEach((s, i) => {
     h += `<tr><td class="sheet-num">${i + 1}</td><td class="sheet-name">${escapeHtml(s.full_name)}</td>`;
     for (const n of days) {
       const v = s.cells[String(n)];
+      const special = v && typeof v === "object";
+      if (special && i > 0) continue;
       const cls =
-        v === undefined
+        special && v.type === "holiday"
+          ? "sheet-holiday"
+          : special && v.type === "weekend"
+            ? "sheet-weekend"
+            : v === undefined
           ? "sheet-blank"
           : v === "."
             ? "sheet-absent"
             : "sheet-present";
-      h += `<td class="sheet-cell ${cls}">${v === undefined ? "" : v}</td>`;
+      const value = special
+        ? `<span class="sheet-special-label" title="${escapeHtml(v.name || v.label)}">${specialLabel(v.type === "holiday" && v.name ? v.name : v.label)}</span>`
+        : v;
+      h += `<td class="sheet-cell ${cls}"${special ? ` rowspan="${students.length}"` : ""}>${v === undefined ? "" : value}</td>`;
     }
     const pct = s.percentage === null ? "—" : `${s.percentage}%`;
     const pctCls =
@@ -6975,11 +6933,20 @@ function downloadSheetPrintable() {
     : "All Subjects";
 
   let body = "";
-  d.students.forEach((s, i) => {
+  const specialLabel = (value) =>
+    [...value].map((letter) => `<span>${letter}</span>`).join("");
+  const students = [...d.students];
+  students.forEach((s, i) => {
     body += `<tr><td class="n">${i + 1}</td><td class="nm">${escapeHtml(s.full_name)}</td>`;
     for (const n of days) {
       const v = s.cells[String(n)];
-      body += `<td class="${v === undefined ? "no" : ""}">${v === undefined ? "" : v}</td>`;
+      const special = v && typeof v === "object";
+      if (special && i > 0) continue;
+      const cls = special ? (v.type === "holiday" ? "holiday" : "weekend") : v === undefined ? "no" : "";
+      const value = special
+        ? `<span class="special-label" title="${escapeHtml(v.name || v.label)}">${specialLabel(v.type === "holiday" && v.name ? v.name : v.label)}</span>`
+        : v;
+      body += `<td class="${cls}"${special ? ` rowspan="${students.length}"` : ""}>${v === undefined ? "" : value}</td>`;
     }
     body += `<td class="t">${s.present}</td><td class="t">${s.total_classes}</td>
              <td class="t">${s.percentage === null ? "—" : s.percentage + "%"}</td></tr>`;
@@ -7020,6 +6987,11 @@ function downloadSheetPrintable() {
   .t  { width:11mm; font-weight:bold; }
   th.t:last-child, td.t:last-child { width:13mm; }
   td.no, th.no { background:#f0f0f0; }            /* no class held that day */
+  td.weekend, td.holiday { background:#fff4cc; font-weight:bold; color:#dc2626; }
+  td.holiday { background:#fee2e2; color:#dc2626; }
+  .special-label { display:flex; flex-direction:column; align-items:stretch; min-height:22mm; }
+  .special-label > span { display:flex; align-items:center; justify-content:center; flex:1 1 0; min-height:3mm; font-size:6pt; line-height:1; }
+  .print-holiday-name { color:#dc2626; font-size:5pt !important; padding:1mm 0; }
   .foot { margin-top:2.5mm; display:flex; justify-content:space-between; font-size:7.5pt; }
   .legend b { font-family:monospace; }
   @media screen {
