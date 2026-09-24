@@ -6846,10 +6846,10 @@ function _renderSheetPreview(d, els) {
           : special && v.type === "weekend"
             ? "sheet-weekend"
             : v === undefined
-          ? "sheet-blank"
-          : v === "."
-            ? "sheet-absent"
-            : "sheet-present";
+              ? "sheet-blank"
+              : v === "."
+                ? "sheet-absent"
+                : "sheet-present";
       const value = special
         ? `<span class="sheet-special-label" title="${escapeHtml(v.name || v.label)}">${specialLabel(v.type === "holiday" && v.name ? v.name : v.label)}</span>`
         : v;
@@ -6942,7 +6942,13 @@ function downloadSheetPrintable() {
       const v = s.cells[String(n)];
       const special = v && typeof v === "object";
       if (special && i > 0) continue;
-      const cls = special ? (v.type === "holiday" ? "holiday" : "weekend") : v === undefined ? "no" : "";
+      const cls = special
+        ? v.type === "holiday"
+          ? "holiday"
+          : "weekend"
+        : v === undefined
+          ? "no"
+          : "";
       const value = special
         ? `<span class="special-label" title="${escapeHtml(v.name || v.label)}">${specialLabel(v.type === "holiday" && v.name ? v.name : v.label)}</span>`
         : v;
