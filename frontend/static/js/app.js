@@ -4419,53 +4419,91 @@ async function loadTeacherDashboard() {
       </div>${otherHtml}`;
     }
 
-    // My Assigned Classes — uses /teacher/me which already has full assignments list
-    _loadAssignedClasses();
+    // Tomorrow and all classes use the same full schedule response.
+    _renderTomorrowClasses(schedData);
+    _loadAssignedClasses(schedData);
   } catch (e) {
     console.error("loadTeacherDashboard:", e);
   }
 }
 
-async function _loadAssignedClasses() {
+function _renderAssignedRow(a) {
+  return `<div class="teacher-assigned-row">
+    <div class="teacher-assigned-info">
+      <span class="teacher-assigned-subject">${escapeHtml(a.subject_name || "—")}</span>
+      <span class="teacher-assigned-meta">${escapeHtml(a.faculty_code || a.faculty_name || "")} · Sem ${a.semester}</span>
+      ${a.day_of_week || a.time_slot_label ? `<span class="teacher-assigned-meta">${a.day_of_week ? escapeHtml(a.day_of_week) : ""}${a.day_of_week && a.time_slot_label ? " · " : ""}${escapeHtml(a.time_slot_label || "")}</span>` : ""}
+      ${a.student_count != null ? `<span class="teacher-assigned-meta">${a.student_count} students</span>` : ""}
+    </div>
+    <div class="teacher-assigned-action">
+      <button class="btn-primary btn-sm" onclick="openSessionModal(${a.assignment_id || a.id})">Start Attendance</button>
+    </div>
+  </div>`;
+}
+
+function _renderCompactClassList(element, classes, emptyText) {
+  if (!element) return;
+  element.innerHTML = classes.length
+    ? classes.map(_renderAssignedRow).join("")
+    : `<div class="teacher-assigned-empty">${emptyText}</div>`;
+}
+
+function _tomorrowDay() {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow.toLocaleDateString("en-US", { weekday: "short" });
+}
+
+function _renderTomorrowClasses(schedData) {
+  const tomorrowEl = document.getElementById("tTomorrowClasses");
+  if (!tomorrowEl) return;
+  const tomorrow = _tomorrowDay();
+  const classes = (schedData?.schedule || {})[tomorrow] || [];
+  _renderCompactClassList(
+    tomorrowEl,
+    classes,
+    `No classes scheduled for ${tomorrow}.`,
+  );
+}
+
+async function _loadAssignedClasses(schedData) {
   const cardEl = document.getElementById("tAssignedCards");
   if (!cardEl) return;
-  cardEl.innerHTML = `<div class="text-muted text-center p-2rem text-13px">Loading…</div>`;
+  cardEl.classList.add("is-collapsed");
+  cardEl.innerHTML = `<div class="text-muted text-center p-1rem text-13px">Loading…</div>`;
 
   try {
-    const r = await api("/teacher/me");
-    if (!r?.ok) return;
-    const data = await r.json();
-    const assignments = data.teacher?.assignments || data.assignments || [];
+    let assignments = schedData?.all || [];
+    if (!assignments.length) {
+      const r = await api("/teacher/me");
+      if (!r?.ok) return;
+      const data = await r.json();
+      assignments = data.teacher?.assignments || data.assignments || [];
+    }
 
     if (!assignments.length) {
-      cardEl.innerHTML = `<div class="teacher-no-class">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".4"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-        <div>No classes assigned yet</div>
-      </div>`;
+      cardEl.innerHTML = `<div class="teacher-assigned-empty">No classes assigned yet.</div>`;
       return;
     }
 
-    cardEl.innerHTML = assignments
-      .map(
-        (a) => `
-      <div class="teacher-assigned-row">
-        <div class="teacher-assigned-info">
-          <span class="teacher-assigned-subject">${escapeHtml(a.subject_name || "—")}</span>
-          <span class="teacher-assigned-meta">${escapeHtml(a.faculty_code || a.faculty_name || "")} · Sem ${a.semester}</span>
-          ${a.day_of_week || a.time_slot_label ? `<span class="teacher-assigned-meta">${a.day_of_week ? escapeHtml(a.day_of_week) : ""}${a.day_of_week && a.time_slot_label ? " · " : ""}${escapeHtml(a.time_slot_label || "")}</span>` : ""}
-          ${a.student_count != null ? `<span class="teacher-assigned-meta">${a.student_count} students</span>` : ""}
-        </div>
-        <div class="teacher-assigned-action">
-          <button class="btn-primary btn-sm" onclick="openSessionModal(${a.id})">Start Attendance</button>
-        </div>
-      </div>`,
-      )
-      .join("");
+    cardEl.innerHTML = assignments.map(_renderAssignedRow).join("");
   } catch (e) {
     console.error("_loadAssignedClasses:", e);
     if (cardEl)
       cardEl.innerHTML = `<div class="text-muted text-13px p-1rem">Failed to load assignments</div>`;
   }
+}
+
+function toggleAllTeacherClasses() {
+  const list = document.getElementById("tAssignedCards");
+  const toggle = document.getElementById("allClassesToggle");
+  if (!list || !toggle) return;
+  const expanded = toggle.getAttribute("aria-expanded") === "true";
+  toggle.setAttribute("aria-expanded", String(!expanded));
+  toggle.querySelector("span").textContent = expanded
+    ? "Show all classes"
+    : "Hide classes";
+  list.classList.toggle("is-collapsed", expanded);
 }
 
 function _renderClassCard(cls) {
