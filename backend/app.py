@@ -143,6 +143,13 @@ def init_db():
                 role          TEXT NOT NULL DEFAULT 'admin'
             );
 
+            CREATE TABLE IF NOT EXISTS teacher_sessions (
+                token      TEXT PRIMARY KEY,
+                teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days')
+            );
+
             CREATE TABLE IF NOT EXISTS students (
                 id           SERIAL  PRIMARY KEY,
                 student_id   TEXT    NOT NULL UNIQUE,
@@ -977,19 +984,22 @@ def require_auth(fn):
         token = request.headers.get("Authorization","").replace("Bearer ","")
         if not token: return jsonify({"error":"Unauthorized"}), 401
         with get_db() as conn:
-            user = qone(conn,
-                "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
+            teacher_session = qone(conn, """
+                SELECT t.id, t.full_name AS username, 'teacher' AS role,
+                       t.id AS _tid
+                FROM teacher_sessions ts
+                JOIN teachers t ON t.id = ts.teacher_id
+                WHERE ts.token=%s AND t.status='active'
+                  AND ts.expires_at > NOW()
+            """, (token,))
+            user = teacher_session
             if not user:
-                # Authenticated directly from teachers table — id is already teachers.id
                 user = qone(conn,
-                    "SELECT id, full_name AS username, 'teacher' AS role FROM teachers "
-                    "WHERE password_hash=%s AND status='active'",(token,))
-            elif user.get("role") == "teacher":
-                # Authenticated from users table — resolve the real teachers.id
-                t = qone(conn,
-                    "SELECT id FROM teachers WHERE password_hash=%s AND status='active'", (token,))
-                if t:
-                    user["_tid"] = t["id"]
+                    "SELECT id,username,role FROM users WHERE password_hash=%s",(token,))
+                # Password hashes are not valid teacher session tokens. This
+                # prevents shared passwords from selecting the wrong teacher.
+                if user and user.get("role") == "teacher":
+                    user = None
             if not user:
                 # Student session token — check sessions table
                 sess = qone(conn,
@@ -1055,7 +1065,13 @@ def login():
                 "WHERE email=%s AND password_hash=%s AND status='active'",
                 (email, _hash(password)))
         if not t: return jsonify({"error": "Invalid email or password"}), 401
-        return jsonify({"token": t["password_hash"], "role": "teacher", "username": t["full_name"]})
+        token = secrets.token_urlsafe(32)
+        with get_db() as conn:
+            qexec(conn, """
+                INSERT INTO teacher_sessions (token, teacher_id)
+                VALUES (%s, %s)
+            """, (token, t["id"]))
+        return jsonify({"token": token, "role": "teacher", "username": t["full_name"]})
 
     # Admin / user login — checked against the users table by username
     with get_db() as conn:
@@ -1639,6 +1655,7 @@ def enroll():
 def recognize():
     data    = request.json or {}
     img_b64 = data.get("image")
+    session_id = data.get("session_id")
     if not img_b64: return jsonify({"error":"No image"}), 400
 
     frame = decode_image(img_b64)
@@ -1655,19 +1672,51 @@ def recognize():
     bbox = [int(x) for x in face.bbox]
 
     with get_db() as conn:
+        session = None
+        if session_id:
+            session = qone(conn, """
+                SELECT id, session_date, subject_id, teacher_id, faculty_id, semester, status
+                FROM attendance_sessions
+                WHERE id=%s
+            """, (session_id,))
+            if not session:
+                return jsonify({"error": "Attendance session not found"}), 404
+            if session["status"] == "closed":
+                return jsonify({"error": "Attendance session is closed"}), 400
+            if g.user.get("role") == "teacher" and session["teacher_id"] != _tid():
+                return jsonify({"error": "This session does not belong to you"}), 403
         sid, name, sim = find_best_match(conn, emb)
 
     if sim >= THRESHOLD and sid:
-        today = date.today().isoformat()
+        today = str(session["session_date"]) if session else date.today().isoformat()
         now   = datetime.now().strftime("%H:%M:%S")
         dept  = email = None
         with get_db() as conn:
             with conn.cursor() as c:
-                c.execute("""
-                    INSERT INTO attendance (student_id, date, time, status)
-                    VALUES (%s,%s,%s,'Present')
-                    ON CONFLICT DO NOTHING
-                """, (sid, today, now))
+                if session:
+                    student = qone(conn, """
+                        SELECT faculty_id, semester
+                        FROM students WHERE student_id=%s
+                    """, (sid,))
+                    if not student or student["faculty_id"] != session["faculty_id"] or str(student["semester"]) != str(session["semester"]):
+                        return jsonify({"recognized": True, "student_id": sid,
+                                        "name": name, "confidence": round(sim * 100, 1),
+                                        "bbox": bbox, "attendance_marked": False,
+                                        "message": "Student is not enrolled in this class"})
+                    c.execute("""
+                        INSERT INTO attendance
+                            (student_id, date, time, status, subject_id, teacher_id, session_id)
+                        VALUES (%s,%s,%s,'Present',%s,%s,%s)
+                        ON CONFLICT (student_id, subject_id, date) WHERE subject_id IS NOT NULL
+                        DO UPDATE SET status=EXCLUDED.status, time=EXCLUDED.time,
+                                      teacher_id=EXCLUDED.teacher_id, session_id=EXCLUDED.session_id
+                    """, (sid, today, now, session["subject_id"], session["teacher_id"], session["id"]))
+                else:
+                    c.execute("""
+                        INSERT INTO attendance (student_id, date, time, status)
+                        VALUES (%s,%s,%s,'Present')
+                        ON CONFLICT DO NOTHING
+                    """, (sid, today, now))
                 marked = c.rowcount == 1
                 c.execute("""
                     INSERT INTO recognition_logs (student_id, full_name, confidence, recognized)
@@ -2821,6 +2870,26 @@ def create_attendance_session():
     sess_date  = d.get("session_date", date.today().isoformat())
     method     = d.get("method", "manual")
     with get_db() as conn:
+        if g.user["role"] == "teacher":
+            assignment = qone(conn, """
+                SELECT id
+                FROM teacher_assignments
+                WHERE teacher_id=%s AND faculty_id=%s AND semester=%s
+                  AND subject_id=%s AND time_slot_id=%s AND day_of_week=%s
+            """, (_tid(), faculty_id, semester, subject_id,
+                   d.get("time_slot_id"), d.get("day_of_week")))
+            if not assignment:
+                return jsonify({"error": "You are not assigned to this class."}), 403
+        slot = qone(conn, """
+            SELECT start_time, end_time
+            FROM time_slots WHERE id=%s
+        """, (d.get("time_slot_id"),)) if d.get("time_slot_id") else None
+        now = datetime.now()
+        if not slot or now.strftime("%a") != d.get("day_of_week"):
+            return jsonify({"error": "Attendance can only start during the scheduled class time."}), 409
+        current = now.time()
+        if not (slot["start_time"] <= current < slot["end_time"]):
+            return jsonify({"error": "Attendance can only start during the scheduled class time."}), 409
         existing = qone(conn, """
             SELECT id, status FROM attendance_sessions
             WHERE teacher_id=%s AND subject_id=%s AND session_date=%s AND status='open'
@@ -3610,6 +3679,14 @@ def attendance_sheet_report():
     ssw = " AND ".join(ses_where)
 
     with get_db(register_pgvector=False) as conn:   # no embeddings touched
+        holiday_rows = qall(conn, """
+            SELECT date::text, name
+            FROM holidays
+            WHERE date BETWEEN %s AND %s
+            ORDER BY date
+        """, (first_day, last_day))
+        holidays = {date.fromisoformat(r["date"]): r["name"] for r in holiday_rows}
+
         # ── OWNERSHIP: explicit 403, never silently-empty data ────────────
         if role == "teacher":
             tid = _tid()
@@ -3720,8 +3797,14 @@ def attendance_sheet_report():
         my_days      = sorted(days_by_group.get(key, set()))
         present_days = present_by_student.get(st["student_id"], set())
         cells, counter = {}, 0
-        for d in my_days:
-            if d in present_days:
+        for d in (first_day + timedelta(days=i) for i in range((last_day - first_day).days + 1)):
+            if d in holidays:
+                cells[str(d.day)] = {"type": "holiday", "label": "HOLIDAY", "name": holidays[d]}
+            elif d.weekday() == 5:
+                cells[str(d.day)] = {"type": "weekend", "label": "SATURDAY"}
+            elif d not in my_days:
+                continue
+            elif d in present_days:
                 counter += 1
                 cells[str(d.day)] = counter   # 1st attended class -> 1, 2nd -> 2 ...
             else:
@@ -3746,6 +3829,7 @@ def attendance_sheet_report():
         "days_in_month": last_day.day,
         "class_days":    [d.day for d in all_days],
         "class_dates":   [d.isoformat() for d in all_days],
+        "holidays":      [{"date": d.isoformat(), "name": name} for d, name in holidays.items()],
         "scope":         "subject" if sid is not None else "all_subjects",
         "subject":       subject_meta,
         "faculty_id":    fid,
