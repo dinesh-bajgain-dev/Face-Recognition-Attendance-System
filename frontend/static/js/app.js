@@ -4428,7 +4428,6 @@ async function loadTeacherDashboard() {
 
 async function _loadAssignedClasses() {
   const cardEl = document.getElementById("tAssignedCards");
-  const tableEl = document.getElementById("tAssignedTable");
   if (!cardEl) return;
   cardEl.innerHTML = `<div class="text-muted text-center p-2rem text-13px">Loading…</div>`;
 
@@ -4443,118 +4442,29 @@ async function _loadAssignedClasses() {
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".4"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
         <div>No classes assigned yet</div>
       </div>`;
-      if (tableEl) tableEl.innerHTML = "";
       return;
     }
 
-    // Card view
     cardEl.innerHTML = assignments
       .map(
         (a) => `
-      <div class="teacher-class-card">
-        <div class="tcc-header">
-          <div>
-            <div class="tcc-subject">${escapeHtml(a.subject_name || "—")}</div>
-            <div class="tcc-meta">${escapeHtml(a.faculty_code || "")}  ·  Semester ${a.semester}</div>
-          </div>
-          ${
-            a.student_count != null
-              ? `<span class="pill" style="background:var(--blue-bg,#eef4ff);color:var(--blue)">${a.student_count} students</span>`
-              : ""
-          }
+      <div class="teacher-assigned-row">
+        <div class="teacher-assigned-info">
+          <span class="teacher-assigned-subject">${escapeHtml(a.subject_name || "—")}</span>
+          <span class="teacher-assigned-meta">${escapeHtml(a.faculty_code || a.faculty_name || "")} · Sem ${a.semester}</span>
+          ${a.day_of_week || a.time_slot_label ? `<span class="teacher-assigned-meta">${a.day_of_week ? escapeHtml(a.day_of_week) : ""}${a.day_of_week && a.time_slot_label ? " · " : ""}${escapeHtml(a.time_slot_label || "")}</span>` : ""}
+          ${a.student_count != null ? `<span class="teacher-assigned-meta">${a.student_count} students</span>` : ""}
         </div>
-        ${
-          a.day_of_week || a.time_slot_label
-            ? `<div class="tcc-time">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-          ${a.day_of_week ? escapeHtml(a.day_of_week) + " · " : ""}${escapeHtml(a.time_slot_label || "")}
-          ${a.start_time ? `· ${a.start_time.slice(0, 5)}–${(a.end_time || "").slice(0, 5)}` : ""}
-        </div>`
-            : ""
-        }
-        <div style="font-size:11px;color:var(--text3);margin-top:0.25rem">${escapeHtml(a.faculty_name || "")}</div>
-        <div class="tcc-actions" style="margin-top:0.5rem">
+        <div class="teacher-assigned-action">
           <button class="btn-primary btn-sm" onclick="openSessionModal(${a.id})">Start Attendance</button>
         </div>
       </div>`,
       )
       .join("");
-
-    // Timetable view (Sun–Fri grid)
-    if (tableEl) {
-      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
-      const grouped = {};
-      days.forEach((d) => (grouped[d] = []));
-      const unscheduled = [];
-      assignments.forEach((a) => {
-        if (a.day_of_week && grouped[a.day_of_week])
-          grouped[a.day_of_week].push(a);
-        else unscheduled.push(a);
-      });
-      const maxRows = Math.max(1, ...days.map((d) => grouped[d].length));
-      const cellHtml = (
-        a,
-      ) => `<td style="vertical-align:top;padding:0.5rem 0.75rem">
-        <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name || "—")}</div>
-        <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code || "")} Sem ${a.semester}</div>
-        <div style="font-size:11px;color:var(--blue)">${a.time_slot_label || ""}</div>
-        ${a.student_count != null ? `<div style="font-size:11px;color:var(--text3)">${a.student_count} students</div>` : ""}
-      </td>`;
-      const unscheduledHtml = unscheduled.length
-        ? `
-        <div style="margin-top:1rem;padding:0.75rem 1rem;background:var(--bg2);border-radius:8px">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:0.5rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em">No day assigned</div>
-          <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
-            ${unscheduled
-              .map(
-                (
-                  a,
-                ) => `<div style="background:var(--bg3,#222);border-radius:6px;padding:0.4rem 0.6rem">
-              <div style="font-weight:600;font-size:12px">${escapeHtml(a.subject_name || "—")}</div>
-              <div style="font-size:11px;color:var(--text3)">${escapeHtml(a.faculty_code || "")} Sem ${a.semester}</div>
-              <div style="font-size:11px;color:var(--blue)">${a.time_slot_label || ""}</div>
-            </div>`,
-              )
-              .join("")}
-          </div>
-        </div>`
-        : "";
-      tableEl.innerHTML = `<table class="data-table" style="min-width:600px">
-        <thead><tr>${days.map((d) => `<th style="text-align:center;min-width:120px">${d}</th>`).join("")}</tr></thead>
-        <tbody>
-          ${Array.from(
-            { length: maxRows },
-            (_, i) => `
-            <tr>${days
-              .map((d) => {
-                const a = grouped[d][i];
-                return a ? cellHtml(a) : `<td></td>`;
-              })
-              .join("")}</tr>`,
-          ).join("")}
-        </tbody>
-      </table>${unscheduledHtml}`;
-    }
   } catch (e) {
     console.error("_loadAssignedClasses:", e);
     if (cardEl)
       cardEl.innerHTML = `<div class="text-muted text-13px p-1rem">Failed to load assignments</div>`;
-  }
-}
-
-function switchAssignedView(view, btn) {
-  const cardEl = document.getElementById("tAssignedCards");
-  const tableEl = document.getElementById("tAssignedTable");
-  document
-    .querySelectorAll("#acViewCard, #acViewTable")
-    .forEach((b) => b.classList.remove("active"));
-  btn.classList.add("active");
-  if (view === "card") {
-    cardEl?.classList.remove("hidden");
-    tableEl?.classList.add("hidden");
-  } else {
-    cardEl?.classList.add("hidden");
-    tableEl?.classList.remove("hidden");
   }
 }
 
